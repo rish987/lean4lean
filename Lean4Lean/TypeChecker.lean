@@ -539,7 +539,11 @@ def isDefEqApp (t s : Expr) : RecM Bool := do
 def isDefEqProofIrrel (t s : Expr) : RecM LBool := do
   let tType ← inferType t
   if !(← isProp tType) then return .undef
-  toLBoolM <| isDefEq tType (← inferType s)
+  let ret ← toLBoolM <| isDefEq tType (← inferType s)
+  if ret == .true then
+    dbg_trace s!"WARNING: aborted proof irrelevance between `{t.dbgToString}` and `{s.dbgToString}`"
+  pure .undef
+  
 
 def failedBefore (failure : HashSet (Expr × Expr)) (t s : Expr) : Bool :=
   if t.hash < s.hash then
