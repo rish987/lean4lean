@@ -5,10 +5,11 @@ import Lean4Lean.Inductive.Reduce
 import Lean4Lean.Instantiate
 import Lean4Lean.ForEachExprV
 import Lean4Lean.EquivManager
+import Lean4Lean.PExpr
 
 namespace Lean
 
-abbrev InferCache := ExprMap (Expr × Option Expr)
+abbrev InferCache := HashMap PExpr (Expr × Option Expr)
 
 structure TypeChecker.State where
   ngen : NameGenerator := { namePrefix := `_kernel_fresh, idx := 0 }
@@ -28,6 +29,8 @@ structure TypeChecker.Context where
 namespace TypeChecker
 
 abbrev M := ReaderT Context <| StateT State <| Except KernelException
+abbrev ME := M (Expr × Option Expr)
+abbrev MB := M (Bool × Option Expr)
 
 def M.run (env : Environment) (safety : DefinitionSafety := .safe) (lctx : LocalContext := {})
     (x : M α) : Except KernelException α :=
@@ -51,7 +54,7 @@ structure Methods where
   isDefEqCore : Expr → Expr → M (Bool × Option Expr)
   whnfCore (e : Expr) (cheapRec := false) (cheapProj := false) : M Expr
   whnf (e : Expr) : M Expr
-  inferType (e : Expr) (inferOnly : Bool) : M (Expr × Option Expr)
+  inferType (e : PExpr) (inferOnly : Bool) : M (Expr × Option Expr)
 
 abbrev RecM := ReaderT Methods M
 abbrev RecE := RecM (Expr × (Option Expr))
@@ -69,17 +72,17 @@ def whnf (e : Expr) : RecM Expr := fun m => m.whnf e
 @[inline] def withLCtx [MonadWithReaderOf LocalContext m] (lctx : LocalContext) (x : m α) : m α :=
   withReader (fun _ => lctx) x
 
-def ensureSortCore (e s : Expr) : RecM Expr := do
+def ensureSortCore (e : Expr) (s : PExpr) : RecM Expr := do
   if e.isSort then return e
   let e ← whnf e
   if e.isSort then return e
-  throw <| .typeExpected (← getEnv) (← getLCtx) s
+  throw <| .typeExpected (← getEnv) (← getLCtx) s.toExpr
 
-def ensureForallCore (e s : Expr) : RecM Expr := do
+def ensureForallCore (e : Expr) (s : PExpr) : RecM Expr := do
   if e.isForall then return e
   let e ← whnf e
   if e.isForall then return e
-  throw <| .funExpected (← getEnv) (← getLCtx) s
+  throw <| .funExpected (← getEnv) (← getLCtx) s.toExpr
 
 def checkLevel (tc : Context) (l : Level) : Except KernelException Unit := do
   if let some n2 := l.getUndefParam tc.lparams then
@@ -109,15 +112,17 @@ def inferConstant (tc : Context) (name : Name) (ls : List Level) (inferOnly : Bo
       checkLevel tc l
   return info.instantiateTypeLevelParams ls
 
-def inferType (e : Expr) (inferOnly := true) : RecE := fun m => m.inferType e inferOnly
+def inferType (e : PExpr) (inferOnly := true) : RecE := fun m => m.inferType e inferOnly
 
-def inferLambda (e : Expr) (inferOnly : Bool) : RecE := loop #[] e where
-  loop fvars : Expr → RecE
+def inferTypePure (e : Expr) (inferOnly := true) : RecM Expr := do pure (← inferType (inferOnly := inferOnly) e).1
+
+def inferLambda (e : PExpr) (inferOnly : Bool) : RecE := loop #[] e where
+  loop fvars : PExpr → RecE
   | .lam name dom body bi => do
     let d := dom.instantiateRev fvars
     -- TODO replace d with patched d from `inferType` below
     let id := ⟨← mkFreshId⟩
-    withLCtx ((← getLCtx).mkLocalDecl id name d bi) do
+    withLCtx ((← getLCtx).mkLocalDecl id name d.toExpr bi) do
       let fvars := fvars.push (.fvar id)
       if !inferOnly then -- FIXME why does this need to happen AFTER introducing the new fvar?
         _ ← ensureSortCore (← inferType d inferOnly).1 d
@@ -129,8 +134,8 @@ def inferLambda (e : Expr) (inferOnly : Bool) : RecE := loop #[] e where
     -- TODO if any of the fvars had domains that were patched, or if ep? := some ep, return patched lambda
     return ((← getLCtx).mkForall fvars r, none)
 
-def inferForall (e : Expr) (inferOnly : Bool) : RecE := loop #[] #[] e where
-  loop fvars us : Expr → RecE
+def inferForall (e : PExpr) (inferOnly : Bool) : RecE := loop #[] #[] e where
+  loop fvars us : PExpr → RecE
   | .forallE name dom body bi => do
     let d := dom.instantiateRev fvars
     let (t, dp?) ← inferType d inferOnly
@@ -138,7 +143,7 @@ def inferForall (e : Expr) (inferOnly : Bool) : RecE := loop #[] #[] e where
     let t1 ← ensureSortCore t d
     let us := us.push t1.sortLevel!
     let id := ⟨← mkFreshId⟩
-    withLCtx ((← getLCtx).mkLocalDecl id name d bi) do
+    withLCtx ((← getLCtx).mkLocalDecl id name d.toExpr bi) do
       let fvars := fvars.push (.fvar id)
       loop fvars us body
   | e => do
@@ -155,10 +160,12 @@ def isDefEq (t s : Expr) : RecB := do
     modify fun st => { st with eqvManager := st.eqvManager.addEquiv t s }
   pure r
 
--- NOTE: This is an infer-only function
+def isDefEqPure (t s : Expr) : RecM Bool := do
+  pure (← isDefEq t s).1
+
 def inferApp (e : Expr) : RecE := do
   e.withApp fun f args => do
-  let mut (fType, fp?) ← inferType f -- FIXME how to make only one mut?
+  let mut fType := (← inferType f).1 -- FIXME how to make only one mut?
   -- TODO return patched application if fp? == some _
   let mut j := 0
   for i in [:args.size] do
@@ -183,13 +190,13 @@ def markUsed (n : Nat) (fvars : Array Expr) (b : Expr) (used : Array Bool) : Arr
             return false
       return true
 
-def inferLet (e : Expr) (inferOnly : Bool) : RecE := loop #[] #[] e where
-  loop fvars vals : Expr → RecE
+def inferLet (e : PExpr) (inferOnly : Bool) : RecE := loop #[] #[] e where
+  loop fvars vals : PExpr → RecE
   | .letE name type val body _ => do
     let type := type.instantiateRev fvars
     let val := val.instantiateRev fvars
     let id := ⟨← mkFreshId⟩
-    withLCtx ((← getLCtx).mkLetDecl id name type val) do -- TODO let rec?
+    withLCtx ((← getLCtx).mkLetDecl id name type.toExpr val.toExpr) do -- TODO let rec?
       let fvars := fvars.push (.fvar id)
       let vals := vals.push val
       if !inferOnly then
@@ -197,9 +204,9 @@ def inferLet (e : Expr) (inferOnly : Bool) : RecE := loop #[] #[] e where
         _ ← ensureSortCore typeType type
         let (valType, valp?) ← inferType val inferOnly
         -- TODO use valp? and typep? in the above mkLetDecl if they exist
-        let (defEq, castProof?) ← isDefEq valType type
+        let (defEq, castProof?) ← isDefEq valType type.toExpr
         if !defEq then
-          throw <| .letTypeMismatch (← getEnv) (← getLCtx) name valType type
+          throw <| .letTypeMismatch (← getEnv) (← getLCtx) name valType type.toExpr
         else
           if let some castProof := castProof? then
             sorry
@@ -212,7 +219,7 @@ def inferLet (e : Expr) (inferOnly : Bool) : RecE := loop #[] #[] e where
       match i with
       | 0 => used
       | i+1 =>
-        let used := if used[i]! then markUsed i fvars vals[i]! used else used
+        let used := if used[i]! then markUsed i fvars vals[i]!.toExpr used else used
         loopUsed i used
     let used := mkArray fvars.size false
     let used := markUsed fvars.size fvars r used
@@ -228,12 +235,12 @@ def isProp (e : Expr) : RecB := do
   let (t, ep?) ← inferType e
   return ((← whnf t) == .prop, ep?)
 
-def inferProj (typeName : Name) (idx : Nat) (struct structType : Expr) (structp? : Option Expr) : RecE := do
-  let e := Expr.proj typeName idx struct
+def inferProj (typeName : Name) (idx : Nat) (struct : PExpr) (structType : Expr) (structp? : Option Expr) : RecE := do
+  let e := PExpr.proj typeName idx struct
   let type ← whnf structType
   type.withApp fun I args => do
   let env ← getEnv
-  let fail {_} := do throw <| .invalidProj env (← getLCtx) e
+  let fail {_} := do throw <| .invalidProj env (← getLCtx) e.toExpr
   let .const I_name I_levels := I | fail
   if typeName != I_name then fail
   let .inductInfo I_val ← env.get I_name | fail
@@ -249,7 +256,7 @@ def inferProj (typeName : Name) (idx : Nat) (struct structType : Expr) (structp?
     let .forallE _ dom b _ ← whnf r | fail
     if b.hasLooseBVars then
       if isPropType then if !(← isProp dom).1 then fail
-      r := b.instantiate1 (.proj I_name i struct)
+      r := b.instantiate1 (.proj I_name i struct.toExpr)
     else
       r := b
   let .forallE _ dom _ _ ← whnf r | fail
@@ -257,16 +264,16 @@ def inferProj (typeName : Name) (idx : Nat) (struct structType : Expr) (structp?
   -- TODO return .some if structp? is set
   return (dom, none)
 
-def inferType' (e : Expr) (inferOnly : Bool) : RecE := do
-  if e.isBVar then
+def inferType' (e : PExpr) (inferOnly : Bool) : RecE := do
+  if e.toExpr.isBVar then
     throw <| .other
       s!"type checker does not support loose bound variables, {""
         }replace them with free variables before invoking it"
-  assert! !e.hasLooseBVars
+  assert! !e.toExpr.hasLooseBVars
   let state ← get
   if let some r := (cond inferOnly state.inferTypeI state.inferTypeC).find? e then
     return r -- TODO verify this, where exactly is the cache set? before or after patching the inserted expressions?
-  let (r, e?) ← match e with
+  let (r, ep?) ← match e with
     | .lit l => pure (l.type, none)
     | .mdata _ e => inferType' e inferOnly
     | .proj s idx e =>
@@ -284,12 +291,12 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecE := do
     | .forallE .. => inferForall e inferOnly
     | .app f a =>
       if inferOnly then
-        inferApp e
+        inferApp e.toExpr
       else
         let (ft, fp?) ← inferType' f inferOnly
-        -- TODO return patched application if fp? == some _
         let fType ← ensureForallCore ft e
         let (aType, ap?) ← inferType' a inferOnly
+        -- TODO return patched application if fp? == some _ or ap? == some _
         let dType := fType.bindingDomain!
         let (defEq, castProof?) ← isDefEq dType aType
         if defEq then
@@ -297,15 +304,14 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecE := do
             -- TODO cast `val` as having type `type` using PI patch if applicable
             sorry
           else
-            pure (fType.bindingBody!.instantiate1 a, none)
+            pure (fType.bindingBody!.instantiate1 a.toExpr, none)
         else
-          -- TODO cast `val` as having type `type` using PI patch if applicable
-          throw <| .appTypeMismatch (← getEnv) (← getLCtx) e fType aType
+          throw <| .appTypeMismatch (← getEnv) (← getLCtx) e.toExpr fType aType
     | .letE .. => inferLet e inferOnly
   modify fun s => cond inferOnly
-    { s with inferTypeI := s.inferTypeI.insert e r }
-    { s with inferTypeC := s.inferTypeC.insert e r }
-  return r
+    { s with inferTypeI := s.inferTypeI.insert e (r, ep?) }
+    { s with inferTypeC := s.inferTypeC.insert e (r, ep?) }
+  return (r, ep?)
 
 def whnfCore (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr :=
   fun m => m.whnfCore e cheapRec cheapProj
@@ -316,7 +322,7 @@ def reduceRecursor (e : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) :
     if let some r ← quotReduceRec e whnf then
       return r
   let whnf' e := if cheapRec then whnfCore e cheapRec cheapProj else whnf e
-  if let some r ← inductiveReduceRec env e whnf' inferType isDefEq then
+  if let some r ← inductiveReduceRec env e whnf' inferTypePure isDefEqPure then
     return r
   return none
 
@@ -449,7 +455,7 @@ def reduceNat (e : Expr) : RecM (Option Expr) := do
     if f == ``Nat.ble then return ← reduceBinNatPred Nat.ble a b
   return none
 
-
+/-- NOTE: This function should not be called on patchable expressions. -/
 def whnf' (e : Expr) : RecM Expr := do
   -- Do not cache easy cases
   match e with
@@ -481,7 +487,8 @@ def isDefEqLambda (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
     let sType ← if tDom != sDom then
       let sType := sDom.instantiateRev subst
       let tType := tDom.instantiateRev subst
-      if !(← isDefEq tType sType) then return false
+      let (defEq, pprf?) ← isDefEq tType sType
+      if !defEq then return false
       pure (some sType)
     else pure none
     if tBody.hasLooseBVars || sBody.hasLooseBVars then
@@ -686,7 +693,7 @@ def isDefEqUnitLike (t s : Expr) : RecM Bool := do
   let .ctorInfo { numFields := 0, .. } ← env.get c | return false
   isDefEqCore tType (← inferType s)
 
-def isDefEqCore' (t s : Expr) : RecM Bool := do
+def isDefEqCore' (t s : Expr) : RecB := do
   let r ← quickIsDefEq t s (useHash := true)
   if r != .undef then return r == .true
 
@@ -747,20 +754,20 @@ def Methods.withFuel : Nat → Methods
 
 def RecM.run (x : RecM α) : M α := x (Methods.withFuel 1000)
 
-def check (e : Expr) (lps : List Name) : M Expr :=
+def check (e : PExpr) (lps : List Name) : ME :=
   withReader ({ · with lparams := lps }) (inferType e (inferOnly := false)).run
 
 def whnf (e : Expr) : M Expr := (Inner.whnf e).run
 
-def inferType (e : Expr) : M Expr := (Inner.inferType e).run
+def inferType (e : PExpr) : ME := (Inner.inferType e).run
 
-def isDefEq (t s : Expr) : M (Bool × Option Expr) := (Inner.isDefEq t s).run
+def isDefEq (t s : Expr) : MB := (Inner.isDefEq t s).run
 
 def ensureSort (t : Expr) (s := t) : M Expr := (ensureSortCore t s).run
 
 def ensureForall (t : Expr) (s := t) : M Expr := (ensureForallCore t s).run
 
-def ensureType (e : Expr) : M Expr := do ensureSort (← inferType e) e
+def ensureType (e : Expr) : M Expr := do ensureSort (← inferType e).1 e
 
 def etaExpand (e : Expr) : M Expr :=
   let rec loop fvars
@@ -771,7 +778,7 @@ def etaExpand (e : Expr) : M Expr :=
       let fvars := fvars.push (.fvar id)
       loop fvars body
   | it => do
-    let itType ← whnf <| ← inferType <| it.instantiateRev fvars
+    let itType ← whnf <| (← inferType <| it.instantiateRev fvars).1
     if !itType.isForall then return e
     let rec loop2 fvars args
     | 0, _ => throw .deepRecursion
