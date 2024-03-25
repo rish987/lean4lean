@@ -59,11 +59,12 @@ structure Methods where
 abbrev RecM := ReaderT Methods M
 abbrev RecE := RecM (Expr × (Option Expr))
 abbrev RecB := RecM (Bool × (Option Expr))
+abbrev RecLB := RecM (LBool × (Option Expr))
 
 inductive ReductionStatus where
   | continue (tn sn : Expr)
   | unknown (tn sn : Expr)
-  | bool (b : Bool)
+  | bool (b : (Bool × Option Expr))
 
 namespace Inner
 
@@ -532,13 +533,17 @@ def quickIsDefEq (t s : Expr) (useHash := false) : RecM LBool := do
   | .lit a1, .lit a2 => pure (a1 == a2).toLBool
   | _, _ => return .undef
 
-def isDefEqArgs (t s : Expr) : RecM Bool := do
+/-- NOTE: This function assumes that t and s are alpha-equal in their function heads. -/
+def isDefEqArgs (t s : Expr) : RecB := do
   match t, s with
   | .app tf ta, .app sf sa =>
-    if !(← isDefEq ta sa) then return false
-    isDefEqArgs tf sf
-  | .app .., _ | _, .app .. => return false
-  | _, _ => return true
+    let (r, proofArg?) ← isDefEq ta sa
+    if !r then return (false, none)
+    
+    let (r, proofFn?) ← isDefEqArgs tf sf
+    return (r, sorry)  -- TODO construct proof (none if !r)
+  | .app .., _ | _, .app .. => return (false, none)
+  | _, _ => return (true, none)
 
 def tryEtaExpansionCore (t s : Expr) : RecM Bool := do
   if t.isLambda && !s.isLambda then
@@ -607,8 +612,8 @@ def lazyDeltaReductionStep (tn sn : Expr) : RecM ReductionStatus := do
   let cont tn sn :=
     return match ← quickIsDefEq tn sn with
     | .undef => .continue tn sn
-    | .true => .bool true
-    | .false => .bool false
+    | .true => .bool (true, sorry) -- TODO ???
+    | .false => .bool (false, sorry)
   match isDelta env tn, isDelta env sn with
   | none, none => return .unknown tn sn
   | some _, none =>
@@ -633,8 +638,9 @@ def lazyDeltaReductionStep (tn sn : Expr) : RecM ReductionStatus := do
         && !failedBefore (← get).failure tn sn
       then
         if Level.isEquivList tn.getAppFn.constLevels! sn.getAppFn.constLevels! then
-          if ← isDefEqArgs tn sn then
-            return .bool true
+          let (r, proof?) ← isDefEqArgs tn sn
+          if r then
+            return .bool (true, proof?)
         cacheFailure tn sn
       cont (← delta tn) (← delta sn)
 
@@ -646,19 +652,25 @@ def isNatSuccOf? : Expr → Option Expr
   | .app (.const ``Nat.succ _) e => return e
   | _ => none
 
-def isDefEqOffset (t s : Expr) : RecM LBool := do
+def isDefEqOffset (t s : Expr) : RecLB := do
   if isNatZero t && isNatZero s then
-    return .true
+    return (.true, none)
   match isNatSuccOf? t, isNatSuccOf? s with
-  | some t', some s' => toLBoolM <| isDefEqCore t' s'
-  | _, _ => return .undef
+  | some t', some s' =>
+    let (ret, proof?) ← isDefEqCore t' s'
+    pure (ret.toLBool, sorry) -- TODO construct equality proof from proof?
+  | _, _ => return (.undef, none)
 
 def lazyDeltaReduction (tn sn : Expr) : RecM ReductionStatus := loop tn sn 1000 where
   loop tn sn
   | 0 => throw .deterministicTimeout
   | fuel+1 => do
-    let r ← isDefEqOffset tn sn
-    if r != .undef then return .bool (r == .true)
+    let (r, proof?) ← isDefEqOffset tn sn
+    if r != .undef then
+      if (r == .true) then
+        return .bool (true, proof?)
+      else
+        return .bool (false, none)
     if !tn.hasFVar && !sn.hasFVar then
       if let some tn' ← reduceNat tn then
         return .bool (← isDefEqCore tn' sn)
@@ -666,8 +678,10 @@ def lazyDeltaReduction (tn sn : Expr) : RecM ReductionStatus := loop tn sn 1000 
         return .bool (← isDefEqCore tn sn')
     let env ← getEnv
     if let some tn' ← reduceNative env tn then
+      -- TODO does this case ever happen?
       return .bool (← isDefEqCore tn' sn)
     else if let some sn' ← reduceNative env sn then
+      -- TODO does this case ever happen?
       return .bool (← isDefEqCore tn sn')
     match ← lazyDeltaReductionStep tn sn with
     | .continue tn sn => loop tn sn fuel
@@ -695,20 +709,25 @@ def isDefEqUnitLike (t s : Expr) : RecM Bool := do
 
 def isDefEqCore' (t s : Expr) : RecB := do
   let r ← quickIsDefEq t s (useHash := true)
-  if r != .undef then return r == .true
+  if r != .undef then return (r == .true, sorry) -- TODO ???
 
   if !t.hasFVar && s.isConstOf ``true then
-    if (← whnf t).isConstOf ``true then return true
+    if (← whnf t).isConstOf ``true then return (true, none)
 
   let tn ← whnfCore t (cheapProj := true)
   let sn ← whnfCore s (cheapProj := true)
 
   if !(unsafe ptrEq tn t && ptrEq sn s) then
     let r ← quickIsDefEq tn sn
-    if r != .undef then return r == .true
+    if r != .undef then return (r == .true, sorry) -- TODO ???
 
   let r ← isDefEqProofIrrel tn sn
-  if r != .undef then return r == .true
+  if r != .undef then 
+    if r == .true then
+      let proof := sorry -- TODO proof that tn = sn using proof irrelevance axiom
+      return (true, some proof)
+
+    return (false, none)
 
   match ← lazyDeltaReduction tn sn with
   | .continue .. => unreachable!
