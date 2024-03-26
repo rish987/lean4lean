@@ -115,7 +115,7 @@ def inferConstant (tc : Context) (name : Name) (ls : List Level) (inferOnly : Bo
 
 def inferType (e : PExpr) (inferOnly := true) : RecE := fun m => m.inferType e inferOnly
 
-def inferTypePure (e : Expr) (inferOnly := true) : RecM Expr := do pure (← inferType (inferOnly := inferOnly) e).1
+def inferTypePure (e : Expr) (inferOnly := true) : RecM Expr := do pure (← inferType (inferOnly := inferOnly) e).1 -- TODO enable proof irrelevance here (for efficiency, to avoid unnecessarily constructing patched term)
 
 def inferLambda (e : PExpr) (inferOnly : Bool) : RecE := loop #[] e where
   loop fvars : PExpr → RecE
@@ -545,39 +545,53 @@ def isDefEqArgs (t s : Expr) : RecB := do
   | .app .., _ | _, .app .. => return (false, none)
   | _, _ => return (true, none)
 
-def tryEtaExpansionCore (t s : Expr) : RecM Bool := do
+def tryEtaExpansionCore (t s : Expr) : RecB := do
   if t.isLambda && !s.isLambda then
-    let .forallE name ty _ bi ← whnf (← inferType s) | return false
-    isDefEq t (.lam name ty (.app s (.bvar 0)) bi)
-  else return false
+    let .forallE name ty _ bi ← whnf (← inferTypePure s) | return (false, none)
+    isDefEq t (.lam name ty (.app s (.bvar 0)) bi) -- NOTE: same proof should be okay because of eta-expansion when typechecking
+  else return (false, none)
 
-def tryEtaExpansion (t s : Expr) : RecM Bool :=
-  tryEtaExpansionCore t s <||> tryEtaExpansionCore s t
+def tryEtaExpansion (t s : Expr) : RecB := do
+  match ← tryEtaExpansionCore t s with
+  | ret@(true, _) => pure ret
+  | (false, _) => tryEtaExpansionCore s t
 
-def tryEtaStructCore (t s : Expr) : RecM Bool := do
-  let .const f _ := s.getAppFn | return false
+def tryEtaStructCore (t s : Expr) : RecB := do
+  let .const f _ := s.getAppFn | return (false, none)
   let env ← getEnv
-  let .ctorInfo fInfo ← env.get f | return false
-  unless s.getAppNumArgs == fInfo.numParams + fInfo.numFields do return false
-  unless isStructureLike env fInfo.induct do return false
-  unless ← isDefEq (← inferType t) (← inferType s) do return false
+  let .ctorInfo fInfo ← env.get f | return (false, none)
+  unless s.getAppNumArgs == fInfo.numParams + fInfo.numFields do return (false, none)
+  unless isStructureLike env fInfo.induct do return (false, none)
+  unless ← isDefEqPure (← inferTypePure t) (← inferTypePure s) do return (false, none)
   let args := s.getAppArgs
+  let mut proofs : Array $ Option Expr := #[]
   for h : i in [fInfo.numParams:args.size] do
-    unless ← isDefEq (.proj fInfo.induct (i - fInfo.numParams) t) (args[i]'h.2) do return false
-  return true
+    let (r, proof?) ← isDefEq (.proj fInfo.induct (i - fInfo.numParams) t) (args[i]'h.2)
+    unless r do return (false, none)
+    -- TODO construct congruence expressions (the above isDefEq check should ensure a certain form)
+    proofs := proofs ++ [proof?]
+  let proof? := sorry -- TODO linearly construct proof from `proofs`
+  return (true, proof?)
 
-def tryEtaStruct (t s : Expr) : RecM Bool :=
-  tryEtaStructCore t s <||> tryEtaStructCore s t
+def tryEtaStruct (t s : Expr) : RecB := do
+  match ← tryEtaStructCore t s with
+  | ret@(true, _) => pure ret
+  | (false, _) => tryEtaStructCore s t
 
-def isDefEqApp (t s : Expr) : RecM Bool := do
-  unless t.isApp && s.isApp do return false
+def isDefEqApp (t s : Expr) : RecB := do
+  unless t.isApp && s.isApp do return (false, none)
   t.withApp fun tf tArgs =>
   s.withApp fun sf sArgs => do
-  unless tArgs.size == sArgs.size do return false
-  unless ← isDefEq tf sf do return false
+  unless tArgs.size == sArgs.size do return (false, none)
+  let (r, proofHead?) ← isDefEq tf sf
+  let mut proof? := proofHead?
+  unless r do return (false, none)
   for ta in tArgs, sa in sArgs do
-    unless ← isDefEq ta sa do return false
-  return true
+    let (r, proofArg?) ← isDefEq tf sf
+    -- TODO modify proof? according to proofArf?
+    proof? := sorry
+    unless r do return (false, none)
+  return (true, proof?)
 
 def isDefEqProofIrrel (t s : Expr) : RecM LBool := do
   let tType ← inferType t
@@ -736,10 +750,14 @@ def isDefEqCore' (t s : Expr) : RecB := do
 
   match tn, sn with
   | .const tf tl, .const sf sl =>
-    if tf == sf && Level.isEquivList tl sl then return true
-  | .fvar tv, .fvar sv => if tv == sv then return true
+    if tf == sf && Level.isEquivList tl sl then return (true, none)
+  | .fvar tv, .fvar sv => if tv == sv then return (true, none)
   | .proj _ ti te, .proj _ si se =>
-    if ti == si then if ← isDefEq te se then return true
+    if ti == si then
+      let (r, proof?) ← isDefEq te se
+      if r then
+        -- TODO construct proof from proof?
+        return (true, sorry)
   | _, _ => pure ()
 
   let tnn ← whnfCore tn
@@ -747,8 +765,12 @@ def isDefEqCore' (t s : Expr) : RecB := do
   if !(unsafe ptrEq tnn tn && ptrEq snn sn) then
     return ← isDefEqCore tnn snn
 
-  if ← isDefEqApp tn sn then return true
-  if ← tryEtaExpansion tn sn then return true
+  match ← isDefEqApp tn sn with
+  | ret@(true, _) => return ret
+  | _ => pure ()
+  match ← tryEtaExpansion tn sn with
+  | ret@(true, _) => return ret
+  | _ => pure ()
   if ← tryEtaStruct tn sn then return true
   let r ← tryStringLitExpansion tn sn
   if r != .undef then return r == .true
