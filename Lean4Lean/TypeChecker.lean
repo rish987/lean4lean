@@ -115,7 +115,9 @@ def inferConstant (tc : Context) (name : Name) (ls : List Level) (inferOnly : Bo
 
 def inferType (e : PExpr) (inferOnly := true) : RecE := fun m => m.inferType e inferOnly
 
-def inferTypePure (e : Expr) (inferOnly := true) : RecM Expr := do pure (← inferType (inferOnly := inferOnly) e).1 -- TODO enable proof irrelevance here (for efficiency, to avoid unnecessarily constructing patched term)
+-- TODO if patching is enabled, enable proof irrelevance and disable patching here (for efficiency, to avoid unnecessarily constructing patched term)
+-- TODO (the same for isDefEq(Core)Pure)
+def inferTypePure (e : Expr) (inferOnly := true) : RecM Expr := do pure (← inferType (inferOnly := inferOnly) e).1
 
 def inferLambda (e : PExpr) (inferOnly : Bool) : RecE := loop #[] e where
   loop fvars : PExpr → RecE
@@ -154,6 +156,8 @@ def inferForall (e : PExpr) (inferOnly : Bool) : RecE := loop #[] #[] e where
     return (.sort <| us.foldr mkLevelIMax' s.sortLevel!, .none)
 
 def isDefEqCore (t s : Expr) : RecB := fun m => m.isDefEqCore t s
+def isDefEqCorePure (t s : Expr) : RecM Bool := do
+  pure (← isDefEqCore t s).1
 
 def isDefEq (t s : Expr) : RecB := do
   let r ← isDefEqCore t s
@@ -232,9 +236,9 @@ def inferLet (e : PExpr) (inferOnly : Bool) : RecE := loop #[] #[] e where
     -- TODO return some if any of the letvars were patched or if ep? == some _
     return ((← getLCtx).mkForall fvars r, none)
 
-def isProp (e : Expr) : RecB := do
-  let (t, ep?) ← inferType e
-  return ((← whnf t) == .prop, ep?)
+def isProp (e : Expr) : RecM Bool := do
+  let t ← inferTypePure e
+  return (← whnf t) == .prop
 
 def inferProj (typeName : Name) (idx : Nat) (struct : PExpr) (structType : Expr) (structp? : Option Expr) : RecE := do
   let e := PExpr.proj typeName idx struct
@@ -252,16 +256,16 @@ def inferProj (typeName : Name) (idx : Nat) (struct : PExpr) (structType : Expr)
   for i in [:I_val.numParams] do
     let .forallE _ _ b _ ← whnf r | fail
     r := b.instantiate1 args[i]!
-  let isPropType := (← isProp type).1
+  let isPropType := ← isProp type
   for i in [:idx] do
     let .forallE _ dom b _ ← whnf r | fail
     if b.hasLooseBVars then
-      if isPropType then if !(← isProp dom).1 then fail
+      if isPropType then if !(← isProp dom) then fail
       r := b.instantiate1 (.proj I_name i struct.toExpr)
     else
       r := b
   let .forallE _ dom _ _ ← whnf r | fail
-  if isPropType then if !(← isProp dom).1 then fail
+  if isPropType then if !(← isProp dom) then fail
   -- TODO return .some if structp? is set
   return (dom, none)
 
@@ -594,9 +598,10 @@ def isDefEqApp (t s : Expr) : RecB := do
   return (true, proof?)
 
 def isDefEqProofIrrel (t s : Expr) : RecM LBool := do
-  let tType ← inferType t
+  let tType ← inferTypePure t
   if !(← isProp tType) then return .undef
-  let ret ← toLBoolM <| isDefEq tType (← inferType s)
+  -- TODO keep proof of equality for use in proof irrelevance axiom (proof types may not be equal in lean-)
+  let ret ← toLBoolM <| isDefEqPure tType (← inferTypePure s)
   if ret == .true then
     dbg_trace s!"WARNING: aborted proof irrelevance between `{t.dbgToString}` and `{s.dbgToString}`"
   pure .undef
@@ -705,21 +710,23 @@ def tryStringLitExpansionCore (t s : Expr) : RecM LBool := do
   let .lit (.strVal st) := t | return .undef
   let .app sf _ := s | return .undef
   unless sf == .const ``String.mk [] do return .undef
-  toLBoolM <| isDefEqCore (.strLitToConstructor st) s
+  toLBoolM <| isDefEqCorePure (.strLitToConstructor st) s
 
 def tryStringLitExpansion (t s : Expr) : RecM LBool := do
   match ← tryStringLitExpansionCore t s with
   | .undef => tryStringLitExpansionCore s t
   | r => return r
 
+-- NOTE: It is okay for this to be a non-congruence-proving function,
+-- because any two instances of a unit type must be definitionally equal to a constructor application
 def isDefEqUnitLike (t s : Expr) : RecM Bool := do
-  let tType ← whnf (← inferType t)
+  let tType ← whnf (← inferTypePure t)
   let .const I _ := tType.getAppFn | return false
   let env ← getEnv
   let .inductInfo { isRec := false, ctors := [c], numIndices := 0, .. } ← env.get I
     | return false
   let .ctorInfo { numFields := 0, .. } ← env.get c | return false
-  isDefEqCore tType (← inferType s)
+  isDefEqCorePure tType (← inferTypePure s)
 
 def isDefEqCore' (t s : Expr) : RecB := do
   let r ← quickIsDefEq t s (useHash := true)
@@ -728,6 +735,7 @@ def isDefEqCore' (t s : Expr) : RecB := do
   if !t.hasFVar && s.isConstOf ``true then
     if (← whnf t).isConstOf ``true then return (true, none)
 
+  -- TODO return proof of equality to normal form
   let tn ← whnfCore t (cheapProj := true)
   let sn ← whnfCore s (cheapProj := true)
 
@@ -771,11 +779,13 @@ def isDefEqCore' (t s : Expr) : RecB := do
   match ← tryEtaExpansion tn sn with
   | ret@(true, _) => return ret
   | _ => pure ()
-  if ← tryEtaStruct tn sn then return true
+  match ← tryEtaStruct tn sn with
+  | ret@(true, _) => return ret
+  | _ => pure ()
   let r ← tryStringLitExpansion tn sn
-  if r != .undef then return r == .true
-  if ← isDefEqUnitLike tn sn then return true
-  return false
+  if r != .undef then return (r == .true, none)
+  if ← isDefEqUnitLike tn sn then return (true, none)
+  return (false, none)
 
 end Inner
 

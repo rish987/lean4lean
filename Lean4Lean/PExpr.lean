@@ -16,7 +16,7 @@ that we expect to be patched.
 Calling such functions within the course of normal typechecking should throw an error,
 which suggests one of two things:
 1. This usage of the function should be considered auxilliary to normal typechecking
-(e.g. when printing a debug message), and such a notion should be made explicit by
+(e.g. when printing a debug message), which should be made explicit by
 converting `e : PExpr` with `e.toExpr` or by using a `NoPatch`-suffixed variant
 of the original function taking `PExpr` instead of `Expr` (preferred).
 2. If this call is part of typechecking, the function should be modified to expect
