@@ -3,6 +3,7 @@ import Lean
 namespace Lean
 
 /--
+TODO update docs, I'm now using this for patched expressions
 The type of "patchable" expressions, i.e. "original expressions" coming from
 from the input constants' types/values that can be patched by the typechecker.
 
@@ -66,7 +67,7 @@ def Expr.toPExpr : Expr → PExpr
 | .proj typ idx str => .proj typ idx str.toPExpr
 
 instance : Hashable PExpr := ⟨(·.toExpr.hash)⟩
-instance : Coe Expr PExpr := ⟨(Expr.toPExpr)⟩
+instance : Coe PExpr Expr := ⟨(PExpr.toExpr)⟩
 
 def PExpr.instantiateRev (e : PExpr) (subst : Array Expr) : PExpr :=
     e.toExpr.instantiateRev subst |>.toPExpr
