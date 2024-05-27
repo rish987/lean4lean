@@ -72,4 +72,38 @@ instance : Coe PExpr Expr := ⟨(PExpr.toExpr)⟩
 def PExpr.instantiateRev (e : PExpr) (subst : Array Expr) : PExpr :=
     e.toExpr.instantiateRev subst |>.toPExpr
 
+inductive LocalDecl' (T : Type) (F : T → Expr) where
+  | cdecl (index : Nat) (fvarId : FVarId) (userName : Name) (type : T) (bi : BinderInfo) (kind : LocalDeclKind)
+  | ldecl (index : Nat) (fvarId : FVarId) (userName : Name) (type : T) (value : T) (nonDep : Bool) (kind : LocalDeclKind)
+  deriving Inhabited
+
+def LocalDecl'.toLocalDecl : LocalDecl' T F → LocalDecl
+  | cdecl i f u t b k => .cdecl i f u (F t) b k
+  | ldecl i f u t v n k => .ldecl i f u (F t) (F v) n k
+
+def LocalDecl.toLocalDecl' (G : Expr → T) : LocalDecl → LocalDecl' T F
+  | cdecl i f u t b k => .cdecl i f u (G t) b k
+  | ldecl i f u t v n k => .ldecl i f u (G t) (G v) n k
+
+abbrev PLocalDecl := LocalDecl' PExpr (PExpr.toExpr)
+
+instance : Coe PLocalDecl LocalDecl := ⟨(LocalDecl'.toLocalDecl)⟩
+instance : Coe LocalDecl PLocalDecl := ⟨(LocalDecl.toLocalDecl' (Expr.toPExpr))⟩
+
+structure LocalContext' (T : Type) (F : T → Expr) where
+  fvarIdToDecl : PersistentHashMap FVarId (LocalDecl' T F) := {}
+  decls        : PersistentArray (Option (LocalDecl' T F)) := {}
+  deriving Inhabited
+
+def LocalContext'.toLocalContext : LocalContext' T F → LocalContext
+  | mk ftd d => .mk (ftd.map fun decl => decl.toLocalDecl) (d.map (·.map (·.toLocalDecl)))
+
+def LocalContext.toLocalContext' (G : Expr → T) : LocalContext → LocalContext' T F
+  | mk ftd d => .mk (ftd.map fun decl => decl.toLocalDecl' G) (d.map (·.map (·.toLocalDecl' G)))
+
+abbrev PLocalContext := LocalContext' PExpr (PExpr.toExpr)
+
+instance : Coe (PLocalContext) LocalContext := ⟨(LocalContext'.toLocalContext)⟩
+instance : Coe (LocalContext) PLocalContext := ⟨(LocalContext.toLocalContext' (Expr.toPExpr))⟩
+
 end Lean
