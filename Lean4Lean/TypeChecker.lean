@@ -42,10 +42,8 @@ instance : MonadEnv M where
   getEnv := return (← read).env
   modifyEnv _ := pure ()
 
-instance : MonadLCtx M where
-  getLCtx := return (← read).lctx
-
-def getLCtx' : M PLocalContext := return (← read).lctx'
+instance : MonadPLCtx M where
+  getLCtx := return (← read).lctx'
 
 instance [Monad m] : MonadNameGenerator (StateT State m) where
   getNGen := return (← get).ngen
@@ -81,10 +79,7 @@ Reduces `e` to its weak-head normal form.
 -/
 def whnf (e : PExpr) : RecE := fun m => m.whnf e
 
-@[inline] def withLCtx [MonadWithReaderOf LocalContext m] (lctx : LocalContext) (x : m α) : m α :=
-  withReader (fun _ => lctx) x
-
-@[inline] def withLCtx' [MonadWithReaderOf PLocalContext m] (lctx : PLocalContext) (x : m α) : m α :=
+@[inline] def withLCtx [MonadWithReaderOf PLocalContext m] (lctx : PLocalContext) (x : m α) : m α :=
   withReader (fun _ => lctx) x
 
 /--
@@ -166,16 +161,15 @@ def inferLambda (e : Expr) : RecE := loop #[] e where
     let d' := d'?.getD d.toPExpr
     -- TODO cast d' if p? is some
     let id := ⟨← mkFreshId⟩
-    withLCtx ((← getLCtx).mkLocalDecl id name d bi) do
-      withLCtx' (LocalContext.mkLocalDecl (← getLCtx') id name d' bi) do
-        let fvars := fvars.push (.fvar id)
-        loop fvars body
+    withLCtx (LocalContext.mkLocalDecl (← getLCtx) id name d' bi) do
+      let fvars := fvars.push (.fvar id)
+      loop fvars body
   | e => do
     let (r, e'?) ← inferType (e.instantiateRev fvars)
     let e' := e'?.getD e.toPExpr
     let r := r.toExpr.cheapBetaReduce
     -- TODO only return .some if any of the fvars had domains that were patched, or if e'? := some e'
-    return ((LocalContext.mkForall (← getLCtx') fvars r).toPExpr, .some $ (LocalContext.mkLambda (← getLCtx') fvars e').toPExpr)
+    return ((LocalContext.mkForall (← getLCtx) fvars r).toPExpr, .some $ (LocalContext.mkLambda (← getLCtx) fvars e').toPExpr)
 
 def inferLambdaPure (e : PExpr) : RecM PExpr := sorry
 
@@ -192,10 +186,9 @@ def inferForall (e : Expr) : RecE := loop #[] #[] e where
     let mut d' := d'?.getD d.toPExpr
     -- TODO cast d' if p? is some
     let id := ⟨← mkFreshId⟩
-    withLCtx ((← getLCtx).mkLocalDecl id name d bi) do
-      withLCtx' (LocalContext.mkLocalDecl (← getLCtx') id name d' bi) do
-        let fvars := fvars.push (.fvar id)
-        loop fvars us body
+    withLCtx (LocalContext.mkLocalDecl (← getLCtx) id name d' bi) do
+      let fvars := fvars.push (.fvar id)
+      loop fvars us body
   | e => do
     let (r, e'?) ← inferType (e.instantiateRev fvars)
     let mut e' := e'?.getD e.toPExpr
@@ -203,7 +196,7 @@ def inferForall (e : Expr) : RecE := loop #[] #[] e where
     -- TODO cast e' if p? is some
     let anyPatch := false
     -- TODO set `anyPatch` if any of the fvars had domains that were patched, or if e'? := some e' (or was cast)
-    let patch := if anyPatch then .some $ (LocalContext.mkForall (← getLCtx') fvars e').toPExpr else none
+    let patch := if anyPatch then .some $ (LocalContext.mkForall (← getLCtx) fvars e').toPExpr else none
     return (.sort <| us.foldr mkLevelIMax' s.toExpr.sortLevel!, patch)
 
 def inferForallPure (e : PExpr) : RecM PExpr := sorry
@@ -274,28 +267,26 @@ def inferLet (e : Expr) : RecE := loop #[] #[] e where
   loop fvars vals : Expr → RecE
   | .letE name type val body _ => do
     let type := type.instantiateRev fvars
+    let (typeType, type'?) ← inferType type 
+    let (_, pType?) ← ensureSortCore typeType type
+    let mut type' := type'?.getD type.toPExpr
+    -- TODO cast type' if pType? := some _
     let val := val.instantiateRev fvars
+    let (valType, val'?) ← inferType val 
+    let (defEq, pVal?) ← isDefEq type' valType -- FIXME order?
+    if !defEq then
+      throw <| .letTypeMismatch (← getEnv) (← getLCtx) name valType type'
+    let mut val' := val'?.getD val.toPExpr
+    -- TODO cast val' if pVal? := some _
     let id := ⟨← mkFreshId⟩
-    withLCtx ((← getLCtx).mkLetDecl id name type val) do
+    withLCtx (LocalContext.mkLetDecl (← getLCtx) id name type' val') do
       let fvars := fvars.push (.fvar id)
-      let vals := vals.push val
-      -- FIXME this should happen before extending the local context
-      if true then
-        let (typeType, typep?) ← inferType type 
-        _ ← ensureSortCore typeType type
-        let (valType, valp?) ← inferType val 
-        -- TODO use valp? and typep? in the above mkLetDecl if they exist
-        let (defEq, castProof?) ← isDefEq valType type
-        if !defEq then
-          throw <| .letTypeMismatch (← getEnv) (← getLCtx) name valType type
-        else
-          if let some castProof := castProof? then
-            sorry
-          -- TODO cast `val` as having type `type` using PI patch if applicable, and use in above mkLetDecl
+      let vals := vals.push val'
       loop fvars vals body
   | e => do
-    let (r, ep?) ← inferType (e.instantiateRev fvars)
-    let r := r.cheapBetaReduce
+    let (r, e'?) ← inferType (e.instantiateRev fvars)
+    let e' := e'?.getD e.toPExpr
+    let r := r.toExpr.cheapBetaReduce.toPExpr
     let rec loopUsed i (used : Array Bool) :=
       match i with
       | 0 => used
@@ -310,8 +301,10 @@ def inferLet (e : Expr) : RecE := loop #[] #[] e where
       if b then
         usedFVars := usedFVars.push fvar
     -- FIXME `usedFVars` is never used
-    -- TODO return some if any of the letvars were patched or if ep? == some _
-    return ((← getLCtx).mkForall fvars r, none)
+    -- TODO return some if any of the letvars had types/values that were patched or if e'? == some _
+    let anyPatch := false
+    let patch := if anyPatch then .some $ LocalContext.mkForall (← getLCtx) fvars e' |>.toPExpr else none
+    return (LocalContext.mkForall (← getLCtx) fvars r |>.toPExpr, patch)
 
 def inferLetPure (e : PExpr) : RecM PExpr := sorry
 
@@ -366,7 +359,7 @@ def inferType' (e : Expr) : RecE := do
   assert! !e.hasLooseBVars
   let state ← get
   if let some r := state.inferTypeC.find? e then
-    return r -- TODO verify this, where exactly is the cache set? before or after patching the inserted expressions?
+    return r
   let (r, ep?) ← match e with
     | .lit l => pure (l.type.toPExpr, none)
     | .mdata _ e => inferType' e
@@ -412,7 +405,7 @@ def inferTypePure' (e : PExpr) : RecM PExpr := do
   assert! !e.toExpr.hasLooseBVars
   let state ← get
   if let some r := state.inferTypeI.find? e then
-    return r -- TODO verify this, where exactly is the cache set? before or after patching the inserted expressions?
+    return r
   let r ← match e with
     | .lit l => pure l.type.toPExpr
     | .mdata _ e => inferTypePure' e

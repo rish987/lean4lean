@@ -106,4 +106,13 @@ abbrev PLocalContext := LocalContext' PExpr (PExpr.toExpr)
 instance : Coe (PLocalContext) LocalContext := ⟨(LocalContext'.toLocalContext)⟩
 instance : Coe (LocalContext) PLocalContext := ⟨(LocalContext.toLocalContext' (Expr.toPExpr))⟩
 
+/-- Class used to denote that `m` has a local context. -/
+class MonadPLCtx (m : Type → Type) where
+  getLCtx : m PLocalContext
+
+export MonadPLCtx (getLCtx)
+
+instance [MonadLift m n] [MonadPLCtx m] : MonadPLCtx n where
+  getLCtx := liftM (getLCtx : m _)
+
 end Lean
