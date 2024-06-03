@@ -60,9 +60,9 @@ instance (priority := low) : MonadWithReaderOf (HashMap (FVarId × FVarId) PExpr
   withReader f := withReader fun s => { s with eqFVars := f s.eqFVars }
 
 structure Methods where
-  isDefEqCore : Expr → Expr → MB
-  whnfCore (e : Expr) (cheapRec := false) (cheapProj := false) : M Expr
-  whnf (e : Expr) : ME
+  isDefEqCore : PExpr → PExpr → MB
+  whnfCore (e : PExpr) (cheapRec := false) (cheapProj := false) : ME
+  whnf (e : PExpr) : ME
   inferType (e : Expr) : ME
   inferTypePure (e : PExpr) : M PExpr
 
@@ -157,7 +157,6 @@ def inferType (e : Expr) : RecE := fun m => m.inferType e
 def inferTypePure (e : PExpr) : RecM PExpr := fun m => m.inferTypePure e
 
 def maybeCast (p? : Option Expr) (lvl : Level) (typLhs typRhs e : PExpr) : PExpr :=
-  -- TODO can we be sure that `lhs : Sort lvl`? FIXME
   p?.map (fun p => sorry) |>.getD e
 
 /--
@@ -379,6 +378,18 @@ def inferProj (typeName : Name) (idx : Nat) (struct : PExpr) (patched : Bool) (s
 
 def inferProjPure (typeName : Name) (idx : Nat) (struct : Expr) (structType : Expr) (structp? : Option Expr) : RecM PExpr := sorry
 
+/--
+Gets the universe level of the sort that the type of `e` inhabits.
+-/
+def getTypeLevel (e : PExpr) : RecM Level := do
+  let (eType, e'?) ← inferType e
+  assert! e'? == none
+  let (eTypeSort, eType'?) ← inferType eType
+  assert! eType'? == none
+  let (eTypeSort', es?) ← ensureSortCore eTypeSort eType
+  assert! es? == none
+  pure eTypeSort'.toExpr.sortLevel!
+
 @[inherit_doc inferType]
 def inferType' (e : Expr) : RecE := do
   if e.isBVar then
@@ -406,18 +417,24 @@ def inferType' (e : Expr) : RecE := do
     | .lam .. => inferLambda e
     | .forallE .. => inferForall e
     | .app f a =>
-      let (ft, f'?) ← inferType' f
-      let (fType, pf'?) ← ensureForallCore ft f
-      let mut f' := f'?.getD f.toPExpr
+      let (fType, f'?) ← inferType' f
+      let (fTypeSort, fType''?) ← inferType fType
+      assert! fType''? == none
+      let (fTypeSort', fs?) ← ensureSortCore fTypeSort fType
+      assert! fs? == none
+      let fTypeLvl := fTypeSort'.toExpr.sortLevel!
+      let (fType', pf'?) ← ensureForallCore fType f
+      let f' := maybeCast pf'? fTypeLvl fType fType' (f'?.getD f.toPExpr)
+
       let (aType, a'?) ← inferType' a
-      let mut a' := a'?.getD a.toPExpr
+      let aTypeLvl ← getTypeLevel (a'?.getD a.toPExpr)
+
       let dType := Expr.bindingDomain! fType |>.toPExpr
       -- it can be shown that if `e` is typeable as `T`, then `T` is typeable as `Sort l`
       -- for some universe level `l`, so this use of `isDefEq` is valid
-      let (defEq, pa'?) ← isDefEq dType aType -- FIXME is this order correct?
+      let (defEq, pa'?) ← isDefEq aType dType
+      let a' := maybeCast pa'? aTypeLvl aType dType (a'?.getD a.toPExpr)
       if defEq then
-        -- TODO set if f'? == some _ or a'? == some _ or pf'? == some _ or pa'? == some _
-        -- TODO cast f' and a' if pf'? or pa'? were set
         let patch := if f'?.isSome || a'?.isSome || pf'?.isSome || pa'?.isSome then .some (.app f' a') else none
         pure ((Expr.bindingBody! fType).instantiate1 a' |>.toPExpr, patch)
       else
@@ -467,7 +484,7 @@ applications/struct projections of the same recursor/projection, where we
 might save some work by directly checking if the major premises/struct
 arguments are defeq (rather than eagerly applying a recursor rule/projection).
 -/
-def whnfCore (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr :=
+def whnfCore (e : PExpr) (cheapRec := false) (cheapProj := false) : RecE :=
   fun m => m.whnfCore e cheapRec cheapProj
 
 def reduceRecursor (e : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) := do
@@ -701,11 +718,12 @@ def isDefEqBinder (binDatas : Array ((Name × PExpr × PExpr × BinderInfo) × (
           withEqFVar ids idt teqsType do
             let tvars := tvars.push (.fvar idt)
             let svars := svars.push (.fvar ids)
-            let teqsvars := svars.push (.fvar idteqs)
+            let teqsvars := teqsvars.push (.fvar idteqs)
             let domEqs := domEqs.push p?
             if _h : idx < binDatas.size - 1 then
               loop (idx + 1) tvars svars teqsvars domEqs
             else
+              -- FIXME FIXME acc? may be some if `idteqs` was used in `isDefEqFVar`
               let mut (defEq, acc?) ← isDefEq (tBody.instantiateRev tvars) (sBody.instantiateRev svars)
               if !defEq then return (false, none)
               let mut tbind := tBody
@@ -742,30 +760,39 @@ recurses on the bodies, substituting in a new free variable for that binder
 (this substitution is delayed for efficiency purposes using the `subst`
 parameter). Otherwise, does a normal defeq check.
 -/
-def isDefEqForall (t s : PExpr) (subst : Array PExpr := #[]) : RecB :=
-  match t, s with
-  | .forallE _ tDom tBody _, .forallE name sDom sBody bi => do
-    let sType ← if tDom != sDom then
-      let sType := sDom.instantiateRev (subst.map (·.toExpr))
-      let tType := tDom.instantiateRev (subst.map (·.toExpr))
-      if !(← isDefEq tType sType) then return false
-      pure (some sType)
-    else pure none
-    if tBody.hasLooseBVars || sBody.hasLooseBVars then
-      let sType := sType.getD (sDom.instantiateRev subst)
-      let id := ⟨← mkFreshId⟩
-      withLCtx ((← getLCtx).mkLocalDecl id name sType bi) do
-        isDefEqForall tBody sBody (subst.push (.fvar id))
-    else
-      isDefEqForall tBody sBody (subst.push default)
-  | t, s => isDefEq (t.instantiateRev subst) (s.instantiateRev subst)
+def isDefEqForall (t s : PExpr) : RecB :=
+  let rec getData t s := 
+    match t, s with
+    | .forallE tName tDom tBody tBi, .forallE sName sDom sBody sBi => 
+      #[((tName, tDom, tBody, tBi), (sName, sDom, sBody, sBi))] ++ getData tBody sBody
+    | _, _ =>
+      #[]
+  isDefEqBinder (getData t s) LocalContext.mkForall `FIXME
+
+def appHEqSymm? (t s : PExpr) (theqs? : Option PExpr) : RecM (Option PExpr) := do
+  let some theqs := theqs? | return none
+  let lvl ← getTypeLevel t
+  let (tType, _) ← inferType t
+  let (sType, _) ← inferType s
+  pure $ Lean.mkAppN (.const `FIXME [lvl]) #[tType, sType, t, s, theqs] |>.toPExpr
+
+def appHEqTrans? (t s r : PExpr) (theqs? sheqr? : Option PExpr) : RecM (Option PExpr) := do
+  let lvl ← getTypeLevel t
+  let (tType, _) ← inferType t
+  let (sType, _) ← inferType s
+  let (rType, _) ← inferType r
+  match theqs?, sheqr? with
+  | none, none => return none
+  | .some theqs, .some sheqr => return Lean.mkAppN (.const `FIXME [lvl]) #[tType, sType, rType, t, s, r, theqs, sheqr] |>.toPExpr
+  | none, .some sheqr => return sheqr
+  | .some theqs, none => return theqs
 
 def isDefEqFVar (idt ids : FVarId) : RecB := do
   if let some p := (← readThe Context).eqFVars.find? (idt, ids) then
     return (true, some p)
   else if let some p := (← readThe Context).eqFVars.find? (ids, idt) then
     -- TODO need to apply symm to p
-    return (true, some p)
+    return (true, ← appHEqSymm? (.fvar idt) (.fvar ids) p)
   return (false, none)
 
 /--
@@ -879,9 +906,11 @@ def isDefEqApp (t s : Expr) : RecB := do
 Checks if `t` and `s` are definitionally equivalent according to proof irrelevance
 (that is, they are proofs of the same proposition).
 -/
-def isDefEqProofIrrel (t s : Expr) : RecM LBool := do
+def isDefEqProofIrrel (t s : PExpr) : RecLB := do
   let tType ← inferTypePure t
-  if !(← isProp tType) then return .undef
+  let (prop, pprop?) ← isProp tType
+  assert! pprop? == none
+  if !prop then return (.undef, none)
   -- TODO keep proof of equality for use in proof irrelevance axiom (proof types may not be equal in lean-)
   let ret ← toLBoolM <| isDefEqPure tType (← inferTypePure s)
   if ret == .true then
@@ -1049,19 +1078,22 @@ def isDefEqUnitLike (t s : Expr) : RecM Bool := do
 
 @[inherit_doc isDefEqCore]
 def isDefEqCore' (t s : PExpr) : RecB := do
-  let r ← quickIsDefEq t s (useHash := true)
-  if r != .undef then return (r == .true, sorry) -- TODO ???
+  let (r, pteqs?) ← quickIsDefEq t s (useHash := true)
+  if r != .undef then return (r == .true, pteqs?)
 
-  if !t.hasFVar && s.isConstOf ``true then
-    if (← whnf t).isConstOf ``true then return (true, none)
+  if !t.toExpr.hasFVar && s.toExpr.isConstOf ``true then
+    let (t, p?) ← whnf t
+    if t.toExpr.isConstOf ``true then return (true, p?)
 
-  -- TODO return proof of equality to normal form
-  let tn ← whnfCore t (cheapProj := true)
-  let sn ← whnfCore s (cheapProj := true)
+  let (tn, ptn?) ← whnfCore t (cheapProj := true)
+  let (sn, psn?) ← whnfCore s (cheapProj := true)
 
   if !(unsafe ptrEq tn t && ptrEq sn s) then
-    let r ← quickIsDefEq tn sn
-    if r != .undef then return (r == .true, sorry) -- TODO ???
+    let (r, ptneqsn?) ← quickIsDefEq tn sn
+    if r == .false then
+      return (false, none)
+    else if r == .true then
+      return (true, ← appHEqTrans? t sn s (← appHEqTrans? t tn sn ptn? ptneqsn?) (← appHEqSymm? s sn psn?))
 
   let r ← isDefEqProofIrrel tn sn
   if r != .undef then 
