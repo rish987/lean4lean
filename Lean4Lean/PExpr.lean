@@ -69,8 +69,8 @@ def Expr.toPExpr : Expr → PExpr
 instance : Hashable PExpr := ⟨(·.toExpr.hash)⟩
 instance : Coe PExpr Expr := ⟨(PExpr.toExpr)⟩
 
-def PExpr.instantiateRev (e : PExpr) (subst : Array Expr) : PExpr :=
-    e.toExpr.instantiateRev subst |>.toPExpr
+def PExpr.instantiateRev (e : PExpr) (subst : Array PExpr) : PExpr :=
+    e.toExpr.instantiateRev (subst.map (·.toExpr)) |>.toPExpr
 
 inductive LocalDecl' (T : Type) (F : T → Expr) where
   | cdecl (index : Nat) (fvarId : FVarId) (userName : Name) (type : T) (bi : BinderInfo) (kind : LocalDeclKind)
