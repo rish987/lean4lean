@@ -157,7 +157,7 @@ def inferType (e : Expr) : RecE := fun m => m.inferType e
 def inferTypePure (e : PExpr) : RecM PExpr := fun m => m.inferTypePure e
 
 def maybeCast (p? : Option Expr) (lvl : Level) (typLhs typRhs e : PExpr) : PExpr :=
-  p?.map (fun p => sorry) |>.getD e
+  p?.map (fun p => Lean.mkAppN (.const `cast' [lvl]) #[typLhs, typRhs, p, e] |>.toPExpr) |>.getD e
 
 /--
 Infers the type of lambda expression `e`.
@@ -179,7 +179,7 @@ def inferLambda (e : Expr) : RecE := loop #[] false e where
     let (r, e'?) ← inferType (e.instantiateRev fvars)
     let e' := e'?.getD e.toPExpr
     let r := r.toExpr.cheapBetaReduce |>.toPExpr
-    let (rSort, r'?) ← inferType (r.instantiateRev fvars)
+    let (rSort, r'?) ← inferType (r.instantiateRev (fvars.map (·.toPExpr)))
     let (rSort', p?) ← ensureSortCore rSort r -- TODO need to test this
     assert! r'? == none
     let lvl := rSort'.toExpr.sortLevel!
@@ -699,9 +699,9 @@ def mkHRefl (lvl : Level) (T : PExpr) (t : PExpr) : PExpr :=
   Lean.mkAppN (.const `HEq.refl [lvl]) #[T, t] |>.toPExpr
 
 def isDefEqBinder (binDatas : Array ((Name × PExpr × PExpr × BinderInfo) × (Name × PExpr × PExpr × BinderInfo)))
-(f : PExpr → PExpr → Option PExpr → Array PExpr → Array PExpr → Array PExpr → Array (Option PExpr) → RecM (Option PExpr))
-: RecB := do
-  let rec loop idx tvars svars teqsvars domEqs : RecB := do
+(f : PExpr → PExpr → Option PExpr → Array PExpr → Array PExpr → Array PExpr → Array (Option PExpr) → RecM (Option T))
+: RecM (Bool × (Option T)) := do
+  let rec loop idx tvars svars teqsvars domEqs : RecM (Bool × (Option T)) := do
     let ((tName, tDom, tBody, tBi), (sName, sDom, sBody, sBi)) := binDatas.get! idx
     let (tType, sType, p?) ← if tDom != sDom then
       let tType := tDom.instantiateRev tvars
@@ -730,7 +730,7 @@ def isDefEqBinder (binDatas : Array ((Name × PExpr × PExpr × BinderInfo) × (
               -- FIXME FIXME acc? may be some if `idteqs` was used in `isDefEqFVar`
               let tBody := tBody.instantiateRev tvars
               let sBody := sBody.instantiateRev tvars
-              let mut (defEq, ptbodEqsbod?) ← isDefEq tBody sBody
+              let (defEq, ptbodEqsbod?) ← isDefEq tBody sBody
               if !defEq then return (false, none)
               pure (true, ← f tBody sBody ptbodEqsbod? tvars.reverse svars.reverse teqsvars.reverse domEqs.reverse) -- FIXME can iterate backwards instead of reversing lists?
   termination_by (binDatas.size - 1) - idx
@@ -754,6 +754,9 @@ def isDefEqLambda (t s : PExpr) : RecB :=
     let mut fa := fa
     let mut gb := gb
     for (((a, b), aEqb), pAEqB?) in as.zip bs |>.zip aEqbs |>.zip pAEqBs? do
+      let f := LocalContext.mkLambda (← getLCtx) #[a] fa |>.toPExpr
+      let g := LocalContext.mkLambda (← getLCtx) #[b] gb |>.toPExpr
+
       if pAEqB?.isSome || pfaEqgb?.isSome then
         let (ALvl, A) ← getTypeLevel a
         let AType ← inferTypePure A
@@ -768,13 +771,21 @@ def isDefEqLambda (t s : PExpr) : RecB :=
 
         let hfg := LocalContext.mkForall (← getLCtx) #[a, b, aEqb] (pfaEqgb?.getD (mkHRefl UaLvl Ua fa))
         let hAB := pAEqB?.getD (mkRefl ALvl.succ AType A)
+        pfaEqgb? := .some $ Lean.mkAppN (.const `lambdaHEq [u, v]) #[A, B, U, V, f, g, hAB, hfg] |>.toPExpr
 
-        let f := LocalContext.mkLambda (← getLCtx) #[a] fa |>.toPExpr
-        let g := LocalContext.mkLambda (← getLCtx) #[b] gb |>.toPExpr
-        pfaEqgb? := .some $ Lean.mkAppN (.const `FIXME [u, v]) #[A, B, U, V, f, g, hAB, hfg] |>.toPExpr -- TODO build application of `heqThm`
-        fa := f
-        gb := g
+      fa := f
+      gb := g
     pure pfaEqgb?
+
+structure ForallData where 
+A : PExpr
+B : PExpr
+hAB : PExpr
+hUV : PExpr
+U : PExpr
+V : PExpr
+u : Level
+v : Level
 
 /--
 If `t` and `s` are for-all expressions, checks that their domains are defeq and
@@ -782,38 +793,48 @@ recurses on the bodies, substituting in a new free variable for that binder
 (this substitution is delayed for efficiency purposes using the `subst`
 parameter). Otherwise, does a normal defeq check.
 -/
-def isDefEqForall (t s : PExpr) : RecB :=
-  let rec getData t s := 
-    match t, s with
-    | .forallE tName tDom tBody tBi, .forallE sName sDom sBody sBi => 
-      #[((tName, tDom, tBody, tBi), (sName, sDom, sBody, sBi))] ++ getData tBody sBody
-    | _, _ =>
+def isDefEqForall' (t s : PExpr) (maxBinds : Option Nat := none) : RecM (Bool × Option (Array ForallData × Option PExpr)) :=
+  let rec getData t s remBinds := 
+    match t, s, remBinds with
+    | .forallE tName tDom tBody tBi, .forallE sName sDom sBody sBi, some (n + 1) => 
+      #[((tName, tDom, tBody, tBi), (sName, sDom, sBody, sBi))] ++ getData tBody sBody (some n)
+    | .forallE tName tDom tBody tBi, .forallE sName sDom sBody sBi, none => 
+      #[((tName, tDom, tBody, tBi), (sName, sDom, sBody, sBi))] ++ getData tBody sBody none
+    | _, _, _ =>
       #[]
-  isDefEqBinder (getData t s) fun Ua Vb pUaEqVb? as bs aEqbs pAEqBs? => do
+  isDefEqBinder (getData t s maxBinds) fun Ua Vb pUaEqVb? as bs aEqbs pAEqBs? => do
     let mut pUaEqVb? := pUaEqVb?
+    let mut datas := #[]
     let mut Ua := Ua
     let mut Vb := Vb
     for (((a, b), aEqb), pAEqB?) in as.zip bs |>.zip aEqbs |>.zip pAEqBs? do
+      let (UaTypeLvl, UaType) ← getTypeLevel Ua
+      let UaLvl := UaType.toExpr.sortLevel!
+
+      let hUV := LocalContext.mkForall (← getLCtx) #[a, b, aEqb] (pUaEqVb?.getD (mkHRefl UaTypeLvl UaType Ua)) |>.toPExpr
+
+      let U := LocalContext.mkForall (← getLCtx) #[a] Ua |>.toPExpr
+      let V := LocalContext.mkForall (← getLCtx) #[b] Vb |>.toPExpr
+
+      let (ALvl, A) ← getTypeLevel a
+      let AType ← inferTypePure A
+      let hAB := pAEqB?.getD (mkRefl ALvl.succ AType A)
+
+      let B ← inferTypePure b
+      let u := ALvl
+      let v := UaLvl
+
       if pAEqB?.isSome || pUaEqVb?.isSome then
-        let (ALvl, A) ← getTypeLevel a
-        let AType ← inferTypePure A
-        let B ← inferTypePure b
-        let u := ALvl
+        pUaEqVb? := .some $ Lean.mkAppN (.const `forallHEq [u, v]) #[A, B, U, V, hAB, hUV] |>.toPExpr -- TODO build application of `heqThm`
 
-        let (UaTypeLvl, UaType) ← getTypeLevel Ua
-        let UaLvl := UaType.toExpr.sortLevel!
-        let v := UaLvl
+      datas := datas.push {A, B, hAB, hUV, U, V, u, v}
+      Ua := U
+      Vb := V
+    pure $ .some (datas, pUaEqVb?)
 
-        let hUV := LocalContext.mkForall (← getLCtx) #[a, b, aEqb] (pUaEqVb?.getD (mkHRefl UaTypeLvl UaType Ua))
-        let hAB := pAEqB?.getD (mkRefl ALvl.succ AType A)
-
-        let U := LocalContext.mkForall (← getLCtx) #[a] Ua |>.toPExpr
-        let V := LocalContext.mkForall (← getLCtx) #[b] Vb |>.toPExpr
-        pUaEqVb? := .some $ Lean.mkAppN (.const `FIXME [u, v]) #[A, B, U, V, hAB, hUV] |>.toPExpr -- TODO build application of `heqThm`
-        Ua := U
-        Vb := V
-    pure pUaEqVb?
-
+def isDefEqForall (t s : PExpr) : RecB := do
+  let (true, .some (_, p?)) ← isDefEqForall' t s | return (false, none)
+  return (true, p?)
 
 def appHEqSymm? (t s : PExpr) (theqs? : Option PExpr) : RecM (Option PExpr) := do
   let some theqs := theqs? | return none
@@ -931,20 +952,39 @@ def tryEtaStruct (t s : Expr) : RecB := do
 Checks if applications `t` and `s` (should be WHNF) are defeq on account of
 their function heads and arguments being defeq.
 -/
-def isDefEqApp (t s : Expr) : RecB := do
-  unless t.isApp && s.isApp do return (false, none)
-  t.withApp fun tf tArgs =>
-  s.withApp fun sf sArgs => do
+def isDefEqApp (t s : PExpr) : RecB := do
+  unless t.toExpr.isApp && s.toExpr.isApp do return (false, none)
+  t.toExpr.withApp fun tf tArgs =>
+  s.toExpr.withApp fun sf sArgs => do
+  let mut tf := tf.toPExpr
+  let mut sf := sf.toPExpr
+  let tArgs := tArgs.map (·.toPExpr)
+  let sArgs := sArgs.map (·.toPExpr)
   unless tArgs.size == sArgs.size do return (false, none)
-  let (r, proofHead?) ← isDefEq tf sf
-  let mut proof? := proofHead?
-  unless r do return (false, none)
+
+  let mut (.true, ret?) ← isDefEq tf sf | return (false, none)
+
+  let mut taEqsas := #[]
   for ta in tArgs, sa in sArgs do
-    let (r, proofArg?) ← isDefEq tf sf
-    -- TODO modify proof? according to proofArf?
-    proof? := sorry
-    unless r do return (false, none)
-  return (true, proof?)
+    let (.true, p?) ← isDefEq ta sa | return (false, none)
+    taEqsas := taEqsas.push p?
+
+  let tfT ← inferTypePure tf
+  let sfT ← inferTypePure sf
+
+  let (true, .some (datas, _)) ← isDefEqForall' tfT sfT (maxBinds := some tArgs.size) | unreachable!
+
+  for ((({A, B, hAB, hUV, U, V, u, v}, ta), sa), taEqsa?) in datas.zip tArgs |>.zip sArgs |>.zip taEqsas do
+    if taEqsa?.isSome || ret?.isSome then
+      let (tfLvl, tfType) ← getTypeLevel tf
+      let (taLvl, taType) ← getTypeLevel ta
+      let ret := ret?.getD (mkRefl tfLvl tfType tf)
+      let taEqsa := taEqsa?.getD (mkRefl taLvl taType ta)
+      ret? := .some $ Lean.mkAppN (.const `appHEq [u, v]) #[A, B, U, V, hAB, hUV, tf, sf, ta, sa, ret, taEqsa] |>.toPExpr -- TODO build application of `heqThm`
+    tf := tf.app ta
+    sf := sf.app sa
+
+  return (true, ret?)
 
 /--
 Checks if `t` and `s` are definitionally equivalent according to proof irrelevance
@@ -1051,7 +1091,8 @@ def isDefEqOffset (t s : PExpr) : RecLB := do
   match isNatSuccOf? t, isNatSuccOf? s with
   | some t', some s' =>
     let (ret, p?) ← isDefEqCore t' s'
-    let p? := p?.map fun p => sorry
+    let p? := p?.map fun p => (mkAppN (.const `appArgHEq [.succ .zero, .succ .zero]) #[.const `Nat [],
+    (mkLambda default default (.const `Nat []) (.const `Nat [])), t', s', p]).toPExpr
     pure (ret.toLBool, p?) -- TODO construct equality proof from proof?
   | _, _ => return (.undef, none)
 
