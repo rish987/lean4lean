@@ -615,6 +615,28 @@ def reduceNative (_env : Environment) (e : Expr) : Except KernelException (Optio
     throw <| .other s!"lean4lean does not support 'reduceNat {c}' reduction"
   return none
 
+def appHEqSymm? (t s : PExpr) (theqs? : Option PExpr) : RecM (Option PExpr) := do
+  let some theqs := theqs? | return none
+  let (lvl, tType) ← getTypeLevel t
+  let sType ← inferTypePure s
+  pure $ Lean.mkAppN (.const `HEq.symm [lvl]) #[tType, sType, t, s, theqs] |>.toPExpr
+
+def appHEqTrans? (t s r : PExpr) (theqs? sheqr? : Option PExpr) : RecM (Option PExpr) := do
+  let (lvl, tType) ← getTypeLevel t
+  let sType ← inferTypePure s
+  let rType ← inferTypePure r
+  match theqs?, sheqr? with
+  | none, none => return none
+  | .some theqs, .some sheqr => return Lean.mkAppN (.const `HEq.trans [lvl]) #[tType, sType, rType, t, s, r, theqs, sheqr] |>.toPExpr
+  | none, .some sheqr => return sheqr
+  | .some theqs, none => return theqs
+
+def mkRefl (lvl : Level) (T : PExpr) (t : PExpr) : PExpr :=
+  Lean.mkAppN (.const `Eq.refl [lvl]) #[T, t] |>.toPExpr
+
+def mkHRefl (lvl : Level) (T : PExpr) (t : PExpr) : PExpr :=
+  Lean.mkAppN (.const `HEq.refl [lvl]) #[T, t] |>.toPExpr
+
 def natLitExt? (e : Expr) : Option Nat := if e == .natZero then some 0 else e.natLit?
 
 /--
@@ -623,10 +645,15 @@ to Nat literals.
 
 Note: `f` should have an (efficient) external implementation.
 -/
-def reduceBinNatOp (f : Nat → Nat → Nat) (a b : Expr) : RecM (Option Expr) := do
-  let some v1 := natLitExt? (← whnf a) | return none
-  let some v2 := natLitExt? (← whnf b) | return none
-  return some <| .lit <| .natVal <| f v1 v2
+def reduceBinNatOp (op : Name) (f : Nat → Nat → Nat) (a b : PExpr) : RecM (Option (PExpr × Option PExpr)) := do
+  let (a', pa?) := (← whnf a)
+  let (b', pb?) := (← whnf b)
+  let some v1 := natLitExt? a' | return none
+  let some v2 := natLitExt? b' | return none
+  let pa := pa?.getD (mkHRefl (.succ .zero) (.const `Nat []) a')
+  let pb := pb?.getD (mkHRefl (.succ .zero) (.const `Nat []) b')
+  let ret? := .some $ Lean.mkAppN (.const `appHEqBinNatOp []) #[.const op [], a, a', b, b', pa, pb] |>.toPExpr
+  return some <| (.lit <| .natVal <| f v1 v2, ret?)
 
 /--
 Reduces the application `f a b` to a boolean expression if `a` and `b` can be
@@ -634,10 +661,14 @@ reduced to Nat literals.
 
 Note: `f` should have an (efficient) external implementation.
 -/
-def reduceBinNatPred (f : Nat → Nat → Bool) (a b : Expr) : RecM (Option Expr) := do
+def reduceBinNatPred (op : Name) (f : Nat → Nat → Bool) (a b : PExpr) : RecM (Option (PExpr × Option PExpr)) := do
   let some v1 := natLitExt? (← whnf a) | return none
   let some v2 := natLitExt? (← whnf b) | return none
   return toExpr <| f v1 v2
+
+def mkNatSuccAppArgHeq (p? : Option PExpr) (t s : PExpr) : Option PExpr :=
+  p?.map fun p => (mkAppN (.const `appArgHEq [.succ .zero, .succ .zero]) #[.const `Nat [],
+  (mkLambda default default (.const `Nat []) (.const `Nat [])), .const `Nat.succ [], t, s, p]).toPExpr
 
 /--
 Reduces `e` to a natural number literal if possible, where binary operations
@@ -645,25 +676,27 @@ and predicates may be applied (provided they have an external implementation).
 These include: `Nat.add`, `Nat.sub`, `Nat.mul`, `Nat.pow`, `Nat.gcd`,
 `Nat.mod`, `Nat.div`, `Nat.beq`, `Nat.ble`.
 -/
-def reduceNat (e : Expr) : RecM (Option Expr) := do
-  if e.hasFVar then return none
-  let nargs := e.getAppNumArgs
+def reduceNat (e : PExpr) : RecM (Option (PExpr × Option PExpr)) := do
+  if e.toExpr.hasFVar then return none
+  let nargs := e.toExpr.getAppNumArgs
   if nargs == 1 then
-    let f := e.appFn!
+    let f := e.toExpr.appFn!
     if f == .const ``Nat.succ [] then
-      let some v := natLitExt? (← whnf e.appArg!) | return none
-      return some <| .lit <| .natVal <| v + 1
+      let prec := e.toExpr.appArg!.toPExpr
+      let (prec', p?) ← whnf prec
+      let some v := natLitExt? prec' | return none
+      return some <| (.lit <| .natVal <| v + 1, mkNatSuccAppArgHeq p? prec prec')
   else if nargs == 2 then
     let .app (.app (.const f _) a) b := e | return none
-    if f == ``Nat.add then return ← reduceBinNatOp Nat.add a b
-    if f == ``Nat.sub then return ← reduceBinNatOp Nat.sub a b
-    if f == ``Nat.mul then return ← reduceBinNatOp Nat.mul a b
-    if f == ``Nat.pow then return ← reduceBinNatOp Nat.pow a b
-    if f == ``Nat.gcd then return ← reduceBinNatOp Nat.gcd a b
-    if f == ``Nat.mod then return ← reduceBinNatOp Nat.mod a b
-    if f == ``Nat.div then return ← reduceBinNatOp Nat.div a b
-    if f == ``Nat.beq then return ← reduceBinNatPred Nat.beq a b
-    if f == ``Nat.ble then return ← reduceBinNatPred Nat.ble a b
+    if f == ``Nat.add then return ← reduceBinNatOp ``Nat.add Nat.add a b
+    if f == ``Nat.sub then return ← reduceBinNatOp ``Nat.sub Nat.sub a b
+    if f == ``Nat.mul then return ← reduceBinNatOp ``Nat.mul Nat.mul a b
+    if f == ``Nat.pow then return ← reduceBinNatOp ``Nat.pow Nat.pow a b
+    if f == ``Nat.gcd then return ← reduceBinNatOp ``Nat.gcd Nat.gcd a b
+    if f == ``Nat.mod then return ← reduceBinNatOp ``Nat.mod Nat.mod a b
+    if f == ``Nat.div then return ← reduceBinNatOp ``Nat.div Nat.div a b
+    if f == ``Nat.beq then return ← reduceBinNatPred ``Nat.beq Nat.beq a b
+    if f == ``Nat.ble then return ← reduceBinNatPred ``Nat.ble Nat.ble a b
   return none
 
 @[inherit_doc whnf]
@@ -691,12 +724,6 @@ def whnf' (e : Expr) : RecM Expr := do
   let r ← loop e 1000
   modify fun s => { s with whnfCache := s.whnfCache.insert e r }
   return r
-
-def mkRefl (lvl : Level) (T : PExpr) (t : PExpr) : PExpr :=
-  Lean.mkAppN (.const `Eq.refl [lvl]) #[T, t] |>.toPExpr
-
-def mkHRefl (lvl : Level) (T : PExpr) (t : PExpr) : PExpr :=
-  Lean.mkAppN (.const `HEq.refl [lvl]) #[T, t] |>.toPExpr
 
 def isDefEqBinder (binDatas : Array ((Name × PExpr × PExpr × BinderInfo) × (Name × PExpr × PExpr × BinderInfo)))
 (f : PExpr → PExpr → Option PExpr → Array PExpr → Array PExpr → Array PExpr → Array (Option PExpr) → RecM (Option T))
@@ -818,6 +845,7 @@ def isDefEqForall' (t s : PExpr) (maxBinds : Option Nat := none) : RecM (Bool ×
 
       let (ALvl, A) ← getTypeLevel a
       let AType ← inferTypePure A
+      -- TODO check all usages of refl vs hrefl
       let hAB := pAEqB?.getD (mkRefl ALvl.succ AType A)
 
       let B ← inferTypePure b
@@ -835,22 +863,6 @@ def isDefEqForall' (t s : PExpr) (maxBinds : Option Nat := none) : RecM (Bool ×
 def isDefEqForall (t s : PExpr) : RecB := do
   let (true, .some (_, p?)) ← isDefEqForall' t s | return (false, none)
   return (true, p?)
-
-def appHEqSymm? (t s : PExpr) (theqs? : Option PExpr) : RecM (Option PExpr) := do
-  let some theqs := theqs? | return none
-  let (lvl, tType) ← getTypeLevel t
-  let (sType, _) ← inferType s
-  pure $ Lean.mkAppN (.const `FIXME [lvl]) #[tType, sType, t, s, theqs] |>.toPExpr
-
-def appHEqTrans? (t s r : PExpr) (theqs? sheqr? : Option PExpr) : RecM (Option PExpr) := do
-  let (lvl, tType) ← getTypeLevel t
-  let (sType, _) ← inferType s
-  let (rType, _) ← inferType r
-  match theqs?, sheqr? with
-  | none, none => return none
-  | .some theqs, .some sheqr => return Lean.mkAppN (.const `FIXME [lvl]) #[tType, sType, rType, t, s, r, theqs, sheqr] |>.toPExpr
-  | none, .some sheqr => return sheqr
-  | .some theqs, none => return theqs
 
 def isDefEqFVar (idt ids : FVarId) : RecB := do
   if let some p := (← readThe Context).eqFVars.find? (idt, ids) then
@@ -973,6 +985,7 @@ def isDefEqApp (t s : PExpr) : RecB := do
   let sfT ← inferTypePure sf
 
   let (true, .some (datas, _)) ← isDefEqForall' tfT sfT (maxBinds := some tArgs.size) | unreachable!
+  assert! datas.size == tArgs.size
 
   for ((({A, B, hAB, hUV, U, V, u, v}, ta), sa), taEqsa?) in datas.zip tArgs |>.zip sArgs |>.zip taEqsas do
     if taEqsa?.isSome || ret?.isSome then
@@ -980,7 +993,7 @@ def isDefEqApp (t s : PExpr) : RecB := do
       let (taLvl, taType) ← getTypeLevel ta
       let ret := ret?.getD (mkRefl tfLvl tfType tf)
       let taEqsa := taEqsa?.getD (mkRefl taLvl taType ta)
-      ret? := .some $ Lean.mkAppN (.const `appHEq [u, v]) #[A, B, U, V, hAB, hUV, tf, sf, ta, sa, ret, taEqsa] |>.toPExpr -- TODO build application of `heqThm`
+      ret? := .some $ Lean.mkAppN (.const `appHEq [u, v]) #[A, B, U, V, hAB, hUV, tf, sf, ta, sa, ret, taEqsa] |>.toPExpr
     tf := tf.app ta
     sf := sf.app sa
 
@@ -1091,8 +1104,7 @@ def isDefEqOffset (t s : PExpr) : RecLB := do
   match isNatSuccOf? t, isNatSuccOf? s with
   | some t', some s' =>
     let (ret, p?) ← isDefEqCore t' s'
-    let p? := p?.map fun p => (mkAppN (.const `appArgHEq [.succ .zero, .succ .zero]) #[.const `Nat [],
-    (mkLambda default default (.const `Nat []) (.const `Nat [])), t', s', p]).toPExpr
+    let p? := mkNatSuccAppArgHeq p? t' s'
     pure (ret.toLBool, p?) -- TODO construct equality proof from proof?
   | _, _ => return (.undef, none)
 
@@ -1115,8 +1127,8 @@ def lazyDeltaReduction (tn sn : PExpr) : RecM ReductionStatus := loop tn sn 1000
         return .bool (true, proof?)
       else
         return .bool (false, none)
-    if !tn.hasFVar && !sn.hasFVar then
-      if let some tn' ← reduceNat tn then
+    if !tn.toExpr.hasFVar && !sn.toExpr.hasFVar then
+      if let some (tn', p?) ← reduceNat tn then
         return .bool (← isDefEqCore tn' sn)
       else if let some sn' ← reduceNat sn then
         return .bool (← isDefEqCore tn sn')
