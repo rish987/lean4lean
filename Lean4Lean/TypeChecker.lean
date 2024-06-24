@@ -72,9 +72,11 @@ abbrev RecB := RecM (Bool × (Option PExpr))
 abbrev RecLB := RecM (LBool × (Option PExpr))
 
 inductive ReductionStatus where
-  | continue (tn sn : PExpr)
-  | unknown (tn : PExpr) (ptn? : Option PExpr) (sn : PExpr) (psn? : Option PExpr)
-  | bool (b : (Bool × Option PExpr))
+  | continue (nltn nlsn : PExpr) (pltnEqnltn? plsnEqnlsn? : Option PExpr)
+  | unknown (ltn lsn : PExpr) (ptnEqltn? psnEqlsn? : Option PExpr)
+  | lunknown (ltn lsn : PExpr)
+  | bool (b : Bool) (p?: Option PExpr)
+deriving Inhabited
 
 namespace Inner
 
@@ -586,28 +588,28 @@ Checks if `e` has a head constant that can be delta-reduced (that is, it is a
 theorem or definition), returning its value (instantiated by level parameters)
 if so.
 -/
-def unfoldDefinitionCore (env : Environment) (e : Expr) : Option Expr := do
+def unfoldDefinitionCore (env : Environment) (e : PExpr) : Option PExpr := do
   if let .const _ ls := e then
     if let some d := isDelta env e then
       if ls.length == d.numLevelParams then
-        return d.instantiateValueLevelParams! ls
+        return d.instantiateValueLevelParams! ls |>.toPExpr
   none
 
 /--
 Unfolds the definition at the head of the application `e` (or `e` itself if it
 is not an application).
 -/
-def unfoldDefinition (env : Environment) (e : Expr) : Option Expr := do
-  if e.isApp then
-    let f0 := e.getAppFn
-    if let some f := unfoldDefinitionCore env f0 then
-      let rargs := e.getAppRevArgs
-      return f.mkAppRevRange 0 rargs.size rargs
+def unfoldDefinition (env : Environment) (e : PExpr) : Option PExpr := do
+  if e.toExpr.isApp then
+    let f0 := e.toExpr.getAppFn
+    if let some f := unfoldDefinitionCore env f0.toPExpr then
+      let rargs := e.toExpr.getAppRevArgs
+      return f.toExpr.mkAppRevRange 0 rargs.size rargs |>.toPExpr
     none
   else
     unfoldDefinitionCore env e
 
-def reduceNative (_env : Environment) (e : Expr) : Except KernelException (Option Expr) := do
+def reduceNative (_env : Environment) (e : PExpr) : Except KernelException (Option (PExpr × Option PExpr)) := do
   let .app f (.const c _) := e | return none
   if f == .const ``reduceBool [] then
     throw <| .other s!"lean4lean does not support 'reduceBool {c}' reduction"
@@ -650,9 +652,12 @@ def reduceBinNatOp (op : Name) (f : Nat → Nat → Nat) (a b : PExpr) : RecM (O
   let (b', pb?) := (← whnf b)
   let some v1 := natLitExt? a' | return none
   let some v2 := natLitExt? b' | return none
-  let pa := pa?.getD (mkHRefl (.succ .zero) (.const `Nat []) a')
-  let pb := pb?.getD (mkHRefl (.succ .zero) (.const `Nat []) b')
-  let ret? := .some $ Lean.mkAppN (.const `appHEqBinNatOp []) #[.const op [], a, a', b, b', pa, pb] |>.toPExpr
+  let ret? := if pa?.isSome || pb?.isSome then
+      let pa := pa?.getD (mkHRefl (.succ .zero) (.const `Nat []) a')
+      let pb := pb?.getD (mkHRefl (.succ .zero) (.const `Nat []) b')
+      .some $ Lean.mkAppN (.const `appHEqBinNatFn []) #[.const `Nat [], .const op [], a, a', b, b', pa, pb] |>.toPExpr
+    else
+      none
   return some <| (.lit <| .natVal <| f v1 v2, ret?)
 
 /--
@@ -662,9 +667,17 @@ reduced to Nat literals.
 Note: `f` should have an (efficient) external implementation.
 -/
 def reduceBinNatPred (op : Name) (f : Nat → Nat → Bool) (a b : PExpr) : RecM (Option (PExpr × Option PExpr)) := do
-  let some v1 := natLitExt? (← whnf a) | return none
-  let some v2 := natLitExt? (← whnf b) | return none
-  return toExpr <| f v1 v2
+  let (a', pa?) := (← whnf a)
+  let (b', pb?) := (← whnf b)
+  let some v1 := natLitExt? a' | return none
+  let some v2 := natLitExt? b' | return none
+  let ret? := if pa?.isSome || pb?.isSome then
+      let pa := pa?.getD (mkHRefl (.succ .zero) (.const `Nat []) a')
+      let pb := pb?.getD (mkHRefl (.succ .zero) (.const `Nat []) b')
+      .some $ Lean.mkAppN (.const `appHEqBinNatFn []) #[.const `Bool [], .const op [], a, a', b, b', pa, pb] |>.toPExpr
+    else
+      none
+  return (toExpr (f v1 v2) |>.toPExpr, ret?)
 
 def mkNatSuccAppArgHeq (p? : Option PExpr) (t s : PExpr) : Option PExpr :=
   p?.map fun p => (mkAppN (.const `appArgHEq [.succ .zero, .succ .zero]) #[.const `Nat [],
@@ -892,7 +905,7 @@ def quickIsDefEq (t s : PExpr) (useHash := false) : RecLB := do
   | .mvar .., .mvar .. => unreachable!
   | .lit a1, .lit a2 => pure $ some ((a1 == a2), none)
   | _, _ => pure none
-  let some (defeq, p?) := res | return (LBool.undef, none)
+  let some (defeq, p?) := res | return (.undef, none)
   pure (defeq.toLBool, p?)
 
 /--
@@ -1028,7 +1041,7 @@ def cacheFailure (t s : Expr) : M Unit := do
   let k := if t.hash ≤ s.hash then (t, s) else (s, t)
   modify fun st => { st with failure := st.failure.insert k }
 
-def tryUnfoldProjApp (e : Expr) : RecM (Option Expr) := do
+def tryUnfoldProjApp (e : PExpr) : RecM (Option PExpr) := do
   let f := e.getAppFn
   if !f.isProj then return none
   let e' ← whnfCore e
@@ -1046,44 +1059,44 @@ If δ-reduction+weak-head-normalization cannot be continued (i.e. we have a
 weak-head normal form (with cheapProj := true)), defers further defeq-checking
 to `isDefEq`.
 -/
-def lazyDeltaReductionStep (tn sn : Expr) : RecM ReductionStatus := do
+def lazyDeltaReductionStep (ltn lsn : PExpr) : RecM ReductionStatus := do
   let env ← getEnv
   let delta e := whnfCore (unfoldDefinition env e).get! (cheapProj := true)
-  let cont tn sn :=
-    return match ← quickIsDefEq tn sn with
-    | .undef => .continue tn sn
-    | .true => .bool (true, sorry) -- TODO ???
-    | .false => .bool (false, sorry)
-  match isDelta env tn, isDelta env sn with
-  | none, none => return .unknown tn sn
+  let cont (nltn nlsn : PExpr) (pltnEqnltn? plsnEqnlsn? : Option PExpr) :=
+    return ← match ← quickIsDefEq nltn nlsn with
+    | (.undef, _) => pure $ .continue nltn nlsn pltnEqnltn? plsnEqnlsn?
+    | (.true, pnltnEqnlsn?) => do pure $ .bool .true (← appHEqTrans? ltn nltn lsn pltnEqnltn? <| ← appHEqTrans? nltn nlsn lsn pnltnEqnlsn? <| ← appHEqSymm? lsn nlsn plsnEqnlsn?)
+    | (.false, _) => pure $ .bool false none
+  match isDelta env ltn, isDelta env lsn with
+  | none, none => return .lunknown ltn lsn
   | some _, none =>
     -- FIXME hasn't whnfCore already been called on sn? so when would this case arise?
-    if let some sn' ← tryUnfoldProjApp sn then
-      cont tn sn'
+    if let some sn' ← tryUnfoldProjApp lsn then
+      cont ltn sn' sorry sorry
     else
-      cont (← delta tn) sn
+      cont (← delta ltn) lsn
   | none, some _ =>
-    if let some tn' ← tryUnfoldProjApp tn then
-      cont tn' sn
+    if let some tn' ← tryUnfoldProjApp ltn then
+      cont tn' lsn
     else
-      cont tn (← delta sn)
+      cont ltn (← delta lsn)
   | some dt, some ds =>
     let ht := dt.hints
     let hs := ds.hints
     if ht.lt' hs then
-      cont tn (← delta sn)
+      cont ltn (← delta lsn)
     else if hs.lt' ht then
-      cont (← delta tn) sn
+      cont (← delta ltn) lsn
     else
-      if tn.isApp && sn.isApp && (unsafe ptrEq dt ds) && dt.hints.isRegular
-        && !failedBefore (← get).failure tn sn
+      if ltn.isApp && lsn.isApp && (unsafe ptrEq dt ds) && dt.hints.isRegular
+        && !failedBefore (← get).failure ltn lsn
       then
-        if Level.isEquivList tn.getAppFn.constLevels! sn.getAppFn.constLevels! then
-          let (r, proof?) ← isDefEqArgs tn sn
+        if Level.isEquivList ltn.getAppFn.constLevels! lsn.getAppFn.constLevels! then
+          let (r, proof?) ← isDefEqArgs ltn lsn
           if r then
             return .bool (true, proof?)
-        cacheFailure tn sn
-      cont (← delta tn) (← delta sn)
+        cacheFailure ltn lsn
+      cont (← delta ltn) (← delta lsn)
 
 @[inline] def isNatZero (t : Expr) : Bool :=
   t == .natZero || t matches .lit (.natVal 0)
@@ -1117,31 +1130,42 @@ Returns whether the `cheapProj := true` weak-head normal forms of `tn` and
 - one of them can be converted to a natural number/boolean literal.
 Otherwise, defers to the calling function with these normal forms.
 -/
-def lazyDeltaReduction (tn sn : PExpr) : RecM ReductionStatus := loop tn sn 1000 where
-  loop tn sn
+def lazyDeltaReduction (tn sn : PExpr) : RecM ReductionStatus := loop tn sn none none 1000 where
+  loop ltn lsn (tnEqltn? snEqlsn? : Option PExpr)
   | 0 => throw .deterministicTimeout
   | fuel+1 => do
-    let (r, proof?) ← isDefEqOffset tn sn
+    let (r, proof?) ← isDefEqOffset ltn lsn
     if r != .undef then
       if (r == .true) then
-        return .bool (true, proof?)
+        return .bool true proof?
       else
-        return .bool (false, none)
-    if !tn.toExpr.hasFVar && !sn.toExpr.hasFVar then
-      if let some (tn', p?) ← reduceNat tn then
-        return .bool (← isDefEqCore tn' sn)
-      else if let some sn' ← reduceNat sn then
-        return .bool (← isDefEqCore tn sn')
+        return .bool false none
+    if !ltn.toExpr.hasFVar && !lsn.toExpr.hasFVar then
+      if let some (ltn', pltnEqltn') ← reduceNat ltn then
+        let (ret, ptn'Eqsn?) ← isDefEqCore ltn' lsn
+        let ptnEqsn? ← appHEqTrans? ltn ltn' lsn pltnEqltn' ptn'Eqsn?
+        return .bool ret ptnEqsn?
+      else if let some (sn', psnEqsn'?) ← reduceNat lsn then
+        let (ret, ptnEqsn'?) ← isDefEqCore ltn sn'
+        let ptnEqsn? ← appHEqTrans? ltn sn' lsn ptnEqsn'? (← appHEqSymm? lsn sn' psnEqsn'?)
+        return .bool ret ptnEqsn?
     let env ← getEnv
-    if let some tn' ← reduceNative env tn then
+    if let some (ltn', pltnEqLtn'?) ← reduceNative env ltn then
       -- TODO does this case ever happen?
-      return .bool (← isDefEqCore tn' sn)
-    else if let some sn' ← reduceNative env sn then
+      let (ret, ptn'Eqsn?) ← isDefEqCore ltn' lsn
+      let ptnEqsn? ← appHEqTrans? ltn ltn' lsn pltnEqLtn'? ptn'Eqsn?
+      return .bool ret ptnEqsn?
+    else if let some (lsn', plsnEqlsn'?) ← reduceNative env lsn then
       -- TODO does this case ever happen?
-      return .bool (← isDefEqCore tn sn')
-    match ← lazyDeltaReductionStep tn sn with
-    | .continue tn sn => loop tn sn fuel
-    | r => return r
+      let (ret, ptnEqsn'?) ← isDefEqCore ltn lsn'
+      let ptnEqsn? ← appHEqTrans? ltn lsn' lsn ptnEqsn'? (← appHEqSymm? lsn lsn' plsnEqlsn'?)
+      return .bool ret ptnEqsn?
+    match ← lazyDeltaReductionStep ltn lsn with
+    | .continue nltn nlsn pltnEqnltn? plsnEqnlsn? => loop nltn nlsn (← appHEqTrans? tn ltn nltn tnEqltn? pltnEqnltn?) (← appHEqTrans? sn lsn nlsn snEqlsn? plsnEqnlsn?) fuel
+    | .lunknown ltn lsn => return .unknown ltn lsn tnEqltn? snEqlsn?
+    | .bool .true pltnEqlsn? => return .bool .true (← appHEqTrans? tn ltn sn tnEqltn? <| ← appHEqTrans? ltn lsn sn pltnEqlsn? <| ← appHEqSymm? sn lsn snEqlsn?)
+    | .bool .false _ => return .bool .false none
+    | .unknown .. => unreachable!
 
 /--
 If `t` is a string literal and `s` is a string constructor application,
