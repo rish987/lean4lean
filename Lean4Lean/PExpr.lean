@@ -103,8 +103,8 @@ def LocalContext.toLocalContext' (G : Expr → T) : LocalContext → LocalContex
 
 abbrev PLocalContext := LocalContext' PExpr (PExpr.toExpr)
 
-instance : Coe (PLocalContext) LocalContext := ⟨(LocalContext'.toLocalContext)⟩
-instance : Coe (LocalContext) PLocalContext := ⟨(LocalContext.toLocalContext' (Expr.toPExpr))⟩
+instance : Coe PLocalContext LocalContext := ⟨LocalContext'.toLocalContext⟩
+instance : Coe LocalContext PLocalContext := ⟨(LocalContext.toLocalContext' Expr.toPExpr)⟩
 
 /-- Class used to denote that `m` has a local context. -/
 class MonadPLCtx (m : Type → Type) where

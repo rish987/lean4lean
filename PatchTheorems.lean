@@ -4,6 +4,12 @@ theorem appArgHEq {A : Sort u} {U : A → Sort v}
   subst hab
   rfl
 
+theorem appFunHEq {A : Sort u} {U : A → Sort v}
+  {f : (a : A) → U a} {a b : A} (hab : HEq a b)
+  : HEq (f a) (f b) := by
+  subst hab
+  rfl
+
 theorem appHEq {A B : Sort u} {U : A → Sort v} {V : B → Sort v}
   (hAB : A = B) (hUV : (a : A) → (b : B) → HEq a b → HEq (U a) (V b))
   {f : (a : A) → U a} {g : (b : B) → V b} {a : A} {b : B}
