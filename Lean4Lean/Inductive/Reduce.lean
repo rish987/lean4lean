@@ -1,11 +1,12 @@
 import Lean.Structure
 import Lean4Lean.Expr
+import Lean4Lean.PExpr
 
 namespace Lean
 
 section
 variable [Monad m] (env : Environment)
-    (whnf : Expr → m Expr) (inferType : Expr → m Expr) (isDefEq : Expr → Expr → m Bool)
+    (whnf : PExpr → m (PExpr × Option PExpr)) (inferType : PExpr → m PExpr) (isDefEq : PExpr → PExpr → m Bool)
 
 def getFirstCtor (dName : Name) : Option Name := do
   let some (.inductInfo info) := env.find? dName | none
@@ -26,13 +27,14 @@ it is definitionally equal to by proof irrelevance). Note that the indices of
 `e`'s type must match those of the constructor application (for instance,
 `e : Eq a b` cannot be converted if `a` and `b` are not defeq).
 -/
-def toCtorWhenK (rval : RecursorVal) (e : Expr) : m Expr := do
+def toCtorWhenK (rval : RecursorVal) (e : PExpr) : m PExpr := do
   assert! rval.k
-  let appType ← whnf (← inferType e)
-  let .const appTypeI _ := appType.getAppFn | return e
+  let (appType, p?) ← whnf (← inferType e)
+  assert! p? == none -- FIXME if some then have to cast?
+  let .const appTypeI _ := appType.toExpr.getAppFn | return e
   if appTypeI != rval.getInduct then return e
-  if appType.hasExprMVar then
-    let appTypeArgs := appType.getAppArgs
+  if appType.toExpr.hasExprMVar then
+    let appTypeArgs := appType.toExpr.getAppArgs
     for h : i in [rval.numParams:appTypeArgs.size] do
       if (appTypeArgs[i]'h.2).hasExprMVar then return e
   let some newCtorApp := mkNullaryCtor env appType rval.numParams | return e
@@ -80,12 +82,12 @@ constructor application). The reduction is done by applying the
 `RecursorRule.rhs` associated with the constructor to the parameters from the
 recursor application and the fields of the constructor application.
 -/
-def inductiveReduceRec [Monad m] (env : Environment) (e : Expr)
-    (whnf : Expr → m Expr) (inferType : Expr → m Expr) (isDefEq : Expr → Expr → m Bool) :
-    m (Option Expr) := do
-  let .const recFn ls := e.getAppFn | return none
+def inductiveReduceRec [Monad m] (env : Environment) (e : PExpr)
+    (whnf : PExpr → m (PExpr × Option PExpr)) (inferType : PExpr → m (PExpr × Option PExpr)) (isDefEq : PExpr → PExpr → m (Bool × Option PExpr)) :
+    m (Option (PExpr × Option PExpr)) := do
+  let .const recFn ls := e.toExpr.getAppFn | return none
   let some (.recInfo info) := env.find? recFn | return none
-  let recArgs := e.getAppArgs
+  let recArgs := e.toExpr.getAppArgs
   let majorIdx := info.getMajorIdx
   let some major := recArgs[majorIdx]? | return none
   let mut major := major

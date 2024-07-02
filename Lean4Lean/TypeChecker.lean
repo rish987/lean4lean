@@ -159,7 +159,6 @@ def inferType (e : Expr) : RecE := fun m => m.inferType e
 def inferTypePure (e : PExpr) : RecM PExpr := fun m => m.inferTypePure e
 
 def maybeCast (p? : Option Expr) (lvl : Level) (typLhs typRhs e : PExpr) : PExpr :=
-  -- TODO recurse cast into lambdas
   p?.map (fun p => Lean.mkAppN (.const `cast' [lvl]) #[typLhs, typRhs, p, e] |>.toPExpr) |>.getD e
 
 /--
@@ -488,16 +487,6 @@ arguments are defeq (rather than eagerly applying a recursor rule/projection).
 def whnfCore (e : PExpr) (cheapRec := false) (cheapProj := false) : RecE :=
   fun m => m.whnfCore e cheapRec cheapProj
 
-def reduceRecursor (e : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) := do
-  let env ← getEnv
-  if env.header.quotInit then
-    if let some r ← quotReduceRec e whnf then
-      return r
-  let whnf' e := if cheapRec then whnfCore e cheapRec cheapProj else whnf e
-  if let some r ← inductiveReduceRec env e whnf' inferTypePure isDefEqPure then
-    return r
-  return none
-
 /--
 Gets the weak-head normal form of the free variable `e`,
 which is the weak-head normal form of its definition if `e` is a let variable and itself if it is a lambda variable.
@@ -507,72 +496,38 @@ def whnfFVar (e : PExpr) (cheapRec cheapProj : Bool) : RecE := do
     return ← whnfCore v.toPExpr cheapRec cheapProj
   return (e, none)
 
+def getProjThm (typeName : Name) (projIdx : Nat) : Name := sorry
+
 /--
 Reduces a projection of `struct` at index `idx` (when `struct` is reducible to a
 constructor application).
 -/
-def reduceProj (idx : Nat) (struct : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) := do
-  let mut c ← (if cheapProj then whnfCore struct cheapRec cheapProj else whnf struct)
+def reduceProj (typeName : Name) (projIdx : Nat) (struct : PExpr) (cheapRec cheapProj : Bool) : RecM (Option (PExpr × Option PExpr)) := do
+  let mut (c, structEqc?) ← (if cheapProj then whnfCore struct cheapRec cheapProj else whnf struct)
+
+  -- -- TODO is this necessary? can we assume the type of c and struct are the same?
+  -- -- if not, we will need to use a different patch theorem
+  -- let structType ← inferTypePure struct
+  -- let structSort ← inferTypePure structType
+  -- let lvl := structSort.toExpr.sortLevel!
+  -- let cType ← inferTypePure c
+  -- let (.true, cTypeEqstructType?) ← isDefEq cType structType | unreachable!
+  -- c := maybeCast cTypeEqstructType? lvl cType structType c 
+
   if let .lit (.strVal s) := c then
-    c := .strLitToConstructor s
-  c.withApp fun mk args => do
+    c := Expr.strLitToConstructor s |>.toPExpr
+
+  c.toExpr.withApp fun mk args => do
   let .const mkC _ := mk | return none
   let env ← getEnv
   let .ctorInfo mkInfo ← env.get mkC | return none
-  return args[mkInfo.numParams + idx]?
+
+  let projstructEqprojc? := structEqc?.map fun p => Lean.mkAppN (.const (getProjThm typeName projIdx) []) #[struct, c, p] |>.toPExpr
+
+  return args[mkInfo.numParams + projIdx]?.map (·.toPExpr, projstructEqprojc?)
 
 def isLetFVar (lctx : LocalContext) (fvar : FVarId) : Bool :=
   lctx.find? fvar matches some (.ldecl ..)
-
-@[inherit_doc whnfCore]
-def whnfCore' (e : PExpr) (cheapRec := false) (cheapProj := false) : RecE := do
-  match e with
-  | .bvar .. | .sort .. | .mvar .. | .forallE .. | .const .. | .lam .. | .lit .. => return (e, none)
-  | .mdata _ e => return ← whnfCore' e cheapRec cheapProj
-  | .fvar id => if !isLetFVar (← getLCtx) id then return (e, none)
-  | .app .. | .letE .. | .proj .. => pure ()
-  if let some r := (← get).whnfCoreCache.find? e then
-    return r
-  let rec save r := do
-    if !cheapRec && !cheapProj then
-      modify fun s => { s with whnfCoreCache := s.whnfCoreCache.insert e r }
-    return r
-  match e with
-  | .bvar .. | .sort .. | .mvar .. | .forallE .. | .const .. | .lam .. | .lit ..
-  | .mdata .. => unreachable!
-  | .fvar _ => return ← whnfFVar e cheapRec cheapProj
-  | .app .. => -- beta-reduce at the head as much as possible, apply any remaining `rargs` to the resulting expression, and re-run `whnfCore`
-    e.toExpr.withAppRev fun f0 rargs => do
-    -- the head may still be a let variable/binding, projection, or mdata-wrapped expression
-    let (f, pf0Eqf?) ← whnfCore f0.toPExpr cheapRec cheapProj -- TODO remember to use pf0Eqf?
-    let pf0rargsEqfrargs? := sorry
-    if let .lam _ _ body _ := f then
-      let rec loop m (f : PExpr) : RecE :=
-        let cont2 := do
-          let r := f.toExpr.instantiateRange (rargs.size - m) rargs.size rargs
-          let r := r.mkAppRevRange 0 (rargs.size - m) rargs |>.toPExpr
-          save <|← whnfCore r cheapRec cheapProj
-        if let .lam _ _ body _ := f then
-          if m < rargs.size then loop (m + 1) body
-          else cont2
-        else cont2
-      loop 1 body
-    else if f == f0 then
-      if let some (r, p?) ← reduceRecursor e cheapRec cheapProj then
-        whnfCore r cheapRec cheapProj
-      else
-        pure e
-    else
-      let r := f.mkAppRevRange 0 rargs.size rargs
-      -- FIXME replace with reduceRecursor? adding arguments can only result in further normalization if the head reduced to a partial recursor application
-      save <|← whnfCore r cheapRec cheapProj
-  | .letE _ _ val body _ =>
-    save <|← whnfCore (body.instantiate1 val) cheapRec cheapProj
-  | .proj _ idx s =>
-    if let some m ← reduceProj idx s cheapRec cheapProj then
-      save <|← whnfCore m cheapRec cheapProj
-    else
-      save (e, sorry)
 
 /--
 Checks if `e` has a head constant that can be delta-reduced (that is, it is a
@@ -713,32 +668,6 @@ def reduceNat (e : PExpr) : RecM (Option (PExpr × Option PExpr)) := do
     if f == ``Nat.beq then return ← reduceBinNatPred ``Nat.beq Nat.beq a b
     if f == ``Nat.ble then return ← reduceBinNatPred ``Nat.ble Nat.ble a b
   return none
-
-@[inherit_doc whnf]
-def whnf' (e : Expr) : RecM Expr := do
-  -- Do not cache easy cases
-  match e with
-  | .bvar .. | .sort .. | .mvar .. | .forallE .. | .lit .. => return e
-  | .mdata _ e => return ← whnf' e
-  | .fvar id =>
-    if !isLetFVar (← getLCtx) id then
-      return e
-  | .lam .. | .app .. | .const .. | .letE .. | .proj .. => pure ()
-  -- check cache
-  if let some r := (← get).whnfCache.find? e then
-    return r
-  let rec loop t
-  | 0 => throw .deterministicTimeout
-  | fuel+1 => do
-    let env ← getEnv
-    let t ← whnfCore' t
-    if let some t ← reduceNative env t then return t
-    if let some t ← reduceNat t then return t
-    let some t := unfoldDefinition env t | return t
-    loop t fuel
-  let r ← loop e 1000
-  modify fun s => { s with whnfCache := s.whnfCache.insert e r }
-  return r
 
 def isDefEqBinder (binDatas : Array ((Name × PExpr × PExpr × BinderInfo) × (Name × PExpr × PExpr × BinderInfo)))
 (f : PExpr → PExpr → Option PExpr → Array PExpr → Array PExpr → Array PExpr → Array (Option PExpr) → RecM (Option T))
@@ -979,7 +908,7 @@ def tryEtaStruct (t s : Expr) : RecB := do
 Checks if applications `t` and `s` (should be WHNF) are defeq on account of
 their function heads and arguments being defeq.
 -/
-def isDefEqApp (t s : PExpr) : RecB := do
+def isDefEqApp (t s : PExpr) (tfEqsf? : Option (Option PExpr) := none) (targsEqsargs? : HashMap Nat (Option PExpr) := default) : RecB := do
   unless t.toExpr.isApp && s.toExpr.isApp do return (false, none)
   t.toExpr.withApp fun tf tArgs =>
   s.toExpr.withApp fun sf sArgs => do
@@ -989,12 +918,20 @@ def isDefEqApp (t s : PExpr) : RecB := do
   let sArgs := sArgs.map (·.toPExpr)
   unless tArgs.size == sArgs.size do return (false, none)
 
-  let mut (.true, ret?) ← isDefEq tf sf | return (false, none)
+  let mut (.true, ret?) ← if tfEqsf?.isSome then pure (.true, tfEqsf?.get!)
+    else isDefEq tf sf | return (false, none)
 
   let mut taEqsas := #[]
+  let mut i := 0
   for ta in tArgs, sa in sArgs do
-    let (.true, p?) ← isDefEq ta sa | return (false, none)
+    let mut p? := none
+    if let some _p? := targsEqsargs?.find? i then
+      p? := _p?
+    else
+      let (.true, _p?) ← isDefEq ta sa | return (false, none)
+      p? := _p?
     taEqsas := taEqsas.push p?
+    i := i + 1
 
   let tfT ← inferTypePure tf
   let sfT ← inferTypePure sf
@@ -1013,6 +950,106 @@ def isDefEqApp (t s : PExpr) : RecB := do
     sf := sf.app sa
 
   return (true, ret?)
+
+def reduceRecursor (e : PExpr) (cheapRec cheapProj : Bool) : RecM (Option (PExpr × Option PExpr)) := do
+  let env ← getEnv
+  if env.header.quotInit then
+    if let some r ← quotReduceRec e whnf (fun x y tup => isDefEqApp x y (targsEqsargs? := HashMap.insert default tup.1 tup.2)) then
+      return r
+  let whnf' e := if cheapRec then whnfCore e cheapRec cheapProj else whnf e
+  if let some r ← inductiveReduceRec env e whnf' inferTypePure isDefEqPure then
+    return r
+  return none
+
+@[inherit_doc whnfCore]
+def whnfCore' (e : PExpr) (cheapRec := false) (cheapProj := false) : RecE := do
+  match e with
+  | .bvar .. | .sort .. | .mvar .. | .forallE .. | .const .. | .lam .. | .lit .. => return (e, none)
+  | .mdata _ e => return ← whnfCore' e cheapRec cheapProj
+  | .fvar id => if !isLetFVar (← getLCtx) id then return (e, none)
+  | .app .. | .letE .. | .proj .. => pure ()
+  if let some r := (← get).whnfCoreCache.find? e then
+    return r
+  let rec save r := do
+    if !cheapRec && !cheapProj then
+      modify fun s => { s with whnfCoreCache := s.whnfCoreCache.insert e r }
+    return r
+  match e with
+  | .bvar .. | .sort .. | .mvar .. | .forallE .. | .const .. | .lam .. | .lit ..
+  | .mdata .. => unreachable!
+  | .fvar _ => return ← whnfFVar e cheapRec cheapProj
+  | .app .. => -- beta-reduce at the head as much as possible, apply any remaining `rargs` to the resulting expression, and re-run `whnfCore`
+    e.toExpr.withAppRev fun f0 rargs => do
+    -- the head may still be a let variable/binding, projection, or mdata-wrapped expression
+    let (f, pf0Eqf?) ← whnfCore f0.toPExpr cheapRec cheapProj
+    let frargs := f.toExpr.mkAppRevRange 0 rargs.size rargs
+    -- patch to cast rargs as necessary to agree with type of f
+    let (_, frargs'?) ← inferType frargs
+    let frargs' := frargs'?.getD frargs.toPExpr
+    let rargs' := frargs'.toExpr.getAppArgs.reverse
+    assert! rargs'.size == rargs.size
+    let (.true, eEqfrargs'?) ← isDefEqApp e frargs' pf0Eqf? | unreachable!
+
+    if let .lam _ _ body _ := f then
+      let rec loop m (f : PExpr) : RecE :=
+        let cont := do
+          let r := f.toExpr.instantiateRange (rargs'.size - m) rargs'.size rargs'
+          let r := r.mkAppRevRange 0 (rargs'.size - m) rargs' |>.toPExpr
+          let (r', rEqr'?) ← whnfCore r cheapRec cheapProj
+          let eEqr'? ← appHEqTrans? e frargs' r' eEqfrargs'? rEqr'?
+          save (r', eEqr'?)
+        if let .lam _ _ body _ := f then
+          if m < rargs'.size then loop (m + 1) body
+          else cont
+        else cont
+      loop 1 body
+    else if f == f0 then
+      if let some (r, eEqr?) ← reduceRecursor e cheapRec cheapProj then
+        let (r', rEqr'?) ← whnfCore r cheapRec cheapProj
+        let eEqr'? ← appHEqTrans? e r r' eEqr? rEqr'?
+        pure (r', eEqr'?)
+      else
+        pure (e, none)
+    else
+      -- FIXME replace with reduceRecursor? adding arguments can only result in further normalization if the head reduced to a partial recursor application
+      let (r', frargsEqr'?) ← whnfCore frargs' cheapRec cheapProj
+      let eEqr'? ← appHEqTrans? e frargs' r' eEqfrargs'? frargsEqr'?
+      save (r', eEqr'?)
+  | .letE _ _ val body _ =>
+    save <|← whnfCore (body.toExpr.instantiate1 val).toPExpr cheapRec cheapProj
+  | .proj typeName idx s =>
+    if let some (m, eEqm?) ← reduceProj typeName idx s cheapRec cheapProj then
+      let (r', mEqr'?) ← whnfCore m cheapRec cheapProj
+      let eEqr'? ← appHEqTrans? e m r' eEqm? mEqr'?
+      save (r', eEqr'?)
+    else
+      save (e, none)
+
+@[inherit_doc whnf]
+def whnf' (e : Expr) : RecM Expr := do
+  -- Do not cache easy cases
+  match e with
+  | .bvar .. | .sort .. | .mvar .. | .forallE .. | .lit .. => return e
+  | .mdata _ e => return ← whnf' e
+  | .fvar id =>
+    if !isLetFVar (← getLCtx) id then
+      return e
+  | .lam .. | .app .. | .const .. | .letE .. | .proj .. => pure ()
+  -- check cache
+  if let some r := (← get).whnfCache.find? e then
+    return r
+  let rec loop t
+  | 0 => throw .deterministicTimeout
+  | fuel+1 => do
+    let env ← getEnv
+    let t ← whnfCore' t
+    if let some t ← reduceNative env t then return t
+    if let some t ← reduceNat t then return t
+    let some t := unfoldDefinition env t | return t
+    loop t fuel
+  let r ← loop e 1000
+  modify fun s => { s with whnfCache := s.whnfCache.insert e r }
+  return r
 
 /--
 Checks if `t` and `s` are definitionally equivalent according to proof irrelevance

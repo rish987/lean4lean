@@ -1,14 +1,31 @@
 theorem appArgHEq {A : Sort u} {U : A → Sort v}
-  {f : (a : A) → U a} {a b : A} (hab : HEq a b)
+  (f : (a : A) → U a)
+  {a b : A} (hab : HEq a b)
   : HEq (f a) (f b) := by
   subst hab
   rfl
 
-theorem appFunHEq {A : Sort u} {U : A → Sort v}
-  {f : (a : A) → U a} {a b : A} (hab : HEq a b)
-  : HEq (f a) (f b) := by
+theorem appArgHEq' {A B : Sort u} (hBA : B = A) {U : A → Sort v}
+  (f : (a : A) → U a)
+  {a : A} {b : B} (hab : HEq a b)
+  : HEq (f a) (f (cast hBA b)) := by
+  subst hBA
   subst hab
   rfl
+
+structure S : Type where
+u : Nat
+
+theorem projHEqStruct (a b : S) (hab : a = b) : a.u = b.u := by
+  subst hab
+  rfl
+
+inductive K : Nat → Prop where
+  | mk : K 1
+#check K.rec
+
+theorem KRedKLike (h : K 1) 
+  : (@K.rec (fun _ _ => Nat) 10 1 h) = 10 := rfl
 
 theorem appHEq {A B : Sort u} {U : A → Sort v} {V : B → Sort v}
   (hAB : A = B) (hUV : (a : A) → (b : B) → HEq a b → HEq (U a) (V b))

@@ -1,6 +1,7 @@
 import Std.Tactic.OpenPrivate
 import Lean4Lean.Environment.Basic
 import Lean4Lean.Expr
+import Lean4Lean.PExpr
 import Lean4Lean.LocalContext
 
 namespace Lean
@@ -96,19 +97,25 @@ Quot.ind.{u} {α : Sort u} {r : α → α → Prop} {β : @Quot.{u} α r → Pro
 Quot.ind p (Quot.mk r a) ... ⟶ p a ...
 ```
 -/
-def quotReduceRec [Monad m] (e : Expr) (whnf : Expr → m Expr) : m (Option Expr) := do
-  let .const fn _ := e.getAppFn | return none
+def quotReduceRec [Monad m] (e : PExpr) (whnf : PExpr → m (PExpr × Option PExpr))
+  (isDefEqArgs : PExpr → PExpr → Nat × (Option PExpr) → m (Bool × Option PExpr)) : m (Option (PExpr × Option PExpr)) := do
+  let fn := e.toExpr.getAppFn
+  let .const fnName _ := e.toExpr.getAppFn | return none
   let cont mkPos argPos := do
-    let args := e.getAppArgs
+    let args := e.toExpr.getAppArgs
     if h : mkPos < args.size then
-      let mk ← whnf args[mkPos]
-      if !mk.isAppOfArity ``Quot.mk 3 then return none
-      let mut r := Expr.app args[argPos]! mk.appArg!
+      let (mk, argEqmk?) ← whnf args[mkPos].toPExpr
+      -- TODO can we really assume that the type of args[mkPos] did not change after whnf?
+      -- if not, need to call infer on `eMk` to cast `mk` as necessary
+      let eMk := (mkAppN fn $ args.set! mkPos mk).toPExpr
+      let (.true, eEqe'?) ← isDefEqArgs e eMk (mkPos, argEqmk?) | unreachable!
+      if !mk.toExpr.isAppOfArity ``Quot.mk 3 then return none
+      let mut r := Expr.app args[argPos]! mk.toExpr.appArg! |>.toPExpr
       let elimArity := mkPos + 1
       if elimArity < args.size then
-        r := mkAppRange r elimArity args.size args
-      return some r
+        r := mkAppRange r elimArity args.size args |>.toPExpr
+      return some (r, eEqe'?)
     else return none
-  if fn == ``Quot.lift then cont 5 3
-  else if fn == ``Quot.ind then cont 4 3
+  if fnName == ``Quot.lift then cont 5 3
+  else if fnName == ``Quot.ind then cont 4 3
   else return none
