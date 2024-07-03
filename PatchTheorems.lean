@@ -1,3 +1,5 @@
+axiom prfIrrelHEq (P Q : Prop) (heq : P = Q) (p : Q) (q : P) : HEq p q
+
 theorem appArgHEq {A : Sort u} {U : A → Sort v}
   (f : (a : A) → U a)
   {a b : A} (hab : HEq a b)

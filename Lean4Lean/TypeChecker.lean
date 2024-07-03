@@ -1051,6 +1051,10 @@ def whnf' (e : Expr) : RecM Expr := do
   modify fun s => { s with whnfCache := s.whnfCache.insert e r }
   return r
 
+def appPrfIrrel (P Q : PExpr) (PEqQ? : Option PExpr) (p q : PExpr) : RecM PExpr := do
+  let PEqQ := PEqQ?.getD (mkRefl 1 (.sort 0) P)
+  let p := Lean.mkAppN (.const `prfIrrelHEq []) #[P, Q, PEqQ, p, q] |>.toPExpr
+
 /--
 Checks if `t` and `s` are definitionally equivalent according to proof irrelevance
 (that is, they are proofs of the same proposition).
