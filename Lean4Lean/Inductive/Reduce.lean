@@ -6,17 +6,16 @@ namespace Lean
 
 section
 
-structure ReduceMethods (m : Type → Type u) where
+structure ExtMethods (m : Type → Type u) where
   isDefEq : PExpr → PExpr → m (Bool × Option PExpr)
   whnf  : PExpr → m (PExpr × Option PExpr)
-  inferType : PExpr → m (PExpr × Option PExpr)
   inferTypePure : PExpr → m PExpr
   appPrfIrrel : PExpr → PExpr → Option PExpr → PExpr → PExpr → m PExpr
   appHEqTrans? : PExpr → PExpr → PExpr → Option PExpr → Option PExpr → m (Option PExpr)
-  isDefEqApp : PExpr → PExpr → Option PExpr → m (Bool × Option Expr)
+  isDefEqApp : PExpr → PExpr → (Nat × Option PExpr) → m (Bool × Option PExpr)
 
 variable [Monad m] (env : Environment)
-  (meth : ReduceMethods m)
+  (meth : ExtMethods m)
 
 def getFirstCtor (dName : Name) : Option Name := do
   let some (.inductInfo info) := env.find? dName | none
@@ -96,10 +95,10 @@ constructor application). The reduction is done by applying the
 recursor application and the fields of the constructor application.
 -/
 def inductiveReduceRec [Monad m] (env : Environment) (e : PExpr)
-     :
-    m (Option (PExpr × Option PExpr)) := do
-  let .const recFn ls := e.toExpr.getAppFn | return none
-  let some (.recInfo info) := env.find? recFn | return none
+    : m (Option (PExpr × Option PExpr)) := do
+  let recFn := e.toExpr.getAppFn
+  let .const recFnName ls := recFn | return none
+  let some (.recInfo info) := env.find? recFnName | return none
   let recArgs := e.toExpr.getAppArgs
   let majorIdx := info.getMajorIdx
   let some major' := recArgs[majorIdx]? | return none
@@ -110,7 +109,9 @@ def inductiveReduceRec [Monad m] (env : Environment) (e : PExpr)
   let (majorMaybeCtor, majorKWhnfEqMajorMaybeCtor?) ← match majorKWhnf with
     | .lit l => pure (l.toConstructor.toPExpr, none)
     | e => toCtorWhenStruct env meth info.getInduct e
-  let majorEqMajorMaybeCtor? := meth.appHEqTrans? major majorKWhnf majorMaybeCtor majorEqmajorKWhnf? majorKWhnfEqMajorMaybeCtor?
+  let majorEqMajorMaybeCtor? ← meth.appHEqTrans? major majorKWhnf majorMaybeCtor majorEqmajorKWhnf? majorKWhnfEqMajorMaybeCtor?
+  let eNewMajor := mkAppN recFn (recArgs.set! majorIdx majorMaybeCtor) |>.toPExpr
+  let (.true, eEqeNewMajor?) ← meth.isDefEqApp e eNewMajor (majorIdx, majorEqMajorMaybeCtor?) | unreachable!
   let some rule := getRecRuleFor info majorMaybeCtor | return none
   let majorArgs := majorMaybeCtor.toExpr.getAppArgs
   if rule.nfields > majorArgs.size then return none
@@ -123,6 +124,6 @@ def inductiveReduceRec [Monad m] (env : Environment) (e : PExpr)
   rhs := mkAppRange rhs (majorArgs.size - rule.nfields) majorArgs.size majorArgs
   if majorIdx + 1 < recArgs.size then
     rhs := mkAppRange rhs (majorIdx + 1) recArgs.size recArgs
-  return .some (rhs.toPExpr, sorry)
+  return .some (rhs.toPExpr, eEqeNewMajor?)
 
 end
