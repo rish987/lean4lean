@@ -23,7 +23,7 @@ structure TypeChecker.State where
 
 structure TypeChecker.Context where
   env : Environment
-  lctx : PLocalContext := {}
+  lctx : LocalContext := {}
   /--
   Mapping from free variables to proofs of their equality,
   introduced by isDefEqLambda.
@@ -38,7 +38,7 @@ abbrev M := ReaderT Context <| StateT State <| Except KernelException
 abbrev ME := M (PExpr × Option PExpr)
 abbrev MB := M (Bool × Option PExpr)
 
-def M.run (env : Environment) (safety : DefinitionSafety := .safe) (lctx : PLocalContext := {})
+def M.run (env : Environment) (safety : DefinitionSafety := .safe) (lctx : LocalContext := {})
     (x : M α) : Except KernelException α :=
   x { env, safety, lctx } |>.run' {}
 
@@ -46,14 +46,14 @@ instance : MonadEnv M where
   getEnv := return (← read).env
   modifyEnv _ := pure ()
 
-instance : MonadPLCtx M where
+instance : MonadLCtx M where
   getLCtx := return (← read).lctx
 
 instance [Monad m] : MonadNameGenerator (StateT State m) where
   getNGen := return (← get).ngen
   setNGen ngen := modify fun s => { s with ngen }
 
-instance (priority := low) : MonadWithReaderOf PLocalContext M where
+instance (priority := low) : MonadWithReaderOf LocalContext M where
   withReader f := withReader fun s => { s with lctx := f s.lctx }
 
 instance (priority := low) : MonadWithReaderOf (HashMap (FVarId × FVarId) PExpr) M where
@@ -89,7 +89,7 @@ def whnf (e : PExpr) : RecE := fun m => m.whnf e
 
 def whnfPure (e : PExpr) : RecM PExpr := fun m => m.whnfPure e
 
-@[inline] def withLCtx [MonadWithReaderOf PLocalContext m] (lctx : PLocalContext) (x : m α) : m α :=
+@[inline] def withLCtx [MonadWithReaderOf LocalContext m] (lctx : LocalContext) (x : m α) : m α :=
   withReader (fun _ => lctx) x
 
 @[inline] def withEqFVar [MonadWithReaderOf (HashMap (FVarId × FVarId) PExpr) m] (idt ids : FVarId) (eq : PExpr) (x : m α) : m α :=
@@ -696,10 +696,10 @@ def isDefEqBinder (binDatas : Array ((Name × PExpr × PExpr × BinderInfo) × (
     let idt := ⟨← mkFreshId⟩
     let ids := ⟨← mkFreshId⟩
     let idteqs := ⟨← mkFreshId⟩
-    withLCtx ((← getLCtx).toLocalContext.mkLocalDecl idt tName tType tBi) do
-      withLCtx ((← getLCtx).toLocalContext.mkLocalDecl ids sName sType sBi) do
+    withLCtx ((← getLCtx).mkLocalDecl idt tName tType tBi) do
+      withLCtx ((← getLCtx).mkLocalDecl ids sName sType sBi) do
         let teqsType : PExpr := default -- TODO
-        withLCtx ((← getLCtx).toLocalContext.mkLocalDecl idteqs default teqsType default) do
+        withLCtx ((← getLCtx).mkLocalDecl idteqs default teqsType default) do
           withEqFVar ids idt teqsType do
             let tvars := tvars.push (.fvar idt)
             let svars := svars.push (.fvar ids)
@@ -708,7 +708,7 @@ def isDefEqBinder (binDatas : Array ((Name × PExpr × PExpr × BinderInfo) × (
             if _h : idx < binDatas.size - 1 then
               loop (idx + 1) tvars svars teqsvars domEqs
             else
-              -- FIXME FIXME acc? may be some if `idteqs` was used in `isDefEqFVar`
+              -- FIXME FIXME ptbodEqsbod? may be some solely because `idteqs` was used in `isDefEqFVar`
               let tBody := tBody.instantiateRev tvars
               let sBody := sBody.instantiateRev tvars
               let (defEq, ptbodEqsbod?) ← isDefEq tBody sBody
@@ -1388,8 +1388,12 @@ Use `inferType` to infer type alone.
 def check (e : Expr) (lps : List Name) : ME :=
   withReader ({ · with lparams := lps }) (inferType e).run
 
+def whnfDiscard (e : PExpr) : M PExpr := RecM.run do
+  let (whnf, _) ← Inner.whnf e
+  pure whnf
+
 @[inherit_doc whnf']
-def whnf (e : PExpr) : ME := (Inner.whnf e).run
+def whnf (e : PExpr) : M PExpr := (Inner.whnfPure e).run
 
 /--
 Infers the type of expression `e`. Note that this uses the optimization
@@ -1397,13 +1401,15 @@ Infers the type of expression `e`. Note that this uses the optimization
 inference on terms that are known to be well-typed. To typecheck terms for the
 first time, use `check`.
 -/
-def inferType (e : Expr) : ME := (Inner.inferType e).run
+def inferType (e : PExpr) : M PExpr := (Inner.inferTypePure e).run
 
 @[inherit_doc isDefEqCore]
-def isDefEq (t s : PExpr) : MB := (Inner.isDefEq t s).run
+def isDefEq (t s : PExpr) : M Bool := (Inner.isDefEqPure t s).run
 
 @[inherit_doc ensureSortCore]
-def ensureSort (t : PExpr) (s := t) : ME := (ensureSortCore t s).run
+def ensureSort (t : PExpr) (s := t) : M PExpr := RecM.run do 
+  let (s, _) ← (ensureSortCore t s)
+  pure s
 
 @[inherit_doc ensureForallCore]
 def ensureForall (t : PExpr) (s := t) : ME := (ensureForallCore t s).run
@@ -1412,7 +1418,7 @@ def ensureForall (t : PExpr) (s := t) : ME := (ensureForallCore t s).run
 Ensures that `e` is defeq to some `e' := .sort (_ + 1)`, returning `e'`. If not,
 throws an error with `s` (the expression required be a type).
 -/
-def ensureType (e : PExpr) : ME := do ensureSort (← inferType e).1 e -- FIXME transport e using proof from ensureSort?
+def ensureType (e : PExpr) : M PExpr := do ensureSort (← inferType e) e -- FIXME transport e using proof from ensureSort?
 
 -- def etaExpand (e : Expr) : M Expr :=
 --   let rec loop fvars

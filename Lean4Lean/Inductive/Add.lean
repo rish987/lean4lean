@@ -19,13 +19,12 @@ structure RecInfo where
   deriving Inhabited
 
 structure InductiveStats where
-  -- FIXME lctx is unused
   lctx : LocalContext := {}
   levels : List Level
   resultLevel : Level
   nindices : Array Nat := #[]
-  indConsts : Array Expr
-  params : Array Expr
+  indConsts : Array PExpr
+  params : Array PExpr
   isNotZero : Bool
   deriving Inhabited
 
@@ -53,8 +52,8 @@ instance : MonadLCtx M where
 @[inline] def withEnv (f : Environment → Environment) (x : M α) : M α :=
   withReader (fun c => { c with env := f c.env }) x
 
-def getType (fvar : Expr) : M Expr :=
-  return ((← getLCtx).get! fvar.fvarId!).type
+def getType (fvar : PExpr) : M PExpr :=
+  return ((← getLCtx).get! fvar.toExpr.fvarId!).type.toPExpr
 
 def checkName (name : Name) : M Unit := fun c => c.env.checkName name c.allowPrimitive
 
@@ -67,11 +66,11 @@ callback `k`.
 def checkInductiveTypes
     (lparams : List Name) (nparams : Nat) (indTypes : Array InductiveType)
     (k : InductiveStats → M α) : M α := do
-  let rec loopInd dIdx stats : M α := do
+  let rec loopInd dIdx (stats : InductiveStats) : M α := do
     if _h : dIdx < indTypes.size then
       let indType := indTypes[dIdx]
       let env := (← read).env
-      let type := indType.type
+      let type := indType.type.toPExpr
       checkName indType.name
       checkName (mkRecName indType.name)
       env.checkNoMVarNoFVar indType.name type
@@ -84,37 +83,38 @@ def checkInductiveTypes
         if let .forallE name dom body bi := type then
           if i < nparams then
             if stats.indConsts.isEmpty then
-              withLocalDecl name dom.consumeTypeAnnotations bi fun param => do
-                let stats := { stats with params := stats.params.push param }
-                let type := body.instantiate1 param
+              withLocalDecl name dom.toExpr.consumeTypeAnnotations bi fun param => do
+                let stats := { stats with params := stats.params.push param.toPExpr }
+                let type := body.toExpr.instantiate1 param |>.toPExpr
                 loop stats (← whnf type) (i + 1) nindices fuel k
             else
               let param := stats.params[i]!
-              unless ← isDefEq dom (← getType param) do
+              let defEq ← isDefEq dom (← getType param)
+              unless defEq do
                 throw <| .other "parameters of all inductive datatypes must match"
-              let type := body.instantiate1 param
+              let type := body.toExpr.instantiate1 param |>.toPExpr
               loop stats (← whnf type) (i + 1) nindices fuel k
           else
-            withLocalDecl name dom.consumeTypeAnnotations bi fun arg => do
-              let type := body.instantiate1 arg
+            withLocalDecl name dom.toExpr.consumeTypeAnnotations bi fun arg => do
+              let type := body.toExpr.instantiate1 arg |>.toPExpr
               loop stats (← whnf type) i (nindices + 1) fuel k
         else
           if i != nparams then
             throw <| .other "number of parameters mismatch in inductive datatype declaration"
-          k type stats nindices
+          k (← whnf type) stats nindices
       loop stats (← whnf type) 0 0 1000 fun type stats nindices => do
-      let type ← ensureSort type
-      let mut stats := stats
-      let resultLevel := type.sortLevel!
-      if stats.indConsts.isEmpty then
-        let lctx := (← read).lctx
-        stats := { stats with lctx, resultLevel, isNotZero := resultLevel.isNeverZero }
-      else if !resultLevel.isEquiv stats.resultLevel then
-        throw <| .other "mutually inductive types must live in the same universe"
-      stats := { stats with
-        nindices := stats.nindices.push nindices
-        indConsts := stats.indConsts.push (.const indType.name stats.levels) }
-      loopInd (dIdx + 1) stats
+        let type ← ensureSort type
+        let mut stats := stats
+        let resultLevel := Expr.sortLevel! type
+        if stats.indConsts.isEmpty then
+          let lctx := (← read).lctx
+          stats := { stats with lctx, resultLevel, isNotZero := resultLevel.isNeverZero }
+        else if !resultLevel.isEquiv stats.resultLevel then
+          throw <| .other "mutually inductive types must live in the same universe"
+        stats := { stats with
+          nindices := stats.nindices.push nindices
+          indConsts := stats.indConsts.push (.const indType.name stats.levels) }
+        loopInd (dIdx + 1) stats
     else
       k <|
         assert! stats.levels.length == lparams.length
@@ -161,6 +161,7 @@ def declareInductiveTypes
   let all := indTypes.map (·.name) |>.toList
   let infos := indTypes.zipWith stats.nindices fun indType numIndices =>
     .inductInfo { indType with
+      name := indType.name
       levelParams, numParams, numIndices, all, isUnsafe, isNested
       ctors := indType.ctors.map (·.name)
       isRec := isRec indTypes stats.indConsts
