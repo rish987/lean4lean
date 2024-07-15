@@ -102,7 +102,7 @@ NOTE: e must be a patched expression
 -/
 def ensureSortCore (e : PExpr) (s : Expr) : RecE := do
   if Expr.isSort e then return (e, none)
-  let (e, p?) ← whnf e -- TODO (TC1) test that this works with an expr that need PI to reduce to Sort
+  let (e, p?) ← whnf e
   if e.toExpr.isSort then return (e, p?)
   throw <| .typeExpected (← getEnv) (← getLCtx) s
 
@@ -113,7 +113,7 @@ function type).
 -/
 def ensureForallCore (e : PExpr) (s : Expr) : RecE := do
   if Expr.isForall e then return (e, none)
-  let (e, p?) ← whnf e -- TODO (TC2) test that this works with an expr that need PI to reduce to forAll
+  let (e, p?) ← whnf e
   if e.toExpr.isForall then return (e, p?)
   throw <| .funExpected (← getEnv) (← getLCtx) s
 
@@ -173,7 +173,7 @@ def inferLambda (e : Expr) : RecE := loop #[] false e where
   | .lam name dom body bi => do
     let mut d := dom.instantiateRev fvars
     let (typ, d'?) ← inferType d
-    let (typ', p?) ← ensureSortCore typ d -- TODO (TC1) if p? = some _, d'? must be cast. also make sure that typ needed to be patched
+    let (typ', p?) ← ensureSortCore typ d
     let lvl := typ'.toExpr.sortLevel!
     let d' := maybeCast p? lvl.succ typ typ' (d'?.getD d.toPExpr)
 
@@ -265,7 +265,7 @@ def inferApp (e : PExpr) : RecM PExpr := do
       fType := body
     | _ =>
       fType := fType.toExpr.instantiateRevRange j i args |>.toPExpr
-      let (fType', p?) ← ensureForallCore fType e -- TODO (TC2)
+      let (fType', p?) ← ensureForallCore fType e
       assert! p? == none -- sanity check; f should already have been cast as necessary
       fType := fType'.toExpr.bindingBody!.toPExpr -- TODO ask on zulip about how to avoid this kind of double-casting
       j := i
@@ -541,8 +541,8 @@ def isLetFVar (lctx : LocalContext) (fvar : FVarId) : Bool :=
 Checks if `e` has a head constant that can be delta-reduced (that is, it is a
 theorem or definition), returning its `ConstantInfo` if so.
 -/
-def isDelta (env : Environment) (e : Expr) : Option ConstantInfo := do
-  if let .const c _ := e.getAppFn then
+def isDelta (env : Environment) (e : PExpr) : Option ConstantInfo := do
+  if let .const c _ := e.toExpr.getAppFn then
     if let some ci := env.find? c then
       if ci.hasValue then
         return ci
@@ -557,6 +557,7 @@ def unfoldDefinitionCore (env : Environment) (e : PExpr) : Option PExpr := do
   if let .const _ ls := e then
     if let some d := isDelta env e then
       if ls.length == d.numLevelParams then
+        -- can assume that any constant value added to the environment has been patched
         return d.instantiateValueLevelParams! ls |>.toPExpr
   none
 
