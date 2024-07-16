@@ -97,23 +97,23 @@ Quot.ind.{u} {α : Sort u} {r : α → α → Prop} {β : @Quot.{u} α r → Pro
 Quot.ind p (Quot.mk r a) ... ⟶ p a ...
 ```
 -/
-def quotReduceRec [Monad m] (e : PExpr) (whnf : PExpr → m (PExpr × Option PExpr))
-  (isDefEqApp : PExpr → PExpr → Nat × (Option PExpr) → m (Bool × Option PExpr)) : m (Option (PExpr × Option PExpr)) := do
+def quotReduceRec [Monad m] (e : PExpr) (whnf : PExpr → m (PExpr × Option EExpr))
+  (isDefEqApp : PExpr → PExpr → Nat × (Option EExpr) → m (Bool × Option EExpr)) : m (Option (PExpr × Option EExpr)) := do
   let fn := e.toExpr.getAppFn
   let .const fnName _ := e.toExpr.getAppFn | return none
   let cont mkPos argPos := do
     let args := e.toExpr.getAppArgs
     if h : mkPos < args.size then
-      let (mk, argEqmk?) ← whnf $ args[mkPos].toPExpr e.data -- FIXME
+      let (mk, argEqmk?) ← whnf $ args[mkPos].toPExpr
       -- TODO can we really assume that the type of args[mkPos] did not change after whnf?
       -- if not, need to call infer on `eMk` to cast `mk` as necessary
-      let eMk := (mkAppN fn $ args.set! mkPos mk).toPExpr e.data -- FIXME
+      let eMk := (mkAppN fn $ args.set! mkPos mk).toPExpr
       let (.true, eEqe'?) ← isDefEqApp e eMk (mkPos, argEqmk?) | unreachable!
       if !mk.toExpr.isAppOfArity ``Quot.mk 3 then return none
-      let mut r := Expr.app args[argPos]! mk.toExpr.appArg! |>.toPExpr e.data -- FIXME
+      let mut r := Expr.app args[argPos]! mk.toExpr.appArg! |>.toPExpr
       let elimArity := mkPos + 1
       if elimArity < args.size then
-        r := mkAppRange r elimArity args.size args |>.toPExpr e.data -- FIXME
+        r := mkAppRange r elimArity args.size args |>.toPExpr
       return some (r, eEqe'?)
     else return none
   if fnName == ``Quot.lift then cont 5 3
