@@ -23,7 +23,7 @@ structure TypeChecker.State where
 
 structure TypeChecker.Context where
   env : Environment
-  lctx : LocalContext := {}
+  lctx : PLocalContext := {}
   /--
   Mapping from free variables to proofs of their equality,
   introduced by isDefEqLambda.
@@ -38,7 +38,7 @@ abbrev M := ReaderT Context <| StateT State <| Except KernelException
 abbrev ME := M (PExpr × Option PExpr)
 abbrev MB := M (Bool × Option PExpr)
 
-def M.run (env : Environment) (safety : DefinitionSafety := .safe) (lctx : LocalContext := {})
+def M.run (env : Environment) (safety : DefinitionSafety := .safe) (lctx : PLocalContext := {})
     (x : M α) : Except KernelException α :=
   x { env, safety, lctx } |>.run' {}
 
@@ -46,14 +46,14 @@ instance : MonadEnv M where
   getEnv := return (← read).env
   modifyEnv _ := pure ()
 
-instance : MonadLCtx M where
+instance : MonadPLCtx M where
   getLCtx := return (← read).lctx
 
 instance [Monad m] : MonadNameGenerator (StateT State m) where
   getNGen := return (← get).ngen
   setNGen ngen := modify fun s => { s with ngen }
 
-instance (priority := low) : MonadWithReaderOf LocalContext M where
+instance (priority := low) : MonadWithReaderOf PLocalContext M where
   withReader f := withReader fun s => { s with lctx := f s.lctx }
 
 instance (priority := low) : MonadWithReaderOf (HashMap (FVarId × FVarId) PExpr) M where
@@ -89,7 +89,7 @@ def whnf (e : PExpr) : RecE := fun m => m.whnf e
 
 def whnfPure (e : PExpr) : RecM PExpr := fun m => m.whnfPure e
 
-@[inline] def withLCtx [MonadWithReaderOf LocalContext m] (lctx : LocalContext) (x : m α) : m α :=
+@[inline] def withLCtx [MonadWithReaderOf PLocalContext m] (lctx : PLocalContext) (x : m α) : m α :=
   withReader (fun _ => lctx) x
 
 @[inline] def withEqFVar [MonadWithReaderOf (HashMap (FVarId × FVarId) PExpr) m] (idt ids : FVarId) (eq : PExpr) (x : m α) : m α :=
@@ -104,7 +104,7 @@ def ensureSortCore (e : PExpr) (s : Expr) : RecE := do
   if Expr.isSort e then return (e, none)
   let (e, p?) ← whnf e
   if e.toExpr.isSort then return (e, p?)
-  throw <| .typeExpected (← getEnv) (← getLCtx) s
+  throw <| .typeExpected (← getEnv) default s
 
 /--
 Ensures that `e` is defeq to some `e' := .forallE ..`, returning `e'`. If not,
@@ -115,7 +115,7 @@ def ensureForallCore (e : PExpr) (s : Expr) : RecE := do
   if Expr.isForall e then return (e, none)
   let (e, p?) ← whnf e
   if e.toExpr.isForall then return (e, p?)
-  throw <| .funExpected (← getEnv) (← getLCtx) s
+  throw <| .funExpected (← getEnv) default s
 
 /--
 Checks that `l` does not contain any level parameters not found in the context `tc`.
@@ -125,8 +125,8 @@ def checkLevel (tc : Context) (l : Level) : Except KernelException Unit := do
     throw <| .other s!"invalid reference to undefined universe level parameter '{n2}'"
 
 def inferFVar (tc : Context) (name : FVarId) : Except KernelException PExpr := do
-  if let some decl := LocalContext.find? tc.lctx name then
-    return decl.type.toPExpr
+  if let some decl := tc.lctx.find? name then
+    return decl.type
   throw <| .other "unknown free variable"
 
 /--
@@ -150,7 +150,7 @@ def inferConstant (tc : Context) (name : Name) (ls : List Level) (inferOnly : Bo
           s!"invalid declaration, safe declaration must not contain partial declaration '{e}'"
     for l in ls do
       checkLevel tc l
-  return info.instantiateTypeLevelParams ls |>.toPExpr
+  return info.instantiateTypeLevelParams ls |>.toPExpr default
 
 /--
 Infers the type of expression `e`. If `inferOnly := false`, this function will
@@ -162,8 +162,8 @@ def inferType (e : Expr) : RecE := fun m => m.inferType e
 
 def inferTypePure (e : PExpr) : RecM PExpr := fun m => m.inferTypePure e
 
-def maybeCast (p? : Option Expr) (lvl : Level) (typLhs typRhs e : PExpr) : PExpr :=
-  p?.map (fun p => Lean.mkAppN (.const `cast' [lvl]) #[typLhs, typRhs, p, e] |>.toPExpr) |>.getD e
+def maybeCast (p? : Option PExpr) (lvl : Level) (typLhs typRhs e : PExpr) : PExpr :=
+  p?.map (fun (p : PExpr) => Lean.mkAppN (.const `cast' [lvl]) #[typLhs, typRhs, p, e] |>.toPExprMergeN e #[p, typLhs, typRhs]) |>.getD e
 
 /--
 Infers the type of lambda expression `e`.
@@ -175,16 +175,16 @@ def inferLambda (e : Expr) : RecE := loop #[] false e where
     let (typ, d'?) ← inferType d
     let (typ', p?) ← ensureSortCore typ d
     let lvl := typ'.toExpr.sortLevel!
-    let d' := maybeCast p? lvl.succ typ typ' (d'?.getD d.toPExpr)
+    let d' := maybeCast p? lvl.succ typ typ' (d'?.getD d.toPExprD)
 
     let id := ⟨← mkFreshId⟩
-    withLCtx (LocalContext.mkLocalDecl (← getLCtx) id name d' bi) do
+    withLCtx ((← getLCtx).mkLocalDecl id name d' bi) do
       let fvars := fvars.push (.fvar id)
       loop fvars (domPatched || d'?.isSome || p?.isSome) body
   | e => do
     let (r, e'?) ← inferType (e.instantiateRev fvars)
-    let e' := e'?.getD e.toPExpr
-    let r := r.toExpr.cheapBetaReduce |>.toPExpr
+    let e' := e'?.getD e.toPExprD
+    let r := r.toExpr.cheapBetaReduce |>.toPExpr r.data
     let (rSort, r'?) ← inferType (r.instantiateRev (fvars.map (·.toPExpr)))
     let (rSort', p?) ← ensureSortCore rSort r -- TODO need to test this
     assert! r'? == none
@@ -497,7 +497,7 @@ Gets the weak-head normal form of the free variable `e`,
 which is the weak-head normal form of its definition if `e` is a let variable and itself if it is a lambda variable.
 -/
 def whnfFVar (e : PExpr) (cheapRec cheapProj : Bool) : RecE := do
-  if let some (.ldecl (value := v) ..) := LocalContext.find? (← getLCtx) e.toExpr.fvarId! then
+  if let some (.ldecl (value := v) ..) := (← getLCtx).find? e.toExpr.fvarId! then
     return ← whnfCore v.toPExpr cheapRec cheapProj
   return (e, none)
 
