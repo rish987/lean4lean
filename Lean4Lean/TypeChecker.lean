@@ -28,7 +28,7 @@ structure TypeChecker.Context where
   Mapping from free variables to proofs of their equality,
   introduced by isDefEqLambda.
   -/
-  eqFVars : HashMap (FVarId × FVarId) PExpr := {}
+  eqFVars : HashMap (FVarId × FVarId) FVarId := {}
   safety : DefinitionSafety := .safe
   lparams : List Name := []
 
@@ -57,7 +57,7 @@ instance [Monad m] : MonadNameGenerator (StateT State m) where
 instance (priority := low) : MonadWithReaderOf PLocalContext M where
   withReader f := withReader fun s => { s with lctx := f s.lctx }
 
-instance (priority := low) : MonadWithReaderOf (HashMap (FVarId × FVarId) PExpr) M where
+instance (priority := low) : MonadWithReaderOf (HashMap (FVarId × FVarId) FVarId) M where
   withReader f := withReader fun s => { s with eqFVars := f s.eqFVars }
 
 structure Methods where
@@ -94,7 +94,7 @@ def whnfPure (e : PExpr) : RecM PExpr := fun m => m.whnfPure e
 @[inline] def withLCtx [MonadWithReaderOf PLocalContext m] (lctx : PLocalContext) (x : m α) : m α :=
   withReader (fun _ => lctx) x
 
-@[inline] def withEqFVar [MonadWithReaderOf (HashMap (FVarId × FVarId) PExpr) m] (idt ids : FVarId) (eq : PExpr) (x : m α) : m α :=
+@[inline] def withEqFVar [MonadWithReaderOf (HashMap (FVarId × FVarId) FVarId) m] (idt ids : FVarId) (eq : FVarId) (x : m α) : m α :=
   withReader (fun l => l.insert (idt, ids) eq) x
 
 /--
@@ -685,7 +685,7 @@ def reduceNat (e : PExpr) : RecM (Option (PExpr × Option EExpr)) := do
   return none
 
 def isDefEqBinder (binDatas : Array ((Name × PExpr × PExpr × BinderInfo) × (Name × PExpr × PExpr × BinderInfo)))
-(f : PExpr → PExpr → Option PExpr → Array PExpr → Array PExpr → Array PExpr → Array (Option PExpr) → RecM (Option T))
+(f : PExpr → PExpr → Option EExpr → Array PExpr → Array PExpr → Array FVarId → Array (Option EExpr) → RecM (Option T))
 : RecM (Bool × (Option T)) := do
   let rec loop idx tvars svars teqsvars domEqs : RecM (Bool × (Option T)) := do
     let ((tName, tDom, tBody, tBi), (sName, sDom, sBody, sBi)) := binDatas.get! idx
@@ -703,12 +703,14 @@ def isDefEqBinder (binDatas : Array ((Name × PExpr × PExpr × BinderInfo) × (
     let idteqs := ⟨← mkFreshId⟩
     withLCtx ((← getLCtx).mkLocalDecl idt tName tType tBi) do
       withLCtx ((← getLCtx).mkLocalDecl ids sName sType sBi) do
-        let teqsType : PExpr := default -- TODO
+        let tvar := (Expr.fvar idt).toPExpr
+        let svar := (Expr.fvar ids).toPExpr
+        let teqsType : PExpr := sorry -- TODO
         withLCtx ((← getLCtx).mkLocalDecl idteqs default teqsType default) do
-          withEqFVar ids idt teqsType do
-            let tvars := tvars.push (.fvar idt)
-            let svars := svars.push (.fvar ids)
-            let teqsvars := teqsvars.push (.fvar idteqs)
+          withEqFVar ids idt idteqs do
+            let tvars := tvars.push tvar
+            let svars := svars.push svar
+            let teqsvars := teqsvars.push idteqs
             let domEqs := domEqs.push p?
             if _h : idx < binDatas.size - 1 then
               loop (idx + 1) tvars svars teqsvars domEqs
@@ -732,18 +734,20 @@ def isDefEqLambda (t s : PExpr) : RecB :=
   let rec getData t s := 
     match t, s with
     | .lam tName tDom tBody tBi, .lam sName sDom sBody sBi => 
-      #[((tName, tDom, tBody, tBi), (sName, sDom, sBody, sBi))] ++ getData tBody sBody
+      #[((tName, tDom.toPExpr, tBody.toPExpr, tBi), (sName, sDom.toPExpr, sBody.toPExpr, sBi))] ++ getData tBody sBody
     | _, _ =>
       #[]
-  isDefEqBinder (getData t s) fun fa gb pfaEqgb? as bs aEqbs pAEqBs? => do
-    let mut pfaEqgb? := pfaEqgb?
+  isDefEqBinder (getData t.toExpr s.toExpr) fun fa gb faEqgb? as bs aEqbs pAEqBs? => do
+    let mut faEqgb? := faEqgb?
     let mut fa := fa
     let mut gb := gb
-    for (((a, b), aEqb), pAEqB?) in as.zip bs |>.zip aEqbs |>.zip pAEqBs? do
-      let f := LocalContext.mkLambda (← getLCtx) #[a] fa |>.toPExpr
-      let g := LocalContext.mkLambda (← getLCtx) #[b] gb |>.toPExpr
+    for (((a, b), idaEqb), pAEqB?) in as.zip bs |>.zip aEqbs |>.zip pAEqBs? do
+      let f := (← getLCtx).toLocalContext.mkLambda #[a] fa |>.toPExpr
+      let g := (← getLCtx).toLocalContext.mkLambda #[b] gb |>.toPExpr
 
-      if pAEqB?.isSome || pfaEqgb?.isSome then
+      if faEqgb?.isSome then
+
+      if pAEqB?.isSome || faEqgb?.isSome then
         let (ALvl, A) ← getTypeLevel a
         let AType ← inferTypePure A
         let B ← inferTypePure b
@@ -752,22 +756,30 @@ def isDefEqLambda (t s : PExpr) : RecB :=
         let (UaLvl, Ua) ← getTypeLevel fa
         let Vb ← inferTypePure gb
         let v := UaLvl
-        let U := LocalContext.mkForall (← getLCtx) #[a] Ua
-        let V := LocalContext.mkForall (← getLCtx) #[b] Vb
+        let U := (← getLCtx).toLocalContext.mkForall #[a] Ua
+        let V := (← getLCtx).toLocalContext.mkForall #[b] Vb
 
-        let hfg := LocalContext.mkForall (← getLCtx) #[a, b, aEqb] (pfaEqgb?.getD (mkHRefl UaLvl Ua fa))
+        let faEqgb := faEqgb?.getD (mkHRefl UaLvl Ua fa)
+        let hfgData := {faEqgb.data with usedFVarEqs := faEqgb.data.usedFVarEqs.erase idaEqb.name}
         let hAB := pAEqB?.getD (mkRefl ALvl.succ AType A)
-        pfaEqgb? := .some $ Lean.mkAppN (.const `lambdaHEq [u, v]) #[A, B, U, V, f, g, hAB, hfg] |>.toPExpr
+
+        let data := hAB.data.merge hfgData
+        if data.isEmpty then
+          faEqgb? := .none
+        else
+          let hfg := (← getLCtx).toLocalContext.mkForall #[a, b, .fvar idaEqb] faEqgb
+          faEqgb? := .some $ Lean.mkAppN (.const `lambdaHEq [u, v]) #[A, B, U, V, f, g, hAB, hfg] |>.toEExpr data
 
       fa := f
       gb := g
-    pure pfaEqgb?
+    pure faEqgb?
 
 structure ForallData where 
 A : PExpr
 B : PExpr
-hAB : PExpr
+hAB : EExpr
 hUV : PExpr
+hUVData : EExprData
 U : PExpr
 V : PExpr
 u : Level
@@ -779,28 +791,30 @@ recurses on the bodies, substituting in a new free variable for that binder
 (this substitution is delayed for efficiency purposes using the `subst`
 parameter). Otherwise, does a normal defeq check.
 -/
-def isDefEqForall' (t s : PExpr) (maxBinds : Option Nat := none) : RecM (Bool × Option (Array ForallData × Option PExpr)) :=
+def isDefEqForall' (t s : PExpr) (maxBinds : Option Nat := none) : RecM (Bool × Option (Array ForallData × Option EExpr)) :=
   let rec getData t s remBinds := 
     match t, s, remBinds with
     | .forallE tName tDom tBody tBi, .forallE sName sDom sBody sBi, some (n + 1) => 
-      #[((tName, tDom, tBody, tBi), (sName, sDom, sBody, sBi))] ++ getData tBody sBody (some n)
+      #[((tName, tDom.toPExpr, tBody.toPExpr, tBi), (sName, sDom.toPExpr, sBody.toPExpr, sBi))] ++ getData tBody sBody (some n)
     | .forallE tName tDom tBody tBi, .forallE sName sDom sBody sBi, none => 
-      #[((tName, tDom, tBody, tBi), (sName, sDom, sBody, sBi))] ++ getData tBody sBody none
+      #[((tName, tDom.toPExpr, tBody.toPExpr, tBi), (sName, sDom.toPExpr, sBody.toPExpr, sBi))] ++ getData tBody sBody none
     | _, _, _ =>
       #[]
-  isDefEqBinder (getData t s maxBinds) fun Ua Vb pUaEqVb? as bs aEqbs pAEqBs? => do
-    let mut pUaEqVb? := pUaEqVb?
+  isDefEqBinder (getData t.toExpr s.toExpr maxBinds) fun Ua Vb UaEqVb? as bs aEqbs pAEqBs? => do
+    let mut UaEqVb? := UaEqVb?
     let mut datas := #[]
     let mut Ua := Ua
     let mut Vb := Vb
-    for (((a, b), aEqb), pAEqB?) in as.zip bs |>.zip aEqbs |>.zip pAEqBs? do
+    for (((a, b), idaEqb), pAEqB?) in as.zip bs |>.zip aEqbs |>.zip pAEqBs? do
       let (UaTypeLvl, UaType) ← getTypeLevel Ua
       let UaLvl := UaType.toExpr.sortLevel!
 
-      let hUV := LocalContext.mkForall (← getLCtx) #[a, b, aEqb] (pUaEqVb?.getD (mkHRefl UaTypeLvl UaType Ua)) |>.toPExpr
+      let UaEqVb := UaEqVb?.getD (mkHRefl UaTypeLvl UaType Ua)
+      let hUV := (← getLCtx).toLocalContext.mkForall #[a, b, .fvar idaEqb] UaEqVb |>.toPExpr
+      let hUVData := {UaEqVb.data with usedFVarEqs := UaEqVb.data.usedFVarEqs.erase idaEqb.name}
 
-      let U := LocalContext.mkForall (← getLCtx) #[a] Ua |>.toPExpr
-      let V := LocalContext.mkForall (← getLCtx) #[b] Vb |>.toPExpr
+      let U := (← getLCtx).toLocalContext.mkForall #[a] Ua |>.toPExpr
+      let V := (← getLCtx).toLocalContext.mkForall #[b] Vb |>.toPExpr
 
       let (ALvl, A) ← getTypeLevel a
       let AType ← inferTypePure A
@@ -811,24 +825,29 @@ def isDefEqForall' (t s : PExpr) (maxBinds : Option Nat := none) : RecM (Bool ×
       let u := ALvl
       let v := UaLvl
 
-      if pAEqB?.isSome || pUaEqVb?.isSome then
-        pUaEqVb? := .some $ Lean.mkAppN (.const `forallHEq [u, v]) #[A, B, U, V, hAB, hUV] |>.toPExpr -- TODO build application of `heqThm`
+      let data := hAB.data.merge hUVData
+      if pAEqB?.isSome || UaEqVb?.isSome then
+        if data.isEmpty then
+          UaEqVb? := .none
+        else
+          UaEqVb? := .some $ Lean.mkAppN (.const `forallHEq [u, v]) #[A, B, U, V, hAB, hUV] |>.toEExpr data
 
-      datas := datas.push {A, B, hAB, hUV, U, V, u, v}
+      datas := datas.push {A, B, hAB, hUV, hUVData, U, V, u, v}
       Ua := U
       Vb := V
-    pure $ .some (datas, pUaEqVb?)
+    pure $ .some (datas, UaEqVb?)
 
 def isDefEqForall (t s : PExpr) : RecB := do
   let (true, .some (_, p?)) ← isDefEqForall' t s | return (false, none)
   return (true, p?)
 
 def isDefEqFVar (idt ids : FVarId) : RecB := do
-  if let some p := (← readThe Context).eqFVars.find? (idt, ids) then
+  if let some id := (← readThe Context).eqFVars.find? (idt, ids) then
+    let p := ((Expr.fvar id).toEExpr {usedFVarEqs := .insert default id.name})
     return (true, some p)
-  else if let some p := (← readThe Context).eqFVars.find? (ids, idt) then
-    -- TODO need to apply symm to p
-    return (true, ← appHEqSymm? (.fvar idt) (.fvar ids) p)
+  else if let some id := (← readThe Context).eqFVars.find? (ids, idt) then
+    let p := ((Expr.fvar id).toEExpr {usedFVarEqs := .insert default id.name})
+    return (true, ← appHEqSymm? (Expr.fvar idt).toPExpr (Expr.fvar ids).toPExpr p)
   return (false, none)
 
 /--
@@ -842,12 +861,12 @@ def quickIsDefEq (t s : PExpr) (useHash := false) : RecLB := do
     let (b, m) := m.isEquiv useHash t s
     (b, .mk a1 a2 a3 a4 a5 a6 (eqvManager := m))
   then return (.true, none)
-  let res : Option (Bool × PExpr) ← match t, s with
+  let res : Option (Bool × PExpr) ← match t.toExpr, s.toExpr with
   | .lam .., .lam .. => pure $ some $ ← isDefEqLambda t s
   | .fvar idt, .fvar ids => pure $ some $ ← isDefEqFVar idt ids
   | .forallE .., .forallE .. => pure $ some $ ← isDefEqForall t s
   | .sort a1, .sort a2 => pure $ some $ ((a1.isEquiv a2), none)
-  | .mdata _ a1, .mdata _ a2 => pure $ some $ ← isDefEq a1 a2
+  | .mdata _ a1, .mdata _ a2 => pure $ some $ ← isDefEq a1.toPExpr a2.toPExpr
   | .mvar .., .mvar .. => unreachable!
   | .lit a1, .lit a2 => pure $ some ((a1 == a2), none)
   | _, _ => pure none
@@ -877,7 +896,7 @@ def tryEtaExpansion (t s : PExpr) : RecB := do
 Checks if applications `t` and `s` (should be WHNF) are defeq on account of
 their function heads and arguments being defeq.
 -/
-def isDefEqApp (t s : PExpr) (tfEqsf? : Option (Option PExpr) := none) (targsEqsargs? : HashMap Nat (Option PExpr) := default) : RecB := do
+def isDefEqApp (t s : PExpr) (tfEqsf? : Option (Option EExpr) := none) (targsEqsargs? : HashMap Nat (Option EExpr) := default) : RecB := do
   unless t.toExpr.isApp && s.toExpr.isApp do return (false, none)
   t.toExpr.withApp fun tf tArgs =>
   s.toExpr.withApp fun sf sArgs => do
@@ -908,15 +927,16 @@ def isDefEqApp (t s : PExpr) (tfEqsf? : Option (Option PExpr) := none) (targsEqs
   let (true, .some (datas, _)) ← isDefEqForall' tfT sfT (maxBinds := some tArgs.size) | unreachable!
   assert! datas.size == tArgs.size
 
-  for ((({A, B, hAB, hUV, U, V, u, v}, ta), sa), taEqsa?) in datas.zip tArgs |>.zip sArgs |>.zip taEqsas do
+  for ((({A, B, hAB, hUV, hUVData, U, V, u, v}, ta), sa), taEqsa?) in datas.zip tArgs |>.zip sArgs |>.zip taEqsas do
     if taEqsa?.isSome || ret?.isSome then
       let (tfLvl, tfType) ← getTypeLevel tf
       let (taLvl, taType) ← getTypeLevel ta
       let ret := ret?.getD (mkRefl tfLvl tfType tf)
       let taEqsa := taEqsa?.getD (mkRefl taLvl taType ta)
-      ret? := .some $ Lean.mkAppN (.const `appHEq [u, v]) #[A, B, U, V, hAB, hUV, tf, sf, ta, sa, ret, taEqsa] |>.toPExpr
-    tf := tf.app ta
-    sf := sf.app sa
+      ret? := .some $ Lean.mkAppN (.const `appHEq [u, v])
+        #[A, B, U, V, hAB, hUV, tf, sf, ta, sa, ret, taEqsa] |>.toEExpr (.mergeN #[taEqsa.data, hUVData, hAB.data])
+    tf := tf.toExpr.app ta |>.toPExpr
+    sf := sf.toExpr.app sa |>.toPExpr
 
   return (true, ret?)
 
