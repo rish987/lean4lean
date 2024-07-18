@@ -16,8 +16,8 @@ structure TypeChecker.State where
   ngen : NameGenerator := { namePrefix := `_kernel_fresh, idx := 0 }
   inferTypeI : InferCacheP := {}
   inferTypeC : InferCache := {}
-  whnfCoreCache : ExprMap (PExpr × Option PExpr) := {}
-  whnfCache : ExprMap (PExpr × Option PExpr) := {}
+  whnfCoreCache : ExprMap (PExpr × Option EExpr) := {}
+  whnfCache : ExprMap (PExpr × Option EExpr) := {}
   eqvManager : EquivManager := {}
   failure : HashSet (Expr × Expr) := {}
 
@@ -76,10 +76,10 @@ abbrev RecB := RecM (Bool × (Option EExpr))
 abbrev RecLB := RecM (LBool × (Option EExpr))
 
 inductive ReductionStatus where
-  | continue (nltn nlsn : PExpr) (pltnEqnltn? plsnEqnlsn? : Option PExpr)
-  | unknown (ltn lsn : PExpr) (tnEqltn? snEqlsn? : Option PExpr)
+  | continue (nltn nlsn : PExpr) (pltnEqnltn? plsnEqnlsn? : Option EExpr)
+  | unknown (ltn lsn : PExpr) (tnEqltn? snEqlsn? : Option EExpr)
   | notDelta
-  | bool (b : Bool) (p?: Option PExpr)
+  | bool (b : Bool) (p?: Option EExpr)
 deriving Inhabited
 
 namespace Inner
@@ -527,7 +527,7 @@ def reduceProj (typeName : Name) (projIdx : Nat) (struct : PExpr) (cheapRec chea
   -- let (.true, cTypeEqstructType?) ← isDefEq cType structType | unreachable!
   -- c := maybeCast cTypeEqstructType? lvl cType structType c 
 
-  if let .mk (.lit (.strVal s)) := c then
+  if let (.lit (.strVal s)) := c.toExpr then
     c := Expr.strLitToConstructor s |>.toPExpr
 
   c.toExpr.withApp fun mk args => do
@@ -672,7 +672,7 @@ def reduceNat (e : PExpr) : RecM (Option (PExpr × Option EExpr)) := do
       let some v := natLitExt? prec' | return none
       return some <| ((Expr.lit <| .natVal <| v + 1).toPExpr, mkNatSuccAppArgHEq? p? prec prec')
   else if nargs == 2 then
-    let (.mk (.app (.app (.const f _) a) b)) := e | return none
+    let .app (.app (.const f _) a) b := e.toExpr | return none
     if f == ``Nat.add then return ← reduceBinNatOp ``Nat.add Nat.add a.toPExpr b.toPExpr
     if f == ``Nat.sub then return ← reduceBinNatOp ``Nat.sub Nat.sub a.toPExpr b.toPExpr
     if f == ``Nat.mul then return ← reduceBinNatOp ``Nat.mul Nat.mul a.toPExpr b.toPExpr
@@ -881,8 +881,8 @@ Assuming that `s` has a function type `(x : A) -> B x`, it η-expands to
 -/
 def tryEtaExpansionCore (t s : PExpr) : RecB := do
   if t.toExpr.isLambda && !s.toExpr.isLambda then
-    let .forallE name ty _ bi ← whnfPure (← inferTypePure s) | return (false, none)
-    isDefEq t (.lam name ty (.app s (.bvar 0)) bi) -- NOTE: same proof should be okay because of eta-expansion when typechecking
+    let .forallE name ty _ bi := (← whnfPure (← inferTypePure s)).toExpr | return (false, none)
+    isDefEq t (Expr.lam name ty (.app s (.bvar 0)) bi).toPExpr -- NOTE: same proof should be okay because of eta-expansion when typechecking
   else return (false, none)
 
 @[inherit_doc tryEtaExpansionCore]
@@ -976,12 +976,11 @@ def tryEtaStruct (t s : PExpr) : RecB := do
     let (true, sEqt?) ← tryEtaStructCore s t | return (false, none)
     return (true, ← appHEqSymm? s t sEqt?)
 
+def appPrfIrrel (P Q : PExpr) (PEqQ? : Option EExpr) (p q : PExpr) : RecM EExpr := do
+  let PEqQ := PEqQ?.getD (mkRefl 1 (Expr.sort 0).toPExpr P)
+  return Lean.mkAppN (.const `prfIrrelHEq []) #[P, Q, PEqQ, p, q] |>.toEExpr (PEqQ.data.merge {usedProofIrrel := true})
 
-def appPrfIrrel (P Q : PExpr) (PEqQ? : Option PExpr) (p q : PExpr) : RecM PExpr := do
-  let PEqQ := PEqQ?.getD (mkRefl 1 (.sort 0) P)
-  return Lean.mkAppN (.const `prfIrrelHEq []) #[P, Q, PEqQ, p, q] |>.toPExpr
-
-def reduceRecursor (e : PExpr) (cheapRec cheapProj : Bool) : RecM (Option (PExpr × Option PExpr)) := do
+def reduceRecursor (e : PExpr) (cheapRec cheapProj : Bool) : RecM (Option (PExpr × Option EExpr)) := do
   let env ← getEnv
   if env.header.quotInit then
     if let some r ← quotReduceRec e whnf (fun x y tup => isDefEqApp x y (targsEqsargs? := HashMap.insert default tup.1 tup.2)) then
@@ -1001,11 +1000,12 @@ def reduceRecursor (e : PExpr) (cheapRec cheapProj : Bool) : RecM (Option (PExpr
   return none
 
 @[inherit_doc whnfCore]
-def whnfCore' (e : PExpr) (cheapRec := false) (cheapProj := false) : RecPE := do
-  match e with
+private def _whnfCore' (e' : Expr) (cheapRec := false) (cheapProj := false) : RecEE := do
+  let e := e'.toPExpr
+  match e' with
   | .bvar .. | .sort .. | .mvar .. | .forallE .. | .const .. | .lam .. | .lit .. => return (e, none)
-  | .mdata _ e => return ← whnfCore' e cheapRec cheapProj
-  | .fvar id => if !isLetFVar (← getLCtx) id then return (e, none)
+  | .mdata _ e => return ← _whnfCore' e cheapRec cheapProj
+  | .fvar id => if !isLetFVar (← getLCtx).toLocalContext id then return (e, none)
   | .app .. | .letE .. | .proj .. => pure ()
   if let some r := (← get).whnfCoreCache.find? e then
     return r
@@ -1013,12 +1013,12 @@ def whnfCore' (e : PExpr) (cheapRec := false) (cheapProj := false) : RecPE := do
     if !cheapRec && !cheapProj then
       modify fun s => { s with whnfCoreCache := s.whnfCoreCache.insert e r }
     return r
-  match e with
+  match e' with
   | .bvar .. | .sort .. | .mvar .. | .forallE .. | .const .. | .lam .. | .lit ..
   | .mdata .. => unreachable!
   | .fvar _ => return ← whnfFVar e cheapRec cheapProj
   | .app .. => -- beta-reduce at the head as much as possible, apply any remaining `rargs` to the resulting expression, and re-run `whnfCore`
-    e.toExpr.withAppRev fun f0 rargs => do
+    e'.withAppRev fun f0 rargs => do
     -- the head may still be a let variable/binding, projection, or mdata-wrapped expression
     let (f, pf0Eqf?) ← whnfCore f0.toPExpr cheapRec cheapProj
     let frargs := f.toExpr.mkAppRevRange 0 rargs.size rargs
@@ -1029,10 +1029,10 @@ def whnfCore' (e : PExpr) (cheapRec := false) (cheapProj := false) : RecPE := do
     assert! rargs'.size == rargs.size
     let (.true, eEqfrargs'?) ← isDefEqApp e frargs' pf0Eqf? | unreachable!
 
-    if let .lam _ _ body _ := f then
-      let rec loop m (f : PExpr) : RecE :=
+    if let (.lam _ _ body _) := f.toExpr then
+      let rec loop m (f : Expr) : RecEE :=
         let cont := do
-          let r := f.toExpr.instantiateRange (rargs'.size - m) rargs'.size rargs'
+          let r := f.instantiateRange (rargs'.size - m) rargs'.size rargs'
           let r := r.mkAppRevRange 0 (rargs'.size - m) rargs' |>.toPExpr
           let (r', rEqr'?) ← whnfCore r cheapRec cheapProj
           let eEqr'? ← appHEqTrans? e frargs' r' eEqfrargs'? rEqr'?
@@ -1055,23 +1055,27 @@ def whnfCore' (e : PExpr) (cheapRec := false) (cheapProj := false) : RecPE := do
       let eEqr'? ← appHEqTrans? e frargs' r' eEqfrargs'? frargsEqr'?
       save (r', eEqr'?)
   | .letE _ _ val body _ =>
-    save <|← whnfCore (body.toExpr.instantiate1 val).toPExpr cheapRec cheapProj
+    save <|← whnfCore (body.instantiate1 val).toPExpr cheapRec cheapProj
   | .proj typeName idx s =>
-    if let some (m, eEqm?) ← reduceProj typeName idx s cheapRec cheapProj then
+    if let some (m, eEqm?) ← reduceProj typeName idx s.toPExpr cheapRec cheapProj then
       let (r', mEqr'?) ← whnfCore m cheapRec cheapProj
       let eEqr'? ← appHEqTrans? e m r' eEqm? mEqr'?
       save (r', eEqr'?)
     else
       save (e, none)
 
+@[inherit_doc whnfCore]
+def whnfCore' (e : PExpr) (cheapRec := false) (cheapProj := false) : RecEE := _whnfCore' e cheapRec cheapProj
+
 @[inherit_doc whnf]
-def whnf' (e : PExpr) : RecPE := do
+private def _whnf' (e' : Expr) : RecEE := do
+  let e := e'.toPExpr
   -- Do not cache easy cases
-  match e with
+  match e' with
   | .bvar .. | .sort .. | .mvar .. | .forallE .. | .lit .. => return (e, none)
-  | .mdata _ e => return ← whnf' e
+  | .mdata _ e => return ← _whnf' e
   | .fvar id =>
-    if !isLetFVar (← getLCtx) id then
+    if !isLetFVar (← getLCtx).toLocalContext id then
       return (e, none)
   | .lam .. | .app .. | .const .. | .letE .. | .proj .. => pure ()
   -- check cache
@@ -1091,6 +1095,9 @@ def whnf' (e : PExpr) : RecPE := do
   modify fun s => { s with whnfCache := s.whnfCache.insert e r }
   return r
 
+@[inherit_doc whnf]
+def whnf' (e : PExpr) : RecEE := _whnf' e
+
 def whnfPure' (e : PExpr) : RecM PExpr := sorry
 
 /--
@@ -1105,9 +1112,8 @@ def isDefEqProofIrrel (t s : PExpr) : RecLB := do
   let sType ← inferTypePure s
   let (ret, pt?) ← isDefEq tType sType
   if ret == .true then
-    let pt := pt?.getD (mkRefl 1 (.sort 0) tType)
-    let p := Lean.mkAppN (.const `FIXME []) #[tType, sType, pt, t, s] |>.toPExpr
-    return (.true, .none) -- FIXME return .some p
+    let p ← appPrfIrrel tType sType pt? t s
+    return (.true, .some p) -- FIXME return .some p
   pure (.undef, none)
 
 def failedBefore (failure : HashSet (Expr × Expr)) (t s : Expr) : Bool :=
@@ -1122,7 +1128,7 @@ def cacheFailure (t s : Expr) : M Unit := do
   let k := if t.hash ≤ s.hash then (t, s) else (s, t)
   modify fun st => { st with failure := st.failure.insert k }
 
-def tryUnfoldProjApp (e : PExpr) : RecM (Option (PExpr × Option PExpr)) := do
+def tryUnfoldProjApp (e : PExpr) : RecM (Option (PExpr × Option EExpr)) := do
   let f := e.toExpr.getAppFn
   if !f.isProj then return none
   let (e', p?) ← whnfCore e
@@ -1144,7 +1150,7 @@ to `isDefEq`.
 def lazyDeltaReductionStep (ltn lsn : PExpr) : RecM ReductionStatus := do
   let env ← getEnv
   let delta e := whnfCore (unfoldDefinition env e).get! (cheapProj := true)
-  let cont (nltn nlsn : PExpr) (pltnEqnltn? plsnEqnlsn? : Option PExpr) :=
+  let cont (nltn nlsn : PExpr) (pltnEqnltn? plsnEqnlsn? : Option EExpr) :=
     return ← match ← quickIsDefEq nltn nlsn with
     | (.undef, _) => pure $ .continue nltn nlsn pltnEqnltn? plsnEqnlsn?
     | (.true, pnltnEqnlsn?) => do pure $ .bool .true (← appHEqTrans? ltn nltn lsn pltnEqnltn? <| ← appHEqTrans? nltn nlsn lsn pnltnEqnlsn? <| ← appHEqSymm? lsn nlsn plsnEqnlsn?)
@@ -1193,9 +1199,10 @@ def lazyDeltaReductionStep (ltn lsn : PExpr) : RecM ReductionStatus := do
 @[inline] def isNatZero (t : Expr) : Bool :=
   t == .natZero || t matches .lit (.natVal 0)
 
-def isNatSuccOf? : PExpr → Option PExpr
-  | .lit (.natVal (n+1)) => return .lit (.natVal n)
-  | .app (.const ``Nat.succ _) e => return e
+def isNatSuccOf? (e : PExpr) : Option PExpr :=
+  match e.toExpr with
+  | .lit (.natVal (n+1)) => return Expr.lit (.natVal n) |>.toPExpr
+  | .app (.const ``Nat.succ _) e => return e.toPExpr
   | _ => none
 
 /--
@@ -1223,7 +1230,7 @@ Returns whether the `cheapProj := true` weak-head normal forms of `tn` and
 Otherwise, defers to the calling function with these normal forms.
 -/
 def lazyDeltaReduction (tn sn : PExpr) : RecM ReductionStatus := loop tn sn none none 1000 where
-  loop ltn lsn (tnEqltn? snEqlsn? : Option PExpr)
+  loop ltn lsn (tnEqltn? snEqlsn? : Option EExpr)
   | 0 => throw .deterministicTimeout
   | fuel+1 => do
     let (r, proof?) ← isDefEqOffset ltn lsn
@@ -1265,8 +1272,8 @@ checks that they are defeq after turning `t` into a constructor application.
 Otherwise, defers to the calling function.
 -/
 def tryStringLitExpansionCore (t s : PExpr) : RecM LBool := do
-  let .lit (.strVal st) := t | return .undef
-  let .app sf _ := s | return .undef
+  let .lit (.strVal st) := t.toExpr | return .undef
+  let .app sf _ := s.toExpr | return .undef
   unless sf == .const ``String.mk [] do return .undef
   toLBoolM <| isDefEqCorePure (Expr.strLitToConstructor st).toPExpr s
 
@@ -1307,7 +1314,7 @@ def isDefEqCore' (t s : PExpr) : RecB := do
   let (tn, tEqtn?) ← whnfCore t (cheapProj := true)
   let (sn, sEqsn?) ← whnfCore s (cheapProj := true)
 
-  let mktEqs? (t' s' : PExpr) (tEqt'? sEqs'? t'Eqs'? : Option PExpr) := do appHEqTrans? t s' s (← appHEqTrans? t t' s' tEqt'? t'Eqs'?) (← appHEqSymm? s s' sEqs'?)
+  let mktEqs? (t' s' : PExpr) (tEqt'? sEqs'? t'Eqs'? : Option EExpr) := do appHEqTrans? t s' s (← appHEqTrans? t t' s' tEqt'? t'Eqs'?) (← appHEqSymm? s s' sEqs'?)
 
   if !(unsafe ptrEq tn t && ptrEq sn s) then
     let (r, tnEqsn?) ← quickIsDefEq tn sn
@@ -1331,17 +1338,17 @@ def isDefEqCore' (t s : PExpr) : RecB := do
   let tEqtn'? ← appHEqTrans? t tn tn' tEqtn? tnEqtn'?
   let sEqsn'? ← appHEqTrans? s sn sn' sEqsn? snEqsn'?
 
-  match tn', sn' with
+  match tn'.toExpr, sn'.toExpr with
   | .const tf tl, .const sf sl =>
     if tf == sf && Level.isEquivList tl sl then return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? none)
   | .fvar tv, .fvar sv => if tv == sv then return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? none)
   | .proj tTypeName ti te, .proj _ si se =>
     if ti == si then
       -- optimized by `lazyDeltaReductionStep` using `cheapProj = true`
-      let (r, teEqse?) ← isDefEq te se
-      
+      let (r, teEqse?) ← isDefEq te.toPExpr se.toPExpr
+
       if r then
-        return (true, appProjThm? tTypeName ti te se teEqse?)
+        return (true, appProjThm? tTypeName ti te.toPExpr se.toPExpr teEqse?)
   | _, _ => pure ()
 
   -- `lazyDeltaReductionStep` used `cheapProj = true`, so we may not have a complete WHNF
@@ -1437,7 +1444,7 @@ def ensureSort (t : PExpr) (s := t) : M PExpr := RecM.run do
   pure s
 
 @[inherit_doc ensureForallCore]
-def ensureForall (t : PExpr) (s := t) : MPE := (ensureForallCore t s).run
+def ensureForall (t : PExpr) (s := t) : MEE := (ensureForallCore t s).run
 
 /--
 Ensures that `e` is defeq to some `e' := .sort (_ + 1)`, returning `e'`. If not,

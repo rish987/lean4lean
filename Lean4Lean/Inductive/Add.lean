@@ -30,7 +30,7 @@ structure InductiveStats where
 
 structure Context where
   env : Environment
-  lctx : LocalContext := {}
+  lctx : PLocalContext := {}
   ngen : NameGenerator := { namePrefix := `_ind_fresh }
   safety : DefinitionSafety
   allowPrimitive : Bool
@@ -43,10 +43,10 @@ instance : MonadLocalNameGenerator M where
 instance (priority := low) : MonadLift TypeChecker.M M where
   monadLift x c := x.run c.env c.safety c.lctx
 
-instance (priority := low+1) : MonadWithReaderOf LocalContext M where
+instance (priority := low+1) : MonadWithReaderOf PLocalContext M where
   withReader f x := withReader (fun c => { c with lctx := f c.lctx }) x
 
-instance : MonadLCtx M where
+instance : MonadPLCtx M where
   getLCtx := return (← read).lctx
 
 @[inline] def withEnv (f : Environment → Environment) (x : M α) : M α :=

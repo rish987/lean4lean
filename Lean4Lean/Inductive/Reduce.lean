@@ -10,7 +10,7 @@ structure ExtMethods (m : Type → Type u) where
   isDefEq : PExpr → PExpr → m (Bool × Option EExpr)
   whnf  : PExpr → m (PExpr × Option EExpr)
   inferTypePure : PExpr → m PExpr
-  appPrfIrrel : PExpr → PExpr → Option PExpr → PExpr → PExpr → m EExpr
+  appPrfIrrel : PExpr → PExpr → Option EExpr → PExpr → PExpr → m EExpr
   appHEqTrans? : PExpr → PExpr → PExpr → Option EExpr → Option EExpr → m (Option EExpr)
   isDefEqApp : PExpr → PExpr → (Nat × Option EExpr) → m (Bool × Option EExpr)
 
