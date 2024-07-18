@@ -23,14 +23,14 @@ structure InductiveStats where
   levels : List Level
   resultLevel : Level
   nindices : Array Nat := #[]
-  indConsts : Array PExpr
-  params : Array PExpr
+  indConsts : Array Expr
+  params : Array Expr
   isNotZero : Bool
   deriving Inhabited
 
 structure Context where
   env : Environment
-  lctx : PLocalContext := {}
+  lctx : LocalContext := {}
   ngen : NameGenerator := { namePrefix := `_ind_fresh }
   safety : DefinitionSafety
   allowPrimitive : Bool
@@ -43,10 +43,10 @@ instance : MonadLocalNameGenerator M where
 instance (priority := low) : MonadLift TypeChecker.M M where
   monadLift x c := x.run c.env c.safety c.lctx
 
-instance (priority := low+1) : MonadWithReaderOf PLocalContext M where
+instance (priority := low+1) : MonadWithReaderOf LocalContext M where
   withReader f x := withReader (fun c => { c with lctx := f c.lctx }) x
 
-instance : MonadPLCtx M where
+instance : MonadLCtx M where
   getLCtx := return (← read).lctx
 
 @[inline] def withEnv (f : Environment → Environment) (x : M α) : M α :=
@@ -80,30 +80,30 @@ def checkInductiveTypes
       let rec loop stats type i nindices fuel k : M α := match fuel with
       | 0 => throw .deepRecursion
       | fuel+1 => do
-        if let .forallE name dom body bi := type then
+        if let .forallE name dom body bi := type.toExpr then
           if i < nparams then
             if stats.indConsts.isEmpty then
-              withLocalDecl name dom.toExpr.consumeTypeAnnotations bi fun param => do
+              withLocalDecl name dom.consumeTypeAnnotations bi fun param => do
                 let stats := { stats with params := stats.params.push param.toPExpr }
-                let type := body.toExpr.instantiate1 param |>.toPExpr
+                let type := body.instantiate1 param |>.toPExpr
                 loop stats (← whnf type) (i + 1) nindices fuel k
             else
               let param := stats.params[i]!
-              let defEq ← isDefEq dom (← getType param)
+              let defEq ← isDefEqPure dom.toPExpr (← getType param.toPExpr)
               unless defEq do
                 throw <| .other "parameters of all inductive datatypes must match"
-              let type := body.toExpr.instantiate1 param |>.toPExpr
+              let type := body.instantiate1 param |>.toPExpr
               loop stats (← whnf type) (i + 1) nindices fuel k
           else
-            withLocalDecl name dom.toExpr.consumeTypeAnnotations bi fun arg => do
-              let type := body.toExpr.instantiate1 arg |>.toPExpr
+            withLocalDecl name dom.consumeTypeAnnotations bi fun arg => do
+              let type := body.instantiate1 arg |>.toPExpr
               loop stats (← whnf type) i (nindices + 1) fuel k
         else
           if i != nparams then
             throw <| .other "number of parameters mismatch in inductive datatype declaration"
           k (← whnf type) stats nindices
       loop stats (← whnf type) 0 0 1000 fun type stats nindices => do
-        let type ← ensureSort type
+        let type ← ensureSortPure type
         let mut stats := stats
         let resultLevel := Expr.sortLevel! type
         if stats.indConsts.isEmpty then
@@ -113,7 +113,7 @@ def checkInductiveTypes
           throw <| .other "mutually inductive types must live in the same universe"
         stats := { stats with
           nindices := stats.nindices.push nindices
-          indConsts := stats.indConsts.push (.const indType.name stats.levels) }
+          indConsts := stats.indConsts.push (Expr.const indType.name stats.levels).toPExpr }
         loopInd (dIdx + 1) stats
     else
       k <|
@@ -188,8 +188,8 @@ def isRecArg (stats : InductiveStats) (t : Expr) : M (Option Nat) := loop t 1000
   loop t
   | 0 => throw .deepRecursion
   | fuel+1 => do
-    let t ← whnf t
-    let .forallE name dom body bi := t | return isValidIndApp? stats t
+    let t ← whnf t.toPExpr
+    let .forallE name dom body bi := t.toExpr | return isValidIndApp? stats t
     withLocalDecl name dom.consumeTypeAnnotations bi fun arg => do
     loop (body.instantiate1 arg) fuel
 
@@ -198,9 +198,9 @@ def checkPositivity (stats : InductiveStats) (t : Expr) (ctor : Name) (idx : Nat
   loop t
   | 0 => throw .deepRecursion
   | fuel+1 => do
-    let t ← whnf t
+    let t ← whnf t.toPExpr
     if !hasIndOcc stats.indConsts t then return
-    if let .forallE name dom body bi := t then
+    if let .forallE name dom body bi := t.toExpr then
       if hasIndOcc stats.indConsts dom then
         throw <| .other s!"arg #{idx + 1} of '{ctor
           }' has a non positive occurrence of the datatypes being declared"
@@ -236,14 +236,14 @@ def checkConstructors (indTypes : Array InductiveType) (lparams : List Name)
       | fuel+1 => do
         if let .forallE name dom body bi := t then
           if let some param := stats.params[i]? then
-            unless ← isDefEq dom (← getType param) do
+            unless ← isDefEqPure dom.toPExpr (← getType param.toPExpr) do
               throw <| .other
                 s!"arg #{i + 1} of '{n}' does not match inductive datatype parameters"
             -- instantiate params with those from the inductive type signature
             loop (body.instantiate1 param) (i + 1) fuel
           else
-            let s ← ensureType dom
-            unless stats.resultLevel.isZero || stats.resultLevel.geq' s.sortLevel! do
+            let s ← ensureTypePure dom.toPExpr
+            unless stats.resultLevel.isZero || stats.resultLevel.geq' s.toExpr.sortLevel! do
               throw <| .other s!"universe level of type_of(arg #{i + 1
                 }) of '{n}' is too big for the corresponding inductive datatype"
             if !isUnsafe then
@@ -298,7 +298,7 @@ def isLargeEliminator (stats : InductiveStats) (indTypes : Array InductiveType) 
         withLocalDecl name dom.consumeTypeAnnotations bi fun arg => do
           let mut toCheck := toCheck
           if i ≥ stats.params.size then
-            if !(← ensureType dom).sortLevel!.isZero then
+            if !(← ensureTypePure dom.toPExpr).toExpr.sortLevel!.isZero then
               toCheck := toCheck.push arg
           loop (body.instantiate1 arg) (i + 1) toCheck fuel
       else
@@ -348,17 +348,17 @@ def loopArgs1 (stats : InductiveStats) (type : Expr) (i : Nat) (indices : Array 
   | fuel+1 => do
     if let .forallE name dom body bi := type then
       if i < stats.params.size then
-        loopArgs1 stats (← whnf <| body.instantiate1 stats.params[i]!) (i + 1) indices fuel k
+        loopArgs1 stats (← whnf <| (body.instantiate1 stats.params[i]!).toPExpr) (i + 1) indices fuel k
       else
         withLocalDecl name dom.consumeTypeAnnotations bi fun arg => do
-        loopArgs1 stats (← whnf <| body.instantiate1 arg) i (indices.push arg) fuel k
+        loopArgs1 stats (← whnf <| (body.instantiate1 arg).toPExpr) i (indices.push arg) fuel k
     else
       k indices
 
 variable (stats : InductiveStats) (indTypes : Array InductiveType) (elimLevel : Level) in
 def loopInd1 (dIdx : Nat) (recInfos : Array RecInfo) (k : Array RecInfo → M α) : M α := do
   if _h : dIdx < indTypes.size then
-    loopArgs1 stats (← whnf indTypes[dIdx].type) 0 #[] 1000 fun indices =>
+    loopArgs1 stats (← whnf indTypes[dIdx].type.toPExpr) 0 #[] 1000 fun indices =>
     let tTy := mkAppN (mkAppN stats.indConsts[dIdx]! stats.params) indices
     withLocalDecl `t tTy.consumeTypeAnnotations .default fun major => do
     let lctx ← getLCtx
@@ -393,14 +393,14 @@ where
     else k t bu u
 
 def loopUArgs (ui : Expr) (k : Expr → Array Expr → M α) : M α := do
-  loop (← whnf (← inferType ui)) #[] 1000
+  loop (← whnf (← inferType ui.toPExpr)) #[] 1000
 where
   loop uiTy xs
   | 0 => throw .deepRecursion
   | fuel+1 => do
-    if let .forallE name dom body bi := uiTy then
+    if let .forallE name dom body bi := uiTy.toExpr then
       withLocalDecl name dom.consumeTypeAnnotations bi fun arg => do
-      loop (← whnf <| body.instantiate1 arg) (xs.push arg) fuel
+      loop (← whnf <| (body.instantiate1 arg).toPExpr) (xs.push arg) fuel
     else
       k uiTy xs
 
