@@ -13,12 +13,12 @@ def checkConstantVal (env : Environment) (v : ConstantVal) (allowPrimitive := fa
   checkName env v.name allowPrimitive
   checkDuplicatedUnivParams v.levelParams
   checkNoMVarNoFVar env v.name v.type
-  let (vtypeType, vtype'?) ← check v.type v.levelParams
-  let vtype' := vtype'?.getD v.type.toPExpr
-  let (sort, vtypeTypeEqsort?) ← ensureSort vtypeType vtype'
+  let (typeType, type'?) ← check v.type v.levelParams
+  let type' := type'?.getD v.type.toPExpr
+  let (sort, typeTypeEqSort?) ← ensureSort typeType type'
   let .sort lvl := sort.toExpr | unreachable!
-  let vtype'' := maybeCast vtypeTypeEqsort? lvl.succ vtypeType sort vtype'
-  pure (vtype'', lvl)
+  let type'' := maybeCast typeTypeEqSort? lvl.succ typeType sort type'
+  pure (type'', lvl)
 
 def addAxiom (env : Environment) (v : AxiomVal) :
     Except KernelException (Environment × AxiomVal) := do
@@ -35,64 +35,77 @@ def addDefinition (env : Environment) (v : DefinitionVal) :
     let env' := add env (.defnInfo v)
     checkNoMVarNoFVar env' v.name v.value
     M.run env' (safety := .unsafe) (lctx := {}) do
-      let (vvalueType, _) ← TypeChecker.check v.value v.levelParams
-      let (defEq, _) ← isDefEq vvalueType type
+      let (valueType, _) ← TypeChecker.check v.value v.levelParams
+      let (defEq, _) ← isDefEq valueType type
       if !defEq then
-        throw <| .declTypeMismatch env' (.defnDecl v) vvalueType
-    return (env', v) -- TODO handle unsafe defs
+        throw <| .declTypeMismatch env' (.defnDecl v) valueType
+    return (env', v) -- TODO handle unsafe defs (low priority)
   else
     let (type, value) ← M.run env (safety := .safe) (lctx := {}) do
       let (type, lvl) ← checkConstantVal env v.toConstantVal (← checkPrimitiveDef env v)
       checkNoMVarNoFVar env v.name v.value
-      let (vvalueType, vvalue'?) ← TypeChecker.check v.value v.levelParams
-      let vvalue' := vvalue'?.getD v.value.toPExpr
-      let (defEq, vvalueTypeEqtype?) ← isDefEq vvalueType type
+      let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
+      let value' := value'?.getD v.value.toPExpr
+      let (defEq, valueTypeEqtype?) ← isDefEq valueType type
       if !defEq then
-        throw <| .declTypeMismatch env (.defnDecl v) vvalueType
-      pure (type, maybeCast vvalueTypeEqtype? lvl vvalueType type vvalue')
-    return (add env (.defnInfo v), {v with type, value})
+        throw <| .declTypeMismatch env (.defnDecl v) valueType
+      pure (type, maybeCast valueTypeEqtype? lvl valueType type value')
+    let v := {v with type, value}
+    return (add env (.defnInfo v), v)
 
 def addTheorem (env : Environment) (v : TheoremVal) :
     Except KernelException (Environment × TheoremVal) := do
   -- TODO(Leo): we must add support for handling tasks here
-  M.run env (safety := .safe) (lctx := {}) do
-    checkConstantVal env v.toConstantVal
+  let (type, value) ← M.run env (safety := .safe) (lctx := {}) do
+    let (type, lvl) ← checkConstantVal env v.toConstantVal
     checkNoMVarNoFVar env v.name v.value
-    let valType ← TypeChecker.check v.value v.levelParams
-    if !(← isDefEq valType v.type) then
-      throw <| .declTypeMismatch env (.thmDecl v) valType
-  return add env (.thmInfo v)
+    let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
+    let value' := value'?.getD v.value.toPExpr
+    let (defEq, valueTypeEqtype?) ← isDefEq valueType type
+    if !defEq then
+      throw <| .declTypeMismatch env (.thmDecl v) valueType
+    pure (type, maybeCast valueTypeEqtype? lvl valueType type value')
+  let v := {v with type, value}
+  return (add env (.thmInfo v), v)
 
 def addOpaque (env : Environment) (v : OpaqueVal) :
     Except KernelException (Environment × OpaqueVal) := do
-  M.run env (safety := .safe) (lctx := {}) do
-    checkConstantVal env v.toConstantVal
-    let valType ← TypeChecker.check v.value v.levelParams
-    if !(← isDefEq valType v.type) then
-      throw <| .declTypeMismatch env (.opaqueDecl v) valType
-  return add env (.opaqueInfo v)
+  let (type, value) ← M.run env (safety := .safe) (lctx := {}) do
+    let (type, lvl) ← checkConstantVal env v.toConstantVal
+    let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
+    let value' := value'?.getD v.value.toPExpr
+    let (defEq, valueTypeEqtype?) ← isDefEq valueType type
+    if !defEq then
+      throw <| .declTypeMismatch env (.opaqueDecl v) valueType
+    pure (type, maybeCast valueTypeEqtype? lvl valueType type value')
+  let v := {v with type, value}
+  return (add env (.opaqueInfo v), v)
 
 def addMutual (env : Environment) (vs : List DefinitionVal) :
     Except KernelException (Environment × List DefinitionVal) := do
   let v₀ :: _ := vs | throw <| .other "invalid empty mutual definition"
   if let .safe := v₀.safety then
     throw <| .other "invalid mutual definition, declaration is not tagged as unsafe/partial"
-  M.run env (safety := v₀.safety) (lctx := {}) do
+  let vs' ← M.run env (safety := v₀.safety) (lctx := {}) do
+    let mut vs' := #[]
     for v in vs do
       if v.safety != v₀.safety then
         throw <| .other
           "invalid mutual definition, declarations must have the same safety annotation"
-      checkConstantVal env v.toConstantVal
+      let (type, _) ← checkConstantVal env v.toConstantVal
+      vs' := vs'.append #[{v with type}]
+    pure vs'
   let mut env' := env
-  for v in vs do
-    env' := add env' (.defnInfo v)
+  for v' in vs' do
+    env' := add env' (.defnInfo v')
   M.run env (safety := v₀.safety) (lctx := {}) do
     for v in vs do
       checkNoMVarNoFVar env' v.name v.value
-      let valType ← TypeChecker.check v.value v.levelParams
-      if !(← isDefEq valType v.type) then
-        throw <| .declTypeMismatch env' (.mutualDefnDecl vs) valType
-  return env'
+      let (valueType, _) ← TypeChecker.check v.value v.levelParams
+      let (defEq, _) ← isDefEq valueType v.type.toPExpr
+      if !defEq then
+        throw <| .declTypeMismatch env' (.mutualDefnDecl vs) valueType
+  return (env', vs) -- TODO handle mutual defs (low priority)
 
 /-- Type check given declaration and add it to the environment -/
 def addDecl' (env : Environment) (decl : @& Declaration) :

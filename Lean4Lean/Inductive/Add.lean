@@ -274,6 +274,7 @@ def declareConstructors (stats : InductiveStats) (levelParams : List Name)
         numParams := stats.params.size
         numFields := assert! arity ≥ stats.params.size; arity - stats.params.size
       }
+      -- TODO if struct, add projection congruence theorems
 
 /--
 Returns true if the recursors of `indTypes` can map into any universe
