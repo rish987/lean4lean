@@ -124,6 +124,12 @@ def ensureForallCore (e : PExpr) (s : Expr) : RecEE := do
   if e.toExpr.isForall then return (e, p?)
   throw <| .funExpected (← getEnv) default s
 
+def ensureForallPure (e : PExpr) (s : Expr) : RecM PExpr := do
+  if Expr.isForall e then return e
+  let e ← whnfPure e
+  if e.toExpr.isForall then return e
+  throw <| .funExpected (← getEnv) default s
+
 /--
 Checks that `l` does not contain any level parameters not found in the context `tc`.
 -/
@@ -170,7 +176,7 @@ def inferType (e : Expr) : RecPE := fun m => m.inferType e
 def inferTypePure (e : PExpr) : RecM PExpr := fun m => m.inferTypePure e
 
 def maybeCast (p? : Option EExpr) (lvl : Level) (typLhs typRhs e : PExpr) : PExpr :=
-  p?.map (fun (p : EExpr) => Lean.mkAppN (.const `cast' [lvl]) #[typLhs, typRhs, p.toPExpr, e] |>.toPExpr) |>.getD e
+  p?.map (fun (p : EExpr) => Lean.mkAppN (.const `L4L.cast [lvl]) #[typLhs, typRhs, p.toPExpr, e] |>.toPExpr) |>.getD e
 
 /--
 Infers the type of lambda expression `e`.
@@ -441,16 +447,16 @@ def inferType' (e : Expr) : RecPE := do
       let (aType, a'?) ← inferType' a
       let (aTypeLvl, _) ← getTypeLevel (a'?.getD a.toPExpr)
 
-      let dType := Expr.bindingDomain! fType |>.toPExpr
+      let dType := Expr.bindingDomain! fType' |>.toPExpr
       -- it can be shown that if `e` is typeable as `T`, then `T` is typeable as `Sort l`
       -- for some universe level `l`, so this use of `isDefEq` is valid
       let (defEq, pa'?) ← isDefEq aType dType
       let a' := maybeCast pa'? aTypeLvl aType dType (a'?.getD a.toPExpr)
       if defEq then
         let patch := if f'?.isSome || a'?.isSome || pf'?.isSome || pa'?.isSome then .some (Expr.app f' a').toPExpr else none
-        pure ((Expr.bindingBody! fType).instantiate1 a' |>.toPExpr, patch)
+        pure ((Expr.bindingBody! fType').instantiate1 a' |>.toPExpr, patch)
       else
-        throw <| .appTypeMismatch (← getEnv) (← getLCtx) e fType aType
+        throw <| .appTypeMismatch (← getEnv) (← getLCtx) e fType' aType
     | .letE .. => inferLet e
   modify fun s => { s with inferTypeC := s.inferTypeC.insert e (r, ep?) }
   return (r, ep?)
@@ -519,7 +525,7 @@ def getProjThm (structName : Name) (structType : PExpr) (projIdx : Nat) (projTyp
   let f ← withLCtx ((← getLCtx).mkLocalDecl ids `x structType default) do
     let svar := (Expr.fvar ids).toPExpr
     pure $ (← getLCtx).mkLambda #[svar] (.proj structName projIdx svar) |>.toPExpr
-  pure $ (mkAppN (.const `appArgHEq [structLvl, projLvl]) #[structType, projType, f]).toPExpr
+  pure $ (mkAppN (.const `L4L.appArgHEq [structLvl, projLvl]) #[structType, projType, f]).toPExpr
 
 def appProjThm? (structName : Name) (projIdx : Nat) (struct structN : PExpr) (structEqstructN? : Option EExpr) : RecM (Option EExpr) := do
   structEqstructN?.mapM fun structEqstructN => do
@@ -654,7 +660,7 @@ def reduceBinNatOp (op : Name) (f : Nat → Nat → Nat) (a b : PExpr) : RecM (O
   let ret? := if pa?.isSome || pb?.isSome then
       let pa := pa?.getD (mkHRefl (.succ .zero) (Expr.const `Nat []).toPExpr a')
       let pb := pb?.getD (mkHRefl (.succ .zero) (Expr.const `Nat []).toPExpr b')
-      .some $ Lean.mkAppN (.const `appHEqBinNatFn []) #[.const `Nat [], .const op [], a, a', b, b', pa, pb] |>.toEExprMerge pa pb
+      .some $ Lean.mkAppN (.const `L4L.appHEqBinNatFn []) #[.const `Nat [], .const `Nat [], .const op [], a, a', b, b', pa, pb] |>.toEExprMerge pa pb
     else
       none
   return some <| ((Expr.lit <| .natVal <| f v1 v2).toPExpr, ret?)
@@ -673,7 +679,7 @@ def reduceBinNatPred (op : Name) (f : Nat → Nat → Bool) (a b : PExpr) : RecM
   let ret? := if pa?.isSome || pb?.isSome then
       let pa := pa?.getD (mkHRefl (.succ .zero) (Expr.const `Nat []).toPExpr a')
       let pb := pb?.getD (mkHRefl (.succ .zero) (Expr.const `Nat []).toPExpr b')
-      .some $ Lean.mkAppN (.const `appHEqBinNatFn []) #[.const `Bool [], .const op [], a, a', b, b', pa, pb] |>.toEExprMerge pa pb
+      .some $ Lean.mkAppN (.const `L4L.appHEqBinNatFn []) #[.const `Nat [], .const `Bool [], .const op [], a, a', b, b', pa, pb] |>.toEExprMerge pa pb
     else
       none
   return (toExpr (f v1 v2) |>.toPExpr, ret?)
@@ -715,6 +721,7 @@ def isDefEqBinder (binDatas : Array ((Name × PExpr × PExpr × BinderInfo) × (
 (f : PExpr → PExpr → Option EExpr → Array PExpr → Array PExpr → Array FVarId → Array (Option EExpr) → RecM (Option T))
 : RecM (Bool × (Option T)) := do
   let rec loop idx tvars svars teqsvars domEqs : RecM (Bool × (Option T)) := do
+    dbg_trace s!"DBG[34]: TypeChecker.lean:718: idx={idx}/{binDatas.size}"
     let ((tName, tDom, tBody, tBi), (sName, sDom, sBody, sBi)) := binDatas.get! idx
     let (tType?, sType?, p?) ← if tDom != sDom then
       let tType := tDom.instantiateRev tvars
@@ -796,7 +803,7 @@ def isDefEqLambda (t s : PExpr) : RecB :=
           faEqgb? := .none
         else
           let hfg := (← getLCtx).mkForall #[a, b, .fvar idaEqb] faEqgb
-          faEqgb? := .some $ Lean.mkAppN (.const `lambdaHEq [u, v]) #[A, B, U, V, f, g, hAB, hfg] |>.toEExpr data
+          faEqgb? := .some $ Lean.mkAppN (.const `L4L.lambdaHEq [u, v]) #[A, B, U, V, f, g, hAB, hfg] |>.toEExpr data
 
       fa := f
       gb := g
@@ -819,22 +826,21 @@ recurses on the bodies, substituting in a new free variable for that binder
 (this substitution is delayed for efficiency purposes using the `subst`
 parameter). Otherwise, does a normal defeq check.
 -/
-def isDefEqForall' (t s : PExpr) (maxBinds : Option Nat := none) : RecM (Bool × Option (Array ForallData × Option EExpr)) :=
-  let rec getData t s remBinds := 
-    match t, s, remBinds with
-    | .forallE tName tDom tBody tBi, .forallE sName sDom sBody sBi, some (n + 1) => 
-      #[((tName, tDom.toPExpr, tBody.toPExpr, tBi), (sName, sDom.toPExpr, sBody.toPExpr, sBi))] ++ getData tBody sBody (some n)
-    | .forallE tName tDom tBody tBi, .forallE sName sDom sBody sBi, none => 
-      #[((tName, tDom.toPExpr, tBody.toPExpr, tBi), (sName, sDom.toPExpr, sBody.toPExpr, sBi))] ++ getData tBody sBody none
-    | _, _, _ =>
+def isDefEqForall' (t s : PExpr) : RecM (Bool × Option (Array ForallData × Option EExpr)) :=
+  let rec getData t s := 
+    match t, s with
+    | .forallE tName tDom tBody tBi, .forallE sName sDom sBody sBi => 
+      #[((tName, tDom.toPExpr, tBody.toPExpr, tBi), (sName, sDom.toPExpr, sBody.toPExpr, sBi))] ++ getData tBody sBody
+    | _, _ =>
       #[]
-  isDefEqBinder (getData t.toExpr s.toExpr maxBinds) fun Ua Vb UaEqVb? as bs aEqbs pAEqBs? => do
+  isDefEqBinder (getData t.toExpr s.toExpr) fun Ua Vb UaEqVb? as bs aEqbs pAEqBs? => do
     let mut UaEqVb? := UaEqVb?
     let mut datas := #[]
     let mut Ua := Ua
     let mut Vb := Vb
     for (((a, b), idaEqb), pAEqB?) in as.zip bs |>.zip aEqbs |>.zip pAEqBs? do
       let (UaTypeLvl, UaType) ← getTypeLevel Ua
+      let UaType ← whnfPure UaType
       let UaLvl := UaType.toExpr.sortLevel!
 
       let UaEqVb := UaEqVb?.getD (mkHRefl UaTypeLvl UaType Ua)
@@ -858,7 +864,7 @@ def isDefEqForall' (t s : PExpr) (maxBinds : Option Nat := none) : RecM (Bool ×
         if data.isEmpty then
           UaEqVb? := .none
         else
-          UaEqVb? := .some $ Lean.mkAppN (.const `forallHEq [u, v]) #[A, B, U, V, hAB, hUV] |>.toEExpr data
+          UaEqVb? := .some $ Lean.mkAppN (.const `L4L.forallHEq [u, v]) #[A, B, U, V, hAB, hUV] |>.toEExpr data
 
       datas := datas.push {A, B, hAB, hUV, hUVData, U, V, u, v}
       Ua := U
@@ -949,10 +955,15 @@ def isDefEqApp (t s : PExpr) (tfEqsf? : Option (Option EExpr) := none) (targsEqs
     taEqsas := taEqsas.push p?
     i := i + 1
 
-  let tfT ← inferTypePure tf
-  let sfT ← inferTypePure sf
+  let mut tfT ← inferTypePure tf
+  let mut sfT ← inferTypePure sf
 
-  let (true, .some (datas, _)) ← isDefEqForall' tfT sfT (maxBinds := some tArgs.size) | unreachable!
+  sorry
+
+  let (true, .some (datas, _)) ← isDefEqForall' tfT sfT | unreachable!
+  if datas.size != tArgs.size then
+    dbg_trace s!"DBG[30]: TypeChecker.lean:956: datas.size={datas.size}"
+    dbg_trace s!"DBG[31]: TypeChecker.lean:957: tArgs.size={tArgs.size}"
   assert! datas.size == tArgs.size
 
   for ((({A, B, hAB, hUV, hUVData, U, V, u, v}, ta), sa), taEqsa?) in datas.zip tArgs |>.zip sArgs |>.zip taEqsas do
@@ -961,7 +972,7 @@ def isDefEqApp (t s : PExpr) (tfEqsf? : Option (Option EExpr) := none) (targsEqs
       let (taLvl, taType) ← getTypeLevel ta
       let ret := ret?.getD (mkRefl tfLvl tfType tf)
       let taEqsa := taEqsa?.getD (mkRefl taLvl taType ta)
-      ret? := .some $ Lean.mkAppN (.const `appHEq [u, v])
+      ret? := .some $ Lean.mkAppN (.const `L4L.appHEq [u, v])
         #[A, B, U, V, hAB, hUV, tf, sf, ta, sa, ret, taEqsa] |>.toEExpr (.mergeN #[taEqsa.data, hUVData, hAB.data])
     tf := tf.toExpr.app ta |>.toPExpr
     sf := sf.toExpr.app sa |>.toPExpr
@@ -1006,7 +1017,7 @@ def tryEtaStruct (t s : PExpr) : RecB := do
 
 def appPrfIrrel (P Q : PExpr) (PEqQ? : Option EExpr) (p q : PExpr) : RecM EExpr := do
   let PEqQ := PEqQ?.getD (mkRefl 1 (Expr.sort 0).toPExpr P)
-  return Lean.mkAppN (.const `prfIrrelHEq []) #[P, Q, PEqQ, p, q] |>.toEExpr (PEqQ.data.merge {usedProofIrrel := true})
+  return Lean.mkAppN (.const `L4L.prfIrrelHEq []) #[P, Q, PEqQ, p, q] |>.toEExpr (PEqQ.data.merge {usedProofIrrel := true})
 
 def reduceRecursor (e : PExpr) (cheapRec cheapProj : Bool) : RecM (Option (PExpr × Option EExpr)) := do
   let env ← getEnv
@@ -1187,12 +1198,15 @@ def lazyDeltaReductionStep (ltn lsn : PExpr) : RecM ReductionStatus := do
     | (.true, pnltnEqnlsn?) => do pure $ .bool .true (← appHEqTrans? ltn nltn lsn pltnEqnltn? <| ← appHEqTrans? nltn nlsn lsn pnltnEqnlsn? <| ← appHEqSymm? lsn nlsn plsnEqnlsn?)
     | (.false, _) => pure $ .bool false none
   let deltaCont_t := do
+    pure () -- FIXME why is this needed to block `delta` below from being run immediately in the outer monad context?
     let (nltn, pltnEqnltn?) ← delta ltn
     cont nltn lsn pltnEqnltn? none
   let deltaCont_s := do
+    pure ()
     let (nlsn, plsnEqnlsn?) ← delta lsn
     cont ltn nlsn none plsnEqnlsn?
   let deltaCont_both := do
+    pure ()
     let (nltn, pltnEqnltn?) ← delta ltn
     let (nlsn, plsnEqnlsn?) ← delta lsn
     cont nltn nlsn pltnEqnltn? plsnEqnlsn?

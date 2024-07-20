@@ -21,13 +21,14 @@ def checkConstantVal (env : Environment) (v : ConstantVal) (allowPrimitive := fa
   pure (type'', lvl)
 
 def addAxiom (env : Environment) (v : AxiomVal) :
-    Except KernelException (Environment × AxiomVal) := do
+    Except KernelException Environment := do
   let (type, _) ← (checkConstantVal env v.toConstantVal).run env
     (safety := if v.isUnsafe then .unsafe else .safe)
-  return (add env (.axiomInfo v), {v with type})
+  let v := {v with type}
+  return add env (.axiomInfo v)
 
 def addDefinition (env : Environment) (v : DefinitionVal) :
-    Except KernelException (Environment × DefinitionVal) := do
+    Except KernelException Environment := do
   if let .unsafe := v.safety then
     -- Meta definition can be recursive.
     -- So, we check the header, add, and then type check the body.
@@ -39,7 +40,7 @@ def addDefinition (env : Environment) (v : DefinitionVal) :
       let (defEq, _) ← isDefEq valueType type
       if !defEq then
         throw <| .declTypeMismatch env' (.defnDecl v) valueType
-    return (env', v) -- TODO handle unsafe defs (low priority)
+    return env' -- TODO handle unsafe defs (low priority)
   else
     let (type, value) ← M.run env (safety := .safe) (lctx := {}) do
       let (type, lvl) ← checkConstantVal env v.toConstantVal (← checkPrimitiveDef env v)
@@ -51,10 +52,10 @@ def addDefinition (env : Environment) (v : DefinitionVal) :
         throw <| .declTypeMismatch env (.defnDecl v) valueType
       pure (type, maybeCast valueTypeEqtype? lvl valueType type value')
     let v := {v with type, value}
-    return (add env (.defnInfo v), v)
+    return add env (.defnInfo v)
 
 def addTheorem (env : Environment) (v : TheoremVal) :
-    Except KernelException (Environment × TheoremVal) := do
+    Except KernelException Environment := do
   -- TODO(Leo): we must add support for handling tasks here
   let (type, value) ← M.run env (safety := .safe) (lctx := {}) do
     let (type, lvl) ← checkConstantVal env v.toConstantVal
@@ -66,10 +67,10 @@ def addTheorem (env : Environment) (v : TheoremVal) :
       throw <| .declTypeMismatch env (.thmDecl v) valueType
     pure (type, maybeCast valueTypeEqtype? lvl valueType type value')
   let v := {v with type, value}
-  return (add env (.thmInfo v), v)
+  return add env (.thmInfo v)
 
 def addOpaque (env : Environment) (v : OpaqueVal) :
-    Except KernelException (Environment × OpaqueVal) := do
+    Except KernelException Environment := do
   let (type, value) ← M.run env (safety := .safe) (lctx := {}) do
     let (type, lvl) ← checkConstantVal env v.toConstantVal
     let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
@@ -79,10 +80,10 @@ def addOpaque (env : Environment) (v : OpaqueVal) :
       throw <| .declTypeMismatch env (.opaqueDecl v) valueType
     pure (type, maybeCast valueTypeEqtype? lvl valueType type value')
   let v := {v with type, value}
-  return (add env (.opaqueInfo v), v)
+  return add env (.opaqueInfo v)
 
 def addMutual (env : Environment) (vs : List DefinitionVal) :
-    Except KernelException (Environment × List DefinitionVal) := do
+    Except KernelException Environment := do
   let v₀ :: _ := vs | throw <| .other "invalid empty mutual definition"
   if let .safe := v₀.safety then
     throw <| .other "invalid mutual definition, declaration is not tagged as unsafe/partial"
@@ -105,28 +106,30 @@ def addMutual (env : Environment) (vs : List DefinitionVal) :
       let (defEq, _) ← isDefEq valueType v.type.toPExpr
       if !defEq then
         throw <| .declTypeMismatch env' (.mutualDefnDecl vs) valueType
-  return (env', vs) -- TODO handle mutual defs (low priority)
+  return env' -- TODO handle mutual defs (low priority)
 
 /-- Type check given declaration and add it to the environment -/
 def addDecl' (env : Environment) (decl : @& Declaration) :
-    Except KernelException (Environment × Declaration) := do
+    Except KernelException Environment := do
   match decl with
   | .axiomDecl v =>
-    let (env, val) ← addAxiom env v
-    pure (env, .axiomDecl val)
+    let env ← addAxiom env v
+    pure env
   | .defnDecl v =>
-    let (env, val) ← addDefinition env v
-    pure (env, .defnDecl val)
+    let env ← addDefinition env v
+    let some (.defnInfo v') := env.find? v.name | throw $ .other "unreachable"
+    dbg_trace s!"value of {v.name}: {v'.value}"
+    pure env
   | .thmDecl v =>
-    let (env, val) ← addTheorem env v
-    pure (env, .thmDecl val)
+    let env ← addTheorem env v
+    pure env
   | .opaqueDecl v =>
-    let (env, val) ← addOpaque env v
-    pure (env, .opaqueDecl val)
+    let env ← addOpaque env v
+    pure env
   | .mutualDefnDecl v =>
-    let (env, val) ← addMutual env v
-    pure (env, .mutualDefnDecl val)
-  | .quotDecl => pure (← addQuot env, Declaration.quotDecl)
+    let env ← addMutual env v
+    pure env
+  | .quotDecl => addQuot env
   | .inductDecl lparams nparams types isUnsafe =>
     let allowPrimitive ← checkPrimitiveInductive env lparams nparams types isUnsafe
-    pure (← addInductive env lparams nparams types isUnsafe allowPrimitive, decl) -- TODO handle any possible patching in inductive type declarations (low priority)
+    addInductive env lparams nparams types isUnsafe allowPrimitive -- TODO handle any possible patching in inductive type declarations (low priority)

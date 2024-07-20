@@ -103,7 +103,7 @@ def inductiveReduceRec [Monad m] (env : Environment) (e : PExpr)
   let majorIdx := info.getMajorIdx
   let some major' := recArgs[majorIdx]? | return none
   let major := major'.toPExpr
-  let (majorK, majorEqmajorK?) := if info.k then ← toCtorWhenK env meth info major else (major, none)
+  let (majorK, majorEqmajorK?) ← if info.k then toCtorWhenK env meth info major else pure (major, none)
   let (majorKWhnf, majorKEqmajorKWhnf?) ← meth.whnf majorK
   let majorEqmajorKWhnf? ← meth.appHEqTrans? major majorK majorKWhnf majorEqmajorK? majorKEqmajorKWhnf?
   let (majorMaybeCtor, majorKWhnfEqMajorMaybeCtor?) ← match majorKWhnf.toExpr with

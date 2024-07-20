@@ -53,7 +53,7 @@ def mergeData (p1 p2 : EExpr) : EExprData :=
 def mergeDataN (p : EExpr) (ps : Array EExpr) : EExprData := p.data.merge $ EExprData.mergeN (ps.map (·.data))
 
 def toExpr : EExpr → Expr := EExpr.expr
-def toPExpr (e : EExpr) : PExpr := assert! e.data.isEmpty
+def toPExpr (e : EExpr) : PExpr := assert! e.data.usedFVarEqs.isEmpty
   .mk e.expr
 
 end EExpr
