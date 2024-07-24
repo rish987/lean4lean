@@ -1,6 +1,7 @@
 import Lean
 import Lean4Less.Replay
-import Lean4Less.Util
+import Lean4Lean.Util
+import Lean4Lean.Commands
 
 open Lean
 

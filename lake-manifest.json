@@ -9,6 +9,12 @@
    "manifestFile": "lake-manifest.json",
    "inputRev": "v4.7.0-rc2",
    "inherited": false,
+   "configFile": "lakefile.lean"},
+  {"type": "path",
+   "name": "lean4lean",
+   "manifestFile": "lake-manifest.json",
+   "inherited": false,
+   "dir": "/home/rish/lean4lean/",
    "configFile": "lakefile.lean"}],
- "name": "lean4lean",
+ "name": "lean4less",
  "lakeDir": ".lake"}

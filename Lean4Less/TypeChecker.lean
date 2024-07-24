@@ -1,13 +1,16 @@
-import Lean4Less.Declaration
-import Lean4Less.Level
 import Lean4Less.Quot
 import Lean4Less.Inductive.Reduce
-import Lean4Less.Instantiate
-import Lean4Less.ForEachExprV
-import Lean4Less.EquivManager
 import Lean4Less.PExpr
 
-namespace Lean
+import Lean4Lean.Environment
+import Lean4Lean.ForEachExprV
+import Lean4Lean.EquivManager
+import Lean4Lean.Declaration
+import Lean4Lean.Level
+import Lean4Lean.Instantiate
+
+namespace Lean4Less
+open Lean
 
 abbrev InferCache := HashMap Expr (PExpr × Option PExpr)
 abbrev InferCacheP := HashMap Expr (PExpr)
@@ -91,7 +94,7 @@ def whnf (e : PExpr) : RecEE := fun m => m.whnf e
 
 def whnfPure (e : PExpr) : RecM PExpr := fun m => m.whnfPure e
 
-@[inline] def withLCtx [MonadWithReaderOf PLocalContext m] (lctx : PLocalContext) (x : m α) : m α :=
+@[inline] def withLCtx [MonadWithReaderOf LocalContext m] (lctx : LocalContext) (x : m α) : m α :=
   withReader (fun _ => lctx) x
 
 @[inline] def withEqFVar [MonadWithReaderOf (HashMap (FVarId × FVarId) FVarId) m] (idt ids : FVarId) (eq : FVarId) (x : m α) : m α :=
@@ -149,7 +152,7 @@ def inferConstant (tc : Context) (name : Name) (ls : List Level) (inferOnly : Bo
     Except KernelException PExpr := do
   let e := Expr.const name ls
   -- should be okay as the environment should only contain patched constants
-  let info ← tc.env.get name
+  let info ← Environment.get tc.env name
   let ps := info.levelParams
   if ps.length != ls.length then
     throw <| .other s!"incorrect number of universe levels parameters for '{e

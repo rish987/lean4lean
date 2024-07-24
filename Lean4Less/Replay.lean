@@ -1,63 +1,13 @@
 import Lean.CoreM
 import Lean.Util.FoldConsts
 import Lean4Less.Environment
+import Lean4Lean.Replay
 
 open Lean
 
-namespace Lean
-
-def HashMap.keyNameSet (m : HashMap Name α) : NameSet :=
-  m.fold (fun s n _ => s.insert n) {}
-
-namespace Environment
-
-def importsOf (env : Environment) (n : Name) : Array Import :=
-  if n = env.header.mainModule then
-    env.header.imports
-  else match env.getModuleIdx? n with
-    | .some idx => env.header.moduleData[idx.toNat]!.imports
-    | .none => #[]
-
-end Environment
-
-namespace NameSet
-
-def ofList (names : List Name) : NameSet :=
-  names.foldl (fun s n => s.insert n) {}
-
-end NameSet
-
-/-- Like `Expr.getUsedConstants`, but produce a `NameSet`. -/
-def Expr.getUsedConstants' (e : Expr) : NameSet :=
-  e.foldConsts {} fun c cs => cs.insert c
-
-namespace ConstantInfo
-
-/-- Return all names appearing in the type or value of a `ConstantInfo`. -/
-def getUsedConstants (c : ConstantInfo) : NameSet :=
-  c.type.getUsedConstants' ++ match c.value? with
-  | some v => v.getUsedConstants'
-  | none => match c with
-    | .inductInfo val => .ofList val.ctors
-    | .opaqueInfo val => val.value.getUsedConstants'
-    | .ctorInfo val => ({} : NameSet).insert val.name
-    | .recInfo val => .ofList val.all
-    | _ => {}
-
-end ConstantInfo
-
-end Lean
-
-def Lean.Declaration.name : Declaration → String
-  | .axiomDecl d => s!"axiomDecl {d.name}"
-  | .defnDecl d => s!"defnDecl {d.name}"
-  | .thmDecl d => s!"thmDecl {d.name}"
-  | .opaqueDecl d => s!"opaqueDecl {d.name}"
-  | .quotDecl => s!"quotDecl"
-  | .mutualDefnDecl d => s!"mutualDefnDecl {d.map (·.name)}"
-  | .inductDecl _ _ d _ => s!"inductDecl {d.map (·.name)}"
-
 namespace Lean4Less
+
+open Lean4Less.Environment
 
 structure Context where
   newConstants : HashMap Name ConstantInfo
@@ -93,7 +43,7 @@ def addDecl (d : Declaration) : M Unit := do
   if (← read).verbose then
     println! "adding {d.name}"
   let t1 ← IO.monoMsNow
-  match (← get).env.addDecl' d with
+  match addDecl' (← get).env d with
   | .ok env =>
     let t2 ← IO.monoMsNow
     if t2 - t1 > 1000 then
@@ -258,9 +208,3 @@ unsafe def replayFromFresh (module : Name)
     discard <| replay ctx ((← mkEmptyEnvironment).setMainModule module) decl
 
 end Lean4Less
-
-register_option l4l.check : Bool := {
-  defValue := false
-  group := "l4l"
-  descr := "run secondary Lean4Less typechecker on definintions"
-}

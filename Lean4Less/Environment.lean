@@ -3,11 +3,13 @@ import Lean4Less.Quot
 import Lean4Less.Inductive.Add
 import Lean4Less.Primitive
 
-namespace Lean
+namespace Lean4Less
 namespace Environment
 open TypeChecker
 
 open private add from Lean.Environment
+open Lean
+open Lean.Environment
 
 def checkConstantVal (env : Environment) (v : ConstantVal) (allowPrimitive := false) : M (PExpr × Level) := do
   checkName env v.name allowPrimitive

@@ -1,8 +1,8 @@
 import Lean4Less.TypeChecker
 
-namespace Lean
-namespace Environment
-open TypeChecker
+namespace Lean4Less
+open Lean
+open Lean4Less.TypeChecker
 
 open private add from Lean.Environment
 
