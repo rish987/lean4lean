@@ -1,4 +1,4 @@
-import Lean4Lean.TypeChecker
+import Lean4Less.TypeChecker
 
 namespace Lean
 namespace Environment

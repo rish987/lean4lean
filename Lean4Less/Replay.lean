@@ -1,6 +1,6 @@
 import Lean.CoreM
 import Lean.Util.FoldConsts
-import Lean4Lean.Environment
+import Lean4Less.Environment
 
 open Lean
 
@@ -57,7 +57,7 @@ def Lean.Declaration.name : Declaration → String
   | .mutualDefnDecl d => s!"mutualDefnDecl {d.map (·.name)}"
   | .inductDecl _ _ d _ => s!"inductDecl {d.map (·.name)}"
 
-namespace Lean4Lean
+namespace Lean4Less
 
 structure Context where
   newConstants : HashMap Name ConstantInfo
@@ -136,8 +136,14 @@ partial def replayConstant (name : Name) : M Unit := do
     -- Check that this name is still pending: a mutual block may have taken care of it.
     if (← get).pending.contains name then
       match ci with
-      | .defnInfo   info =>
+      | .defnInfo   info => do
         addDecl (Declaration.defnDecl   info)
+        let env := (← get).env
+        let some (.defnInfo v) := env.find? info.name | unreachable!
+        let options := default
+        let options := KVMap.set options `pp.proofs true
+        dbg_trace s!"value of {v.name}: {← (PrettyPrinter.ppExprLegacy env default default options v.type)}
+{← (PrettyPrinter.ppExprLegacy env default default options v.value)}"
       | .thmInfo    info =>
         addDecl (Declaration.thmDecl    info)
       | .axiomInfo  info =>
@@ -251,10 +257,10 @@ unsafe def replayFromFresh (module : Name)
     let ctx := { newConstants := env.constants.map₁, verbose, compare }
     discard <| replay ctx ((← mkEmptyEnvironment).setMainModule module) decl
 
-end Lean4Lean
+end Lean4Less
 
 register_option l4l.check : Bool := {
   defValue := false
   group := "l4l"
-  descr := "run secondary Lean4Lean typechecker on definintions"
+  descr := "run secondary Lean4Less typechecker on definintions"
 }

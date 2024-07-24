@@ -3,12 +3,12 @@ Copyright (c) 2021 Mario Carneiro. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Mario Carneiro
 -/
-import Lean4Lean.Std.Basic
+import Lean4Less.Std.Basic
 
 local macro_rules | `(tactic| rfl) => `(tactic| exact Nat.le_refl _)
 attribute [-simp] Array.get_eq_getElem
 
-namespace Lean4Lean
+namespace Lean4Less
 
 structure UFNode where
   parent : Nat

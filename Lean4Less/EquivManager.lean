@@ -1,4 +1,4 @@
-import Lean4Lean.UnionFind
+import Lean4Less.UnionFind
 
 namespace Lean
 
@@ -6,7 +6,7 @@ abbrev EquivManager.NodeRef := Nat
 open EquivManager
 
 structure EquivManager where
-  uf : Lean4Lean.UnionFind := {}
+  uf : Lean4Less.UnionFind := {}
   toNodeMap : ExprMap NodeRef := {}
 
 namespace EquivManager

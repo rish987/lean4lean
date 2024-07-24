@@ -1,5 +1,4 @@
-import Lean4Lean.TypeChecker
-import Lean4Lean.Stream
+import Lean4Less.TypeChecker
 
 namespace Lean
 

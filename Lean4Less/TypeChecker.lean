@@ -1,11 +1,11 @@
-import Lean4Lean.Declaration
-import Lean4Lean.Level
-import Lean4Lean.Quot
-import Lean4Lean.Inductive.Reduce
-import Lean4Lean.Instantiate
-import Lean4Lean.ForEachExprV
-import Lean4Lean.EquivManager
-import Lean4Lean.PExpr
+import Lean4Less.Declaration
+import Lean4Less.Level
+import Lean4Less.Quot
+import Lean4Less.Inductive.Reduce
+import Lean4Less.Instantiate
+import Lean4Less.ForEachExprV
+import Lean4Less.EquivManager
+import Lean4Less.PExpr
 
 namespace Lean
 
@@ -721,7 +721,6 @@ def isDefEqBinder (binDatas : Array ((Name × PExpr × PExpr × BinderInfo) × (
 (f : PExpr → PExpr → Option EExpr → Array PExpr → Array PExpr → Array FVarId → Array (Option EExpr) → RecM (Option T))
 : RecM (Bool × (Option T)) := do
   let rec loop idx tvars svars teqsvars domEqs : RecM (Bool × (Option T)) := do
-    dbg_trace s!"DBG[34]: TypeChecker.lean:718: idx={idx}/{binDatas.size}"
     let ((tName, tDom, tBody, tBi), (sName, sDom, sBody, sBi)) := binDatas.get! idx
     let (tType?, sType?, p?) ← if tDom != sDom then
       let tType := tDom.instantiateRev tvars
@@ -958,20 +957,31 @@ def isDefEqApp (t s : PExpr) (tfEqsf? : Option (Option EExpr) := none) (targsEqs
   let mut tfT ← inferTypePure tf
   let mut sfT ← inferTypePure sf
 
-  sorry
+  let rec alignForall t s remBinds := do
+    if let remBinds' + 1 := remBinds then
+      let t ← ensureForallPure t default
+      let s ← ensureForallPure s default
+      match t.toExpr, s.toExpr with
+      | .forallE tName tDom tBody tBi, .forallE sName sDom sBody sBi => 
+        let (tb, sb) ← alignForall tBody.toPExpr sBody.toPExpr remBinds'
+        pure (Expr.forallE tName tDom tb tBi |>.toPExpr, Expr.forallE sName sDom sb sBi |>.toPExpr)
+      | _, _ =>
+        unreachable!
+    else
+      pure (t, s)
 
+  (tfT, sfT) ← alignForall tfT sfT tArgs.size
+
+  -- TODO(perf) restrict data collection to the case of `taEqsa?.isSome || ret?.isSome`
   let (true, .some (datas, _)) ← isDefEqForall' tfT sfT | unreachable!
-  if datas.size != tArgs.size then
-    dbg_trace s!"DBG[30]: TypeChecker.lean:956: datas.size={datas.size}"
-    dbg_trace s!"DBG[31]: TypeChecker.lean:957: tArgs.size={tArgs.size}"
   assert! datas.size == tArgs.size
 
   for ((({A, B, hAB, hUV, hUVData, U, V, u, v}, ta), sa), taEqsa?) in datas.zip tArgs |>.zip sArgs |>.zip taEqsas do
     if taEqsa?.isSome || ret?.isSome then
       let (tfLvl, tfType) ← getTypeLevel tf
       let (taLvl, taType) ← getTypeLevel ta
-      let ret := ret?.getD (mkRefl tfLvl tfType tf)
-      let taEqsa := taEqsa?.getD (mkRefl taLvl taType ta)
+      let ret := ret?.getD (mkHRefl tfLvl tfType tf)
+      let taEqsa := taEqsa?.getD (mkHRefl taLvl taType ta)
       ret? := .some $ Lean.mkAppN (.const `L4L.appHEq [u, v])
         #[A, B, U, V, hAB, hUV, tf, sf, ta, sa, ret, taEqsa] |>.toEExpr (.mergeN #[taEqsa.data, hUVData, hAB.data])
     tf := tf.toExpr.app ta |>.toPExpr

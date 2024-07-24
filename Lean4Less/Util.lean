@@ -14,6 +14,7 @@ namespace Deps
 
   structure State where
     map : HashMap Name ConstantInfo := {}
+
   abbrev DepsM := ReaderT Context <| StateRefT State IO
 
   @[inline] def DepsM.run (x : DepsM α) (ctx : Context) (s : State := {}) : MetaM (α × State) :=

@@ -1,12 +1,12 @@
 import Lean
-import Lean4Lean.Replay
-import Lean4Lean.Util
+import Lean4Less.Replay
+import Lean4Less.Util
 
 open Lean
 
-namespace Lean4Lean
+namespace Lean4Less
 
-def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (printErr := false) : IO Lean.NameSet := do
+def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (printErr := false) : IO (Lean.NameSet × Environment) := do
   let mut onlyConstsToTrans : Lean.NameSet := default
 
   -- constants that should be skipped on account of already having been typechecked
@@ -28,7 +28,7 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (printErr :=
         for skipConst in skippedConsts do
           map := map.erase skipConst
 
-        modEnv ← Lean4Lean.replay {newConstants := map} modEnv 
+        modEnv ← Lean4Less.replay {newConstants := map} modEnv 
         skipConsts := skipConsts.union mapConsts -- TC success, so want to skip in future runs (already in environment)
       onlyConstsToTrans := onlyConstsToTrans.insert const
     catch
@@ -36,13 +36,24 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (printErr :=
       if printErr then
         dbg_trace s!"Error typechecking constant `{const}`: {e.toString}"
       errConsts := errConsts.insert const
-  pure onlyConstsToTrans
+  pure (onlyConstsToTrans, modEnv)
 
-end Lean4Lean
+end Lean4Less
+
+def transL4L (n : Name) : Lean.Elab.Command.CommandElabM Environment := do
+  let (_, env) ← Lean4Less.checkConstants (printErr := true) (← getEnv) (.insert default n)
+  let some (.defnInfo v) := env.find? n | unreachable!
+  let options := default
+  let options := KVMap.set options `pp.proofs true
+  IO.println s!"{v.name}: {← (PrettyPrinter.ppExprLegacy env default default options v.type)}
+{← (PrettyPrinter.ppExprLegacy env default default options v.value)}"
+  pure env
+
+elab "#trans_l4l " i:ident : command => do
+  _ ← transL4L i.getId
 
 elab "#check_l4l " i:ident : command => do
-  let env ← getEnv
-  discard $ Lean4Lean.checkConstants (printErr := true) env (.insert default i.getId)
+  let env ← transL4L i.getId
   -- match macroRes with
   -- | some (name, _) => logInfo s!"Next step is a macro: {name.toString}"
   -- | none =>

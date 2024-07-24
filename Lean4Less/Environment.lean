@@ -1,7 +1,7 @@
-import Lean4Lean.TypeChecker
-import Lean4Lean.Quot
-import Lean4Lean.Inductive.Add
-import Lean4Lean.Primitive
+import Lean4Less.TypeChecker
+import Lean4Less.Quot
+import Lean4Less.Inductive.Add
+import Lean4Less.Primitive
 
 namespace Lean
 namespace Environment
@@ -118,7 +118,6 @@ def addDecl' (env : Environment) (decl : @& Declaration) :
   | .defnDecl v =>
     let env ← addDefinition env v
     let some (.defnInfo v') := env.find? v.name | throw $ .other "unreachable"
-    dbg_trace s!"value of {v.name}: {v'.value}"
     pure env
   | .thmDecl v =>
     let env ← addTheorem env v

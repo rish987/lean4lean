@@ -1,8 +1,8 @@
 import Std.Tactic.OpenPrivate
-import Lean4Lean.Environment.Basic
-import Lean4Lean.Expr
-import Lean4Lean.PExpr
-import Lean4Lean.LocalContext
+import Lean4Less.Environment.Basic
+import Lean4Less.Expr
+import Lean4Less.PExpr
+import Lean4Less.LocalContext
 
 namespace Lean
 

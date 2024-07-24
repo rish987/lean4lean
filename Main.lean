@@ -5,11 +5,13 @@ Authors: Scott Morrison
 -/
 import Lean.CoreM
 import Lean.Util.FoldConsts
-import Lean4Lean.Environment
-import Lean4Lean.Replay
+import Lean4Less.Environment
+import Lean4Less.Replay
 
 open Lean
-open Lean4Lean
+open Lean4Less
+
+def outDir : System.FilePath := System.mkFilePath [".", "out"]
 
 /--
 Run as e.g. `lake exe lean4lean` to check everything on the Lean search path,
@@ -39,10 +41,12 @@ unsafe def main (args : List String) : IO UInt32 := do
       if fresh then
         throw <| IO.userError "--fresh flag is only valid when specifying a single module"
       let sp ← searchPathRef.get
-      let mut tasks := #[]
+      let sp := [sp[0]!] -- FIXME
+      let mut tasks : Array (Name × Task (Except IO.Error Unit)) := #[]
       for path in (← SearchPath.findAllWithExt sp "olean") do
+        dbg_trace s!"DBG[2]: Main.lean:44: m={path}"
         if let some m ← searchModuleNameOfFileName path sp then
-          tasks := tasks.push (m, ← IO.asTask (replayFromImports m verbose compare))
+          replayFromImports m verbose compare
       for (m, t) in tasks do
         if let .error e := t.get then
           IO.eprintln s!"lean4lean found a problem in {m}"
