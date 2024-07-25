@@ -19,32 +19,35 @@ def checkConstantVal (env : Environment) (v : ConstantVal) (allowPrimitive := fa
   let type' := type'?.getD v.type.toPExpr
   let (sort, typeTypeEqSort?) ← ensureSort typeType type'
   let .sort lvl := sort.toExpr | unreachable!
-  let type'' := maybeCast typeTypeEqSort? lvl.succ typeType sort type'
+  let type'' ← maybeCast typeTypeEqSort? lvl.succ typeType sort type'
   pure (type'', lvl)
 
-def addAxiom (env : Environment) (v : AxiomVal) :
-    Except KernelException Environment := do
+def patchAxiom (env : Environment) (v : AxiomVal) :
+    Except KernelException ConstantInfo := do
   let (type, _) ← (checkConstantVal env v.toConstantVal).run env
     (safety := if v.isUnsafe then .unsafe else .safe)
   let v := {v with type}
-  return add env (.axiomInfo v)
+  return .axiomInfo v
 
-def addDefinition (env : Environment) (v : DefinitionVal) :
-    Except KernelException Environment := do
+def patchDefinition (env : Environment) (v : DefinitionVal) :
+    Except KernelException ConstantInfo := do
   if let .unsafe := v.safety then
     -- Meta definition can be recursive.
     -- So, we check the header, add, and then type check the body.
-    let (type, _) ← (checkConstantVal env v.toConstantVal).run env (safety := .unsafe)
-    let env' := add env (.defnInfo v)
+    let (type, lvl) ← (checkConstantVal env v.toConstantVal).run env (safety := .unsafe)
+    let env' := add env (.defnInfo {v with type})
     checkNoMVarNoFVar env' v.name v.value
     M.run env' (safety := .unsafe) (lctx := {}) do
-      let (valueType, _) ← TypeChecker.check v.value v.levelParams
-      let (defEq, _) ← isDefEq valueType type
+      let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
+      let value' := value'?.getD v.value.toPExpr
+      let (defEq, valueTypeEqtype?) ← isDefEq valueType type
       if !defEq then
         throw <| .declTypeMismatch env' (.defnDecl v) valueType
-    return env' -- TODO handle unsafe defs (low priority)
+      let value ← maybeCast valueTypeEqtype? lvl valueType type value'
+      let v := {v with type, value}
+      return .defnInfo v
   else
-    let (type, value) ← M.run env (safety := .safe) (lctx := {}) do
+    M.run env (safety := .safe) (lctx := {}) do
       let (type, lvl) ← checkConstantVal env v.toConstantVal (← checkPrimitiveDef env v)
       checkNoMVarNoFVar env v.name v.value
       let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
@@ -52,12 +55,12 @@ def addDefinition (env : Environment) (v : DefinitionVal) :
       let (defEq, valueTypeEqtype?) ← isDefEq valueType type
       if !defEq then
         throw <| .declTypeMismatch env (.defnDecl v) valueType
-      pure (type, maybeCast valueTypeEqtype? lvl valueType type value')
-    let v := {v with type, value}
-    return add env (.defnInfo v)
+      let value  ← maybeCast valueTypeEqtype? lvl valueType type value'
+      let v := {v with type, value}
+      return (.defnInfo v)
 
-def addTheorem (env : Environment) (v : TheoremVal) :
-    Except KernelException Environment := do
+def patchTheorem (env : Environment) (v : TheoremVal) :
+    Except KernelException ConstantInfo := do
   -- TODO(Leo): we must add support for handling tasks here
   let (type, value) ← M.run env (safety := .safe) (lctx := {}) do
     let (type, lvl) ← checkConstantVal env v.toConstantVal
@@ -67,12 +70,12 @@ def addTheorem (env : Environment) (v : TheoremVal) :
     let (defEq, valueTypeEqtype?) ← isDefEq valueType type
     if !defEq then
       throw <| .declTypeMismatch env (.thmDecl v) valueType
-    pure (type, maybeCast valueTypeEqtype? lvl valueType type value')
+    pure (type, ← maybeCast valueTypeEqtype? lvl valueType type value')
   let v := {v with type, value}
-  return add env (.thmInfo v)
+  return .thmInfo v
 
-def addOpaque (env : Environment) (v : OpaqueVal) :
-    Except KernelException Environment := do
+def patchOpaque (env : Environment) (v : OpaqueVal) :
+    Except KernelException ConstantInfo := do
   let (type, value) ← M.run env (safety := .safe) (lctx := {}) do
     let (type, lvl) ← checkConstantVal env v.toConstantVal
     let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
@@ -80,56 +83,64 @@ def addOpaque (env : Environment) (v : OpaqueVal) :
     let (defEq, valueTypeEqtype?) ← isDefEq valueType type
     if !defEq then
       throw <| .declTypeMismatch env (.opaqueDecl v) valueType
-    pure (type, maybeCast valueTypeEqtype? lvl valueType type value')
+    pure (type, ← maybeCast valueTypeEqtype? lvl valueType type value')
   let v := {v with type, value}
-  return add env (.opaqueInfo v)
+  return .opaqueInfo v
 
-def addMutual (env : Environment) (vs : List DefinitionVal) :
-    Except KernelException Environment := do
+def patchMutual (env : Environment) (vs : List DefinitionVal) :
+    Except KernelException (List ConstantInfo) := do
   let v₀ :: _ := vs | throw <| .other "invalid empty mutual definition"
   if let .safe := v₀.safety then
     throw <| .other "invalid mutual definition, declaration is not tagged as unsafe/partial"
-  let vs' ← M.run env (safety := v₀.safety) (lctx := {}) do
-    let mut vs' := #[]
+  let (types, lvls) ← M.run env (safety := v₀.safety) (lctx := {}) do
+    let mut types := []
+    let mut lvls := []
     for v in vs do
       if v.safety != v₀.safety then
         throw <| .other
           "invalid mutual definition, declarations must have the same safety annotation"
-      let (type, _) ← checkConstantVal env v.toConstantVal
-      vs' := vs'.append #[{v with type}]
-    pure vs'
+      let (type, lvl) ← checkConstantVal env v.toConstantVal
+      types := types.append [type]
+      lvls := lvls.append [lvl]
+    pure (types, lvls)
   let mut env' := env
-  for v' in vs' do
+  let mut vs' := []
+  for (type, v) in types.zip vs do
+    let v' := {v with type}
     env' := add env' (.defnInfo v')
-  M.run env (safety := v₀.safety) (lctx := {}) do
-    for v in vs do
-      checkNoMVarNoFVar env' v.name v.value
-      let (valueType, _) ← TypeChecker.check v.value v.levelParams
-      let (defEq, _) ← isDefEq valueType v.type.toPExpr
+    vs' := vs'.append [v']
+  M.run env' (safety := v₀.safety) (lctx := {}) do
+    let mut newvs' := #[]
+    for ((v', type), lvl) in vs'.zip types |>.zip lvls do
+      checkNoMVarNoFVar env' v'.name v'.value
+      let (valueType, value'?) ← TypeChecker.check v'.value v'.levelParams
+      let value' := value'?.getD v'.value.toPExpr
+      let (defEq, valueTypeEqtype?) ← isDefEq valueType type
       if !defEq then
-        throw <| .declTypeMismatch env' (.mutualDefnDecl vs) valueType
-  return env' -- TODO handle mutual defs (low priority)
+        throw <| .declTypeMismatch env' (.mutualDefnDecl vs') valueType
+      let value ← maybeCast valueTypeEqtype? lvl valueType type value'
+      newvs' := newvs'.append #[{v' with value}]
+    return newvs'.map .defnInfo |>.toList
 
 /-- Type check given declaration and add it to the environment -/
 def addDecl' (env : Environment) (decl : @& Declaration) :
     Except KernelException Environment := do
   match decl with
   | .axiomDecl v =>
-    let env ← addAxiom env v
-    pure env
+    let v ← patchAxiom env v
+    return add env v
   | .defnDecl v =>
-    let env ← addDefinition env v
-    let some (.defnInfo v') := env.find? v.name | throw $ .other "unreachable"
-    pure env
+    let v ← patchDefinition env v
+    return add env v
   | .thmDecl v =>
-    let env ← addTheorem env v
-    pure env
+    let v ← patchTheorem env v
+    return add env v
   | .opaqueDecl v =>
-    let env ← addOpaque env v
-    pure env
-  | .mutualDefnDecl v =>
-    let env ← addMutual env v
-    pure env
+    let v ← patchOpaque env v
+    return add env v
+  | .mutualDefnDecl vs =>
+    let vs ← patchMutual env vs
+    return vs.foldl (init := env) (fun env v => add env v)
   | .quotDecl => addQuot env
   | .inductDecl lparams nparams types isUnsafe =>
     let allowPrimitive ← checkPrimitiveInductive env lparams nparams types isUnsafe

@@ -178,8 +178,10 @@ def inferType (e : Expr) : RecPE := fun m => m.inferType e
 
 def inferTypePure (e : PExpr) : RecM PExpr := fun m => m.inferTypePure e
 
-def maybeCast (p? : Option EExpr) (lvl : Level) (typLhs typRhs e : PExpr) : PExpr :=
-  p?.map (fun (p : EExpr) => Lean.mkAppN (.const `L4L.cast [lvl]) #[typLhs, typRhs, p.toPExpr, e] |>.toPExpr) |>.getD e
+def getConst (n : Name) (lvls : List Level) : RecM Expr := pure $ .const n lvls
+
+def maybeCast (p? : Option EExpr) (lvl : Level) (typLhs typRhs e : PExpr) : RecM PExpr := do
+  pure $ (← p?.mapM (fun (p : EExpr) => do pure (Lean.mkAppN (← getConst `L4L.cast [lvl]) #[typLhs, typRhs, p.toPExpr, e]).toPExpr)).getD e
 
 /--
 Infers the type of lambda expression `e`.
@@ -191,7 +193,7 @@ def inferLambda (e : Expr) : RecPE := loop #[] false e where
     let (typ, d'?) ← inferType d
     let (typ', p?) ← ensureSortCore typ d
     let lvl := typ'.toExpr.sortLevel!
-    let d' := maybeCast p? lvl.succ typ typ' (d'?.getD d.toPExpr)
+    let d' ← maybeCast p? lvl.succ typ typ' (d'?.getD d.toPExpr)
 
     let id := ⟨← mkFreshId⟩
     withLCtx ((← getLCtx).mkLocalDecl id name d' bi) do
@@ -205,7 +207,7 @@ def inferLambda (e : Expr) : RecPE := loop #[] false e where
     let (rSort', p?) ← ensureSortCore rSort r -- TODO need to test this
     assert! r'? == none
     let lvl := rSort'.toExpr.sortLevel!
-    let r' := maybeCast p? lvl.succ rSort rSort' r
+    let r' ← maybeCast p? lvl.succ rSort rSort' r
 
     let patch := if domPatched || e'?.isSome then some $ ((← getLCtx).mkLambda fvars e').toPExpr else none
     -- TODO only return .some if any of the fvars had domains that were patched, or if e'? := some e'
@@ -223,7 +225,7 @@ def inferForall (e : Expr) : RecPE := loop #[] #[] false e where
     let (t, d'?) ← inferType d
     let (t', p?) ← ensureSortCore t d
     let lvl := t'.toExpr.sortLevel!
-    let d' := maybeCast p? lvl.succ t t' (d'?.getD d.toPExpr)
+    let d' ← maybeCast p? lvl.succ t t' (d'?.getD d.toPExpr)
 
     let us := us.push lvl
     let id := ⟨← mkFreshId⟩
@@ -234,7 +236,7 @@ def inferForall (e : Expr) : RecPE := loop #[] #[] false e where
     let (r, e'?) ← inferType (e.instantiateRev fvars)
     let (r', p?) ← ensureSortCore r e
     let lvl := r'.toExpr.sortLevel!
-    let e' := maybeCast p? lvl.succ r r' (e'?.getD e.toPExpr)
+    let e' ← maybeCast p? lvl.succ r r' (e'?.getD e.toPExpr)
 
     let patch? := if domPatched || e'?.isSome || p?.isSome then .some $ ((← getLCtx).mkForall fvars e').toPExpr else none
     return ((Expr.sort <| us.foldr mkLevelIMax' lvl ).toPExpr, patch?)
@@ -309,13 +311,13 @@ def inferLet (e : Expr) : RecPE := loop #[] #[] false e where
     let (typeType, type'?) ← inferType type 
     let (typeType', pType?) ← ensureSortCore typeType type
     let lvl := typeType'.toExpr.sortLevel!
-    let type' := maybeCast pType? lvl.succ typeType typeType' (type'?.getD type.toPExpr)
+    let type' ← maybeCast pType? lvl.succ typeType typeType' (type'?.getD type.toPExpr)
     let val := val.instantiateRev fvars
     let (valType, val'?) ← inferType val 
     let (defEq, pVal?) ← isDefEq valType type' -- FIXME order?
     if !defEq then
       throw <| .letTypeMismatch (← getEnv) (← getLCtx) name valType type'
-    let val' := maybeCast pVal? lvl valType type' (val'?.getD val.toPExpr)
+    let val' ← maybeCast pVal? lvl valType type' (val'?.getD val.toPExpr)
     let id := ⟨← mkFreshId⟩
     withLCtx ((← getLCtx).mkLetDecl id name type' val') do
       let fvars := fvars.push (.fvar id)
@@ -445,7 +447,7 @@ def inferType' (e : Expr) : RecPE := do
       assert! fs? == none
       let fTypeLvl := fTypeSort'.toExpr.sortLevel!
       let (fType', pf'?) ← ensureForallCore fType f
-      let f' := maybeCast pf'? fTypeLvl fType fType' (f'?.getD f.toPExpr)
+      let f' ← maybeCast pf'? fTypeLvl fType fType' (f'?.getD f.toPExpr)
 
       let (aType, a'?) ← inferType' a
       let (aTypeLvl, _) ← getTypeLevel (a'?.getD a.toPExpr)
@@ -454,7 +456,7 @@ def inferType' (e : Expr) : RecPE := do
       -- it can be shown that if `e` is typeable as `T`, then `T` is typeable as `Sort l`
       -- for some universe level `l`, so this use of `isDefEq` is valid
       let (defEq, pa'?) ← isDefEq aType dType
-      let a' := maybeCast pa'? aTypeLvl aType dType (a'?.getD a.toPExpr)
+      let a' ← maybeCast pa'? aTypeLvl aType dType (a'?.getD a.toPExpr)
       if defEq then
         let patch := if f'?.isSome || a'?.isSome || pf'?.isSome || pa'?.isSome then .some (Expr.app f' a').toPExpr else none
         pure ((Expr.bindingBody! fType').instantiate1 a' |>.toPExpr, patch)
@@ -528,7 +530,7 @@ def getProjThm (structName : Name) (structType : PExpr) (projIdx : Nat) (projTyp
   let f ← withLCtx ((← getLCtx).mkLocalDecl ids `x structType default) do
     let svar := (Expr.fvar ids).toPExpr
     pure $ (← getLCtx).mkLambda #[svar] (.proj structName projIdx svar) |>.toPExpr
-  pure $ (mkAppN (.const `L4L.appArgHEq [structLvl, projLvl]) #[structType, projType, f]).toPExpr
+  pure $ (mkAppN (← getConst `L4L.appArgHEq [structLvl, projLvl]) #[structType, projType, f]).toPExpr
 
 def appProjThm? (structName : Name) (projIdx : Nat) (struct structN : PExpr) (structEqstructN? : Option EExpr) : RecM (Option EExpr) := do
   structEqstructN?.mapM fun structEqstructN => do
@@ -561,7 +563,7 @@ def reduceProj (structName : Name) (projIdx : Nat) (struct : PExpr) (cheapRec ch
   -- -- if not, we will need to use a different patch theorem
   -- let cType ← inferTypePure c
   -- let (.true, cTypeEqstructType?) ← isDefEq cType structType | unreachable!
-  -- c := maybeCast cTypeEqstructType? lvl cType structType c 
+  -- c ← maybeCast cTypeEqstructType? lvl cType structType c 
 
   if let (.lit (.strVal s)) := structN.toExpr then
     structN := Expr.strLitToConstructor s |>.toPExpr
@@ -628,7 +630,7 @@ def appHEqSymm? (t s : PExpr) (theqs? : Option EExpr) : RecM (Option EExpr) := d
   let some theqs := theqs? | return none
   let (lvl, tType) ← getTypeLevel t
   let sType ← inferTypePure s
-  pure $ Lean.mkAppN (.const `HEq.symm [lvl]) #[tType, sType, t, s, theqs.toExpr] |>.toEExpr theqs.data
+  pure $ Lean.mkAppN (← getConst `HEq.symm [lvl]) #[tType, sType, t, s, theqs.toExpr] |>.toEExpr theqs.data
 
 def appHEqTrans? (t s r : PExpr) (theqs? sheqr? : Option EExpr) : RecM (Option EExpr) := do
   match theqs?, sheqr? with
@@ -637,15 +639,15 @@ def appHEqTrans? (t s r : PExpr) (theqs? sheqr? : Option EExpr) : RecM (Option E
     let (lvl, tType) ← getTypeLevel t
     let sType ← inferTypePure s
     let rType ← inferTypePure r
-    return Lean.mkAppN (.const `HEq.trans [lvl]) #[tType, sType, rType, t, s, r, theqs.toExpr, sheqr.toExpr] |>.toEExprMerge theqs sheqr
+    return Lean.mkAppN (← getConst `HEq.trans [lvl]) #[tType, sType, rType, t, s, r, theqs.toExpr, sheqr.toExpr] |>.toEExprMerge theqs sheqr
   | none, .some sheqr => return sheqr
   | .some theqs, none => return theqs
 
-def mkRefl (lvl : Level) (T : PExpr) (t : PExpr) : EExpr :=
-  Lean.mkAppN (.const `Eq.refl [lvl]) #[T, t] |>.toEExprD
+def mkRefl (lvl : Level) (T : PExpr) (t : PExpr) : RecM EExpr := do
+  pure $ Lean.mkAppN (← getConst `Eq.refl [lvl]) #[T, t] |>.toEExprD
 
-def mkHRefl (lvl : Level) (T : PExpr) (t : PExpr) : EExpr :=
-  Lean.mkAppN (.const `HEq.refl [lvl]) #[T, t] |>.toEExprD
+def mkHRefl (lvl : Level) (T : PExpr) (t : PExpr) : RecM EExpr := do
+  pure $ Lean.mkAppN (← getConst `HEq.refl [lvl]) #[T, t] |>.toEExprD
 
 def natLitExt? (e : Expr) : Option Nat := if e == .natZero then some 0 else e.natLit?
 
@@ -661,9 +663,9 @@ def reduceBinNatOp (op : Name) (f : Nat → Nat → Nat) (a b : PExpr) : RecM (O
   let some v1 := natLitExt? a' | return none
   let some v2 := natLitExt? b' | return none
   let ret? := if pa?.isSome || pb?.isSome then
-      let pa := pa?.getD (mkHRefl (.succ .zero) (Expr.const `Nat []).toPExpr a')
-      let pb := pb?.getD (mkHRefl (.succ .zero) (Expr.const `Nat []).toPExpr b')
-      .some $ Lean.mkAppN (.const `L4L.appHEqBinNatFn []) #[.const `Nat [], .const `Nat [], .const op [], a, a', b, b', pa, pb] |>.toEExprMerge pa pb
+      let pa := pa?.getD (← mkHRefl (.succ .zero) (Expr.const `Nat []).toPExpr a')
+      let pb := pb?.getD (← mkHRefl (.succ .zero) (Expr.const `Nat []).toPExpr b')
+      .some $ Lean.mkAppN (← getConst `L4L.appHEqBinNatFn []) #[.const `Nat [], .const `Nat [], .const op [], a, a', b, b', pa, pb] |>.toEExprMerge pa pb
     else
       none
   return some <| ((Expr.lit <| .natVal <| f v1 v2).toPExpr, ret?)
@@ -680,16 +682,17 @@ def reduceBinNatPred (op : Name) (f : Nat → Nat → Bool) (a b : PExpr) : RecM
   let some v1 := natLitExt? a' | return none
   let some v2 := natLitExt? b' | return none
   let ret? := if pa?.isSome || pb?.isSome then
-      let pa := pa?.getD (mkHRefl (.succ .zero) (Expr.const `Nat []).toPExpr a')
-      let pb := pb?.getD (mkHRefl (.succ .zero) (Expr.const `Nat []).toPExpr b')
-      .some $ Lean.mkAppN (.const `L4L.appHEqBinNatFn []) #[.const `Nat [], .const `Bool [], .const op [], a, a', b, b', pa, pb] |>.toEExprMerge pa pb
+      let pa := pa?.getD (← mkHRefl (.succ .zero) (Expr.const `Nat []).toPExpr a')
+      let pb := pb?.getD (← mkHRefl (.succ .zero) (Expr.const `Nat []).toPExpr b')
+      .some $ Lean.mkAppN (← getConst `L4L.appHEqBinNatFn []) #[.const `Nat [], .const `Bool [], .const op [], a, a', b, b', pa, pb] |>.toEExprMerge pa pb
     else
       none
   return (toExpr (f v1 v2) |>.toPExpr, ret?)
 
-def mkNatSuccAppArgHEq? (p? : Option EExpr) (t s : PExpr) : Option EExpr :=
-  p?.map fun p => (mkAppN (.const `appArgHEq [.succ .zero, .succ .zero]) #[.const `Nat [],
-  (mkLambda default default (.const `Nat []) (.const `Nat [])), .const `Nat.succ [], t, s, p.toExpr]).toEExpr p.data
+def mkNatSuccAppArgHEq? (p? : Option EExpr) (t s : PExpr) : RecM (Option EExpr) := do
+  p?.mapM fun p => do
+    pure $ (mkAppN (← getConst `appArgHEq [.succ .zero, .succ .zero]) #[.const `Nat [],
+    (mkLambda default default (.const `Nat []) (.const `Nat [])), .const `Nat.succ [], t, s, p.toExpr]).toEExpr p.data
 
 /--
 Reduces `e` to a natural number literal if possible, where binary operations
@@ -706,7 +709,7 @@ def reduceNat (e : PExpr) : RecM (Option (PExpr × Option EExpr)) := do
       let prec := e.toExpr.appArg!.toPExpr
       let (prec', p?) ← whnf prec
       let some v := natLitExt? prec' | return none
-      return some <| ((Expr.lit <| .natVal <| v + 1).toPExpr, mkNatSuccAppArgHEq? p? prec prec')
+      return some <| ((Expr.lit <| .natVal <| v + 1).toPExpr, ← mkNatSuccAppArgHEq? p? prec prec')
   else if nargs == 2 then
     let .app (.app (.const f _) a) b := e.toExpr | return none
     if f == ``Nat.add then return ← reduceBinNatOp ``Nat.add Nat.add a.toPExpr b.toPExpr
@@ -796,9 +799,9 @@ def isDefEqLambda (t s : PExpr) : RecB :=
         let U := (← getLCtx).mkForall #[a] Ua
         let V := (← getLCtx).mkForall #[b] Vb
 
-        let faEqgb := faEqgb?.getD (mkHRefl UaLvl Ua fa)
+        let faEqgb := faEqgb?.getD (← mkHRefl UaLvl Ua fa)
         let hfgData := {faEqgb.data with usedFVarEqs := faEqgb.data.usedFVarEqs.erase idaEqb.name}
-        let hAB := pAEqB?.getD (mkRefl ALvl.succ AType A)
+        let hAB := pAEqB?.getD (← mkRefl ALvl.succ AType A)
 
         let data := hAB.data.merge hfgData
         if data.isEmpty then
@@ -845,7 +848,7 @@ def isDefEqForall' (t s : PExpr) : RecM (Bool × Option (Array ForallData × Opt
       let UaType ← whnfPure UaType
       let UaLvl := UaType.toExpr.sortLevel!
 
-      let UaEqVb := UaEqVb?.getD (mkHRefl UaTypeLvl UaType Ua)
+      let UaEqVb := UaEqVb?.getD (← mkHRefl UaTypeLvl UaType Ua)
       let hUV := (← getLCtx).mkForall #[a, b, .fvar idaEqb] UaEqVb |>.toPExpr
       let hUVData := {UaEqVb.data with usedFVarEqs := UaEqVb.data.usedFVarEqs.erase idaEqb.name}
 
@@ -855,7 +858,7 @@ def isDefEqForall' (t s : PExpr) : RecM (Bool × Option (Array ForallData × Opt
       let (ALvl, A) ← getTypeLevel a
       let AType ← inferTypePure A
       -- TODO check all usages of refl vs hrefl
-      let hAB := pAEqB?.getD (mkRefl ALvl.succ AType A)
+      let hAB := pAEqB?.getD (← mkRefl ALvl.succ AType A)
 
       let B ← inferTypePure b
       let u := ALvl
@@ -983,9 +986,9 @@ def isDefEqApp (t s : PExpr) (tfEqsf? : Option (Option EExpr) := none) (targsEqs
     if taEqsa?.isSome || ret?.isSome then
       let (tfLvl, tfType) ← getTypeLevel tf
       let (taLvl, taType) ← getTypeLevel ta
-      let ret := ret?.getD (mkHRefl tfLvl tfType tf)
-      let taEqsa := taEqsa?.getD (mkHRefl taLvl taType ta)
-      ret? := .some $ Lean.mkAppN (.const `L4L.appHEq [u, v])
+      let ret := ret?.getD (← mkHRefl tfLvl tfType tf)
+      let taEqsa := taEqsa?.getD (← mkHRefl taLvl taType ta)
+      ret? := .some $ Lean.mkAppN (← getConst `L4L.appHEq [u, v])
         #[A, B, U, V, hAB, hUV, tf, sf, ta, sa, ret, taEqsa] |>.toEExpr (.mergeN #[taEqsa.data, hUVData, hAB.data])
     tf := tf.toExpr.app ta |>.toPExpr
     sf := sf.toExpr.app sa |>.toPExpr
@@ -1029,8 +1032,8 @@ def tryEtaStruct (t s : PExpr) : RecB := do
     return (true, ← appHEqSymm? s t sEqt?)
 
 def appPrfIrrel (P Q : PExpr) (PEqQ? : Option EExpr) (p q : PExpr) : RecM EExpr := do
-  let PEqQ := PEqQ?.getD (mkRefl 1 (Expr.sort 0).toPExpr P)
-  return Lean.mkAppN (.const `L4L.prfIrrelHEq []) #[P, Q, PEqQ, p, q] |>.toEExpr (PEqQ.data.merge {usedProofIrrel := true})
+  let PEqQ := PEqQ?.getD (← mkRefl 1 (Expr.sort 0).toPExpr P)
+  return Lean.mkAppN (← getConst `L4L.prfIrrelHEq []) #[P, Q, PEqQ, p, q] |>.toEExpr (PEqQ.data.merge {usedProofIrrel := true})
 
 def reduceRecursor (e : PExpr) (cheapRec cheapProj : Bool) : RecM (Option (PExpr × Option EExpr)) := do
   let env ← getEnv
@@ -1274,7 +1277,7 @@ def isDefEqOffset (t s : PExpr) : RecLB := do
   match isNatSuccOf? t, isNatSuccOf? s with
   | some t', some s' =>
     let (ret, p?) ← isDefEqCore t' s'
-    let p? := mkNatSuccAppArgHEq? p? t' s'
+    let p? ← mkNatSuccAppArgHEq? p? t' s'
     pure (ret.toLBool, p?)
   | _, _ => return (.undef, none)
 
@@ -1513,7 +1516,8 @@ def ensureSortPure (t : PExpr) (s := t) : M PExpr := RecM.run do
 @[inherit_doc ensureForallCore]
 def ensureForall (t : PExpr) (s := t) : MEE := (ensureForallCore t s).run
 
-def maybeCast := Inner.maybeCast
+def maybeCast (p? : Option EExpr) (lvl : Level) (typLhs typRhs e : PExpr) : M PExpr := RecM.run do
+  Inner.maybeCast p? lvl typLhs typRhs e
 
 /--
 Ensures that `e` is defeq to some `e' := .sort (_ + 1)`, returning `e'`. If not,

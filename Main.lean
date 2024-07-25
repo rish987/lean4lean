@@ -9,7 +9,7 @@ import Lean4Less.Environment
 import Lean4Less.Replay
 
 open Lean
-open Lean4Less
+open Lean4Lean
 
 def outDir : System.FilePath := System.mkFilePath [".", "out"]
 
@@ -26,29 +26,23 @@ You can also use `lake exe lean4lean --fresh Mathlib.Data.Nat.Basic` to replay a
 unsafe def main (args : List String) : IO UInt32 := do
   initSearchPath (← findSysroot)
   let (flags, args) := args.partition fun s => s.startsWith "--"
-  let fresh : Bool := "--fresh" ∈ flags
   let verbose : Bool := "--verbose" ∈ flags
-  let compare : Bool := "--compare" ∈ flags
   match args with
     | [mod] => match mod.toName with
       | .anonymous => throw <| IO.userError s!"Could not resolve module: {mod}"
       | m =>
-        if fresh then
-          replayFromFresh m verbose compare
-        else
-          replayFromImports m verbose compare
+          replayFromFresh Lean4Less.addDecl m verbose false
     | _ => do
-      if fresh then
-        throw <| IO.userError "--fresh flag is only valid when specifying a single module"
-      let sp ← searchPathRef.get
-      let sp := [sp[0]!] -- FIXME
-      let mut tasks : Array (Name × Task (Except IO.Error Unit)) := #[]
-      for path in (← SearchPath.findAllWithExt sp "olean") do
-        dbg_trace s!"DBG[2]: Main.lean:44: m={path}"
-        if let some m ← searchModuleNameOfFileName path sp then
-          replayFromImports m verbose compare
-      for (m, t) in tasks do
-        if let .error e := t.get then
-          IO.eprintln s!"lean4lean found a problem in {m}"
-          throw e
+      throw <| IO.userError "TODO not implemented"
+      -- let sp ← searchPathRef.get
+      -- let sp := [sp[0]!] -- FIXME
+      -- let mut tasks : Array (Name × Task (Except IO.Error Unit)) := #[]
+      -- for path in (← SearchPath.findAllWithExt sp "olean") do
+      --   dbg_trace s!"DBG[2]: Main.lean:44: m={path}"
+      --   if let some m ← searchModuleNameOfFileName path sp then
+      --     replayFromImports m verbose compare
+      -- for (m, t) in tasks do
+      --   if let .error e := t.get then
+      --     IO.eprintln s!"lean4lean found a problem in {m}"
+      --     throw e
   return 0
