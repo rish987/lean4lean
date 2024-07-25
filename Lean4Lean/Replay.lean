@@ -120,6 +120,7 @@ deriving instance BEq for RecursorVal
 
 
 mutual
+
 /--
 Check if a `Name` still needs to be processed (i.e. is in `remaining`).
 
@@ -129,21 +130,21 @@ to ensure we add declarations in the right order.
 The construct the `Declaration` from its stored `ConstantInfo`,
 and add it to the environment.
 -/
-partial def replayConstant (name : Name) : M Unit := do
+partial def replayConstant (name : Name) (addDeclFn : Declaration → M Unit) : M Unit := do
   if ← isTodo name then
     let some ci := (← read).newConstants.find? name | unreachable!
-    replayConstants ci.getUsedConstants
+    replayConstants ci.getUsedConstants addDeclFn
     -- Check that this name is still pending: a mutual block may have taken care of it.
     if (← get).pending.contains name then
       match ci with
       | .defnInfo   info =>
-        addDecl (Declaration.defnDecl   info)
+        addDeclFn (Declaration.defnDecl   info)
       | .thmInfo    info =>
-        addDecl (Declaration.thmDecl    info)
+        addDeclFn (Declaration.thmDecl    info)
       | .axiomInfo  info =>
-        addDecl (Declaration.axiomDecl  info)
+        addDeclFn (Declaration.axiomDecl  info)
       | .opaqueInfo info =>
-        addDecl (Declaration.opaqueDecl info)
+        addDeclFn (Declaration.opaqueDecl info)
       | .inductInfo info =>
         let lparams := info.levelParams
         let nparams := info.numParams
@@ -154,7 +155,7 @@ partial def replayConstant (name : Name) : M Unit := do
           -- because the kernel treats the existence of the `String` type as license
           -- to use string literals, which use `Char.ofNat` internally. However
           -- this definition is not transitively reachable from the declaration of `String`.
-          if o.name == ``String then replayConstant ``Char.ofNat
+          if o.name == ``String then replayConstant ``Char.ofNat addDeclFn
           modify fun s =>
             { s with remaining := s.remaining.erase o.name, pending := s.pending.erase o.name }
         let ctorInfo ← all.mapM fun ci => do
@@ -163,12 +164,12 @@ partial def replayConstant (name : Name) : M Unit := do
         -- Make sure we are really finished with the constructors.
         for (_, ctors) in ctorInfo do
           for ctor in ctors do
-            replayConstants ctor.getUsedConstants
+            replayConstants ctor.getUsedConstants addDeclFn
         let types : List InductiveType := ctorInfo.map fun ⟨ci, ctors⟩ =>
           { name := ci.name
             type := ci.type
             ctors := ctors.map fun ci => { name := ci.name, type := ci.type } }
-        addDecl (Declaration.inductDecl lparams nparams types false)
+        addDeclFn (Declaration.inductDecl lparams nparams types false)
       -- We postpone checking constructors,
       -- and at the end make sure they are identical
       -- to the constructors generated when we replay the inductives.
@@ -178,12 +179,12 @@ partial def replayConstant (name : Name) : M Unit := do
       | .recInfo info =>
         modify fun s => { s with postponedRecursors := s.postponedRecursors.insert info.name }
       | .quotInfo _ =>
-        addDecl (Declaration.quotDecl)
+        addDeclFn (Declaration.quotDecl)
       modify fun s => { s with pending := s.pending.erase name }
 
 /-- Replay a set of constants one at a time. -/
-partial def replayConstants (names : NameSet) : M Unit := do
-  for n in names do replayConstant n
+partial def replayConstants (names : NameSet) (addDeclFn : Declaration → M Unit) : M Unit := do
+  for n in names do replayConstant n addDeclFn
 
 end
 
@@ -209,6 +210,7 @@ def checkPostponedRecursors : M Unit := do
       if ! (info == info') then throw <| IO.userError s!"Invalid recursor {ctor}"
     | _, _ => throw <| IO.userError s!"No such recursor {ctor}"
 
+variable  (addDeclFn : Declaration → M Unit)
 
 /-- "Replay" some constants into an `Environment`, sending them to the kernel for checking. -/
 def replay (ctx : Context) (env : Environment) (decl : Option Name := none) : IO Environment := do
@@ -221,10 +223,10 @@ def replay (ctx : Context) (env : Environment) (decl : Option Name := none) : IO
   let (_, s) ← StateRefT'.run (s := { env, remaining }) do
     ReaderT.run (r := ctx) do
       match decl with
-      | some d => replayConstant d
+      | some d => replayConstant d addDeclFn
       | none =>
         for n in remaining do
-          replayConstant n
+          replayConstant n addDeclFn
       checkPostponedConstructors
       checkPostponedRecursors
   return s.env
@@ -241,7 +243,7 @@ unsafe def replayFromImports (module : Name) (verbose := false) (compare := fals
   let mut newConstants := {}
   for name in mod.constNames, ci in mod.constants do
     newConstants := newConstants.insert name ci
-  let env' ← replay { newConstants, verbose, compare } env
+  let env' ← replay addDeclFn { newConstants, verbose, compare } env
   env'.freeRegions
   region.free
 
@@ -249,7 +251,7 @@ unsafe def replayFromFresh (module : Name)
     (verbose := false) (compare := false) (decl : Option Name := none) : IO Unit := do
   Lean.withImportModules #[{module}] {} 0 fun env => do
     let ctx := { newConstants := env.constants.map₁, verbose, compare }
-    discard <| replay ctx ((← mkEmptyEnvironment).setMainModule module) decl
+    discard <| replay addDeclFn ctx ((← mkEmptyEnvironment).setMainModule module) decl 
 
 end Lean4Lean
 

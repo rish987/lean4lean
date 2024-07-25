@@ -30,14 +30,14 @@ def addDefinition (env : Environment) (v : DefinitionVal) (check := true) :
     -- So, we check the header, add, and then type check the body.
     if check then
       _ ← (checkConstantVal env v.toConstantVal).run env (safety := .unsafe)
-    let env' := add env (.defnInfo v)
+    let env' := add env (.opaqueInfo {v with isUnsafe := false})
     if check then
       checkNoMVarNoFVar env' v.name v.value
       M.run env' (safety := .unsafe) (lctx := {}) do
         let valType ← TypeChecker.check v.value v.levelParams
         if !(← isDefEq valType v.type) then
           throw <| .declTypeMismatch env' (.defnDecl v) valType
-    return env'
+    return add env (.defnInfo v)
   else
     if check then
       M.run env (safety := .safe) (lctx := {}) do
