@@ -39,12 +39,12 @@ unsafe def main (args : List String) : IO UInt32 := do
       if fresh then
         throw <| IO.userError "--fresh flag is only valid when specifying a single module"
       let sp ← searchPathRef.get
+      let mut tasks := #[]
       for path in (← SearchPath.findAllWithExt sp "olean") do
         if let some m ← searchModuleNameOfFileName path sp then
-          try
-            replayFromImports addDecl m verbose compare
-          catch
-          | e =>
-            IO.eprintln s!"lean4lean found a problem in {m}"
-            throw e
+          tasks := tasks.push (m, ← IO.asTask (replayFromImports addDecl m verbose compare))
+      for (m, t) in tasks do
+        if let .error e := t.get then
+          IO.eprintln s!"lean4lean found a problem in {m}"
+          throw e
   return 0

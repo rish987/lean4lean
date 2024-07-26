@@ -344,7 +344,10 @@ def whnfCore' (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr :=
         pure e
     else
       let r := f.mkAppRevRange 0 rargs.size rargs
-      save <|← whnfCore r cheapRec cheapProj
+      if let some r ← reduceRecursor r cheapRec cheapProj then
+        whnfCore r cheapRec cheapProj
+      else
+        pure r
   | .letE _ _ val body _ =>
     save <|← whnfCore (body.instantiate1 val) cheapRec cheapProj
   | .proj _ idx s =>

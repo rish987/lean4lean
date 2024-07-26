@@ -84,7 +84,7 @@ def addMutual (env : Environment) (vs : List DefinitionVal) (check := true) :
         checkConstantVal env v.toConstantVal
   let mut env' := env
   for v in vs do
-    env' := add env' (.defnInfo v)
+    env' := add env' (.opaqueInfo {v with isUnsafe := false})
   if check then
     M.run env (safety := v₀.safety) (lctx := {}) do
       for v in vs do
