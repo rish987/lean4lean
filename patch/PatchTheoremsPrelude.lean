@@ -1,5 +1,4 @@
 prelude
-namespace L4L
 universe u v
 
 inductive HEq : {α : Sort u} → α → {β : Sort u} → β → Prop where
@@ -25,26 +24,26 @@ noncomputable def cast {α β : Sort u} (h : Eq α β) (a : α) : β :=
 variable {α β φ : Sort u} {a a' : α} {b b' : β} {c : φ}
 @[irreducible] def letFun {α : Sort u} {β : α → Sort v} (v : α) (f : (x : α) → β x) : β v := f v
 
-theorem eq_of_heq : ∀ {α : Sort u} {a a' : α}, @L4L.HEq.{u} α a α a' → @L4L.Eq.{u} α a a' :=
-fun {α : Sort u} {a a' : α} (h : @L4L.HEq.{u} α a α a') =>
+theorem eq_of_heq : ∀ {α : Sort u} {a a' : α}, @HEq.{u} α a α a' → @Eq.{u} α a a' :=
+fun {α : Sort u} {a a' : α} (h : @HEq.{u} α a α a') =>
   @letFun.{0, 0}
     (∀ (α β : Sort u) (a : α) (b : β),
-      @L4L.HEq.{u} α a β b → ∀ (h : @L4L.Eq.{u + 1} (Sort u) α β), @L4L.Eq.{u} β (@L4L.cast.{u} α β h a) b)
+      @HEq.{u} α a β b → ∀ (h : @Eq.{u + 1} (Sort u) α β), @Eq.{u} β (@cast.{u} α β h a) b)
     (fun
         (_ :
           ∀ (α β : Sort u) (a : α) (b : β),
-            @L4L.HEq.{u} α a β b → ∀ (h : @L4L.Eq.{u + 1} (Sort u) α β), @L4L.Eq.{u} β (@L4L.cast.{u} α β h a) b) =>
-      @L4L.Eq.{u} α (@L4L.cast.{u} α α (@L4L.Eq.refl.{u + 1} (Sort u) α) a) a')
-    (fun (x x_1 : Sort u) (x_2 : x) (x_3 : x_1) (h₁ : @L4L.HEq.{u} x x_2 x_1 x_3) =>
-      @L4L.HEq.rec.{0, u} x x_2
-        (@fun (x_4 : Sort u) (x_5 : x_4) (_ : @L4L.HEq.{u} x x_2 x_4 x_5) =>
-          ∀ (h : @L4L.Eq.{u + 1} (Sort u) x x_4), @L4L.Eq.{u} x_4 (@L4L.cast.{u} x x_4 h x_2) x_5)
-        (fun (x_4 : @L4L.Eq.{u + 1} (Sort u) x x) => @L4L.Eq.refl.{u} x (@L4L.cast.{u} x x x_4 x_2)) x_1 x_3 h₁)
+            @HEq.{u} α a β b → ∀ (h : @Eq.{u + 1} (Sort u) α β), @Eq.{u} β (@cast.{u} α β h a) b) =>
+      @Eq.{u} α (@cast.{u} α α (@Eq.refl.{u + 1} (Sort u) α) a) a')
+    (fun (x x_1 : Sort u) (x_2 : x) (x_3 : x_1) (h₁ : @HEq.{u} x x_2 x_1 x_3) =>
+      @HEq.rec.{0, u} x x_2
+        (@fun (x_4 : Sort u) (x_5 : x_4) (_ : @HEq.{u} x x_2 x_4 x_5) =>
+          ∀ (h : @Eq.{u + 1} (Sort u) x x_4), @Eq.{u} x_4 (@cast.{u} x x_4 h x_2) x_5)
+        (fun (x_4 : @Eq.{u + 1} (Sort u) x x) => @Eq.refl.{u} x (@cast.{u} x x x_4 x_2)) x_1 x_3 h₁)
     fun
       (this :
         ∀ (α β : Sort u) (a : α) (b : β),
-          @L4L.HEq.{u} α a β b → ∀ (h : @L4L.Eq.{u + 1} (Sort u) α β), @L4L.Eq.{u} β (@L4L.cast.{u} α β h a) b) =>
-    this α α a a' h (@L4L.Eq.refl.{u + 1} (Sort u) α)
+          @HEq.{u} α a β b → ∀ (h : @Eq.{u + 1} (Sort u) α β), @Eq.{u} β (@cast.{u} α β h a) b) =>
+    this α α a a' h (@Eq.refl.{u + 1} (Sort u) α)
 
 theorem Eq.subst {α : Sort u} {motive : α → Prop} {a b : α} (h₁ : Eq a b) (h₂ : motive a) : motive b :=
   Eq.ndrec h₂ h₁
@@ -54,6 +53,8 @@ theorem heq_of_eq (h : Eq a a') : HEq a a' :=
 
 theorem type_eq_of_heq (h : HEq a b) : Eq α β :=
   h.rec (Eq.refl α)
+
+namespace L4L
 
 axiom prfIrrelHEq (P Q : Prop) (heq : Eq P Q) (p : Q) (q : P) : HEq p q
 

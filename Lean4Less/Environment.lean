@@ -17,7 +17,7 @@ def checkConstantVal (env : Environment) (v : ConstantVal) (allowPrimitive := fa
   checkNoMVarNoFVar env v.name v.type
   let (typeType, type'?) ← check v.type v.levelParams
   let type' := type'?.getD v.type.toPExpr
-  let (sort, typeTypeEqSort?) ← ensureSort typeType type'
+  let (sort, typeTypeEqSort?) ← ensureSort typeType v.levelParams type'
   let .sort lvl := sort.toExpr | unreachable!
   let type'' ← maybeCast typeTypeEqSort? lvl.succ typeType sort type'
   pure (type'', lvl)
@@ -40,7 +40,7 @@ def patchDefinition (env : Environment) (v : DefinitionVal) :
     M.run env' (safety := .unsafe) (lctx := {}) do
       let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
       let value' := value'?.getD v.value.toPExpr
-      let (defEq, valueTypeEqtype?) ← isDefEq valueType type
+      let (defEq, valueTypeEqtype?) ← isDefEq valueType type v.levelParams
       if !defEq then
         throw <| .declTypeMismatch env' (.defnDecl v) valueType
       let value ← maybeCast valueTypeEqtype? lvl valueType type value'
@@ -52,7 +52,7 @@ def patchDefinition (env : Environment) (v : DefinitionVal) :
       checkNoMVarNoFVar env v.name v.value
       let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
       let value' := value'?.getD v.value.toPExpr
-      let (defEq, valueTypeEqtype?) ← isDefEq valueType type
+      let (defEq, valueTypeEqtype?) ← isDefEq valueType type v.levelParams
       if !defEq then
         throw <| .declTypeMismatch env (.defnDecl v) valueType
       let value  ← maybeCast valueTypeEqtype? lvl valueType type value'
@@ -67,7 +67,7 @@ def patchTheorem (env : Environment) (v : TheoremVal) :
     checkNoMVarNoFVar env v.name v.value
     let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
     let value' := value'?.getD v.value.toPExpr
-    let (defEq, valueTypeEqtype?) ← isDefEq valueType type
+    let (defEq, valueTypeEqtype?) ← isDefEq valueType type v.levelParams
     if !defEq then
       throw <| .declTypeMismatch env (.thmDecl v) valueType
     pure (type, ← maybeCast valueTypeEqtype? lvl valueType type value')
@@ -80,7 +80,7 @@ def patchOpaque (env : Environment) (v : OpaqueVal) :
     let (type, lvl) ← checkConstantVal env v.toConstantVal
     let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
     let value' := value'?.getD v.value.toPExpr
-    let (defEq, valueTypeEqtype?) ← isDefEq valueType type
+    let (defEq, valueTypeEqtype?) ← isDefEq valueType type v.levelParams
     if !defEq then
       throw <| .declTypeMismatch env (.opaqueDecl v) valueType
     pure (type, ← maybeCast valueTypeEqtype? lvl valueType type value')
@@ -115,7 +115,7 @@ def patchMutual (env : Environment) (vs : List DefinitionVal) :
       checkNoMVarNoFVar env' v'.name v'.value
       let (valueType, value'?) ← TypeChecker.check v'.value v'.levelParams
       let value' := value'?.getD v'.value.toPExpr
-      let (defEq, valueTypeEqtype?) ← isDefEq valueType type
+      let (defEq, valueTypeEqtype?) ← isDefEq valueType type v'.levelParams
       if !defEq then
         throw <| .declTypeMismatch env' (.mutualDefnDecl vs') valueType
       let value ← maybeCast valueTypeEqtype? lvl valueType type value'

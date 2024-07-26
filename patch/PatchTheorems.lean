@@ -5,8 +5,29 @@ import Init.Core
 
 namespace L4L
 
-noncomputable def cast {α β : Sort u} (h : Eq α β) (a : α) : β :=
-  h.rec a
+universe u v
+
+theorem forallHEq {A B : Sort u} {U : A → Sort v} {V : B → Sort v}
+  (hAB : A = B) (hUV : (a : A) → (b : B) → HEq a b → HEq (U a) (V b))
+  : ((a : A) → U a) = ((b : B) → V b) :=
+  @Eq.ndrec (Sort u) A
+    (fun {B : Sort u} =>
+      ∀ {V : B → Sort v},
+        (∀ (a : A) (b : B), @HEq A a B b → @HEq (Sort v) (U a) (Sort v) (V b)) →
+          @Eq (Sort (imax u v)) ((a : A) → U a) ((b : B) → V b))
+    (fun {V : A → Sort v} (hUV : ∀ (a b : A), @HEq A a A b → @HEq (Sort v) (U a) (Sort v) (V b)) =>
+      @letFun (@Eq (A → Sort v) U V)
+        (fun (_ : @Eq (A → Sort v) U V) => @Eq (Sort (imax u v)) ((a : A) → U a) ((b : A) → V b))
+        (@funext A (fun (_ : A) => Sort v) U V fun (x : A) => @eq_of_heq (Sort v) (U x) (V x) (hUV x x (@HEq.rfl A x)))
+        fun (this : @Eq (A → Sort v) U V) =>
+        @Eq.ndrec (A → Sort v) U
+          (fun {V : A → Sort v} =>
+            (∀ (a b : A), @HEq A a A b → @HEq (Sort v) (U a) (Sort v) (V b)) →
+              @Eq (Sort (imax u v)) ((a : A) → U a) ((b : A) → V b))
+          (fun (_ : ∀ (a b : A), @HEq A a A b → @HEq (Sort v) (U a) (Sort v) (U b)) =>
+            @Eq.refl (Sort (imax u v)) ((a : A) → U a))
+          V this hUV)
+    B hAB V hUV
 
 axiom prfIrrelHEq (P Q : Prop) (heq : P = Q) (p : Q) (q : P) : HEq p q
 
@@ -15,6 +36,9 @@ theorem appArgHEq {A : Sort u} {U : A → Sort v}
   {a b : A} (hab : HEq a b)
   : HEq (f a) (f b) :=
   @Eq.ndrec A a (fun {b : A} => @HEq (U a) (f a) (U b) (f b)) (@HEq.rfl (U a) (f a)) b (@eq_of_heq A a b hab)
+
+-- axiom forallHEq {A B : Sort u} {U : A → Sort v} {V : B → Sort v} (hAB : A = B) (hUV : (a : A) → (b : B) → HEq a b → HEq (U a) (V b))
+--   : ((a : A) → U a) = ((b : B) → V b)
 
 theorem appHEq {A B : Sort u} {U : A → Sort v} {V : B → Sort v}
   (hAB : A = B) (hUV : (a : A) → (b : B) → HEq a b → HEq (U a) (V b))
@@ -85,27 +109,5 @@ theorem lambdaHEq {A B : Sort u} {U : A → Sort v} {V : B → Sort v}
               @heq_of_eq ((a : A) → U a) (fun (a : A) => f a) (fun (b : A) => g b) this)
           V hUV g hfg)
     B hAB V g hfg
-
-theorem forAllHEq {A B : Sort u} {U : A → Sort v} {V : B → Sort v}
-  (hAB : A = B) (hUV : (a : A) → (b : B) → HEq a b → HEq (U a) (V b))
-  : ((a : A) → U a) = ((b : B) → V b) :=
-  @Eq.ndrec (Sort u) A
-    (fun {B : Sort u} =>
-      ∀ {V : B → Sort v},
-        (∀ (a : A) (b : B), @HEq A a B b → @HEq (Sort v) (U a) (Sort v) (V b)) →
-          @Eq (Sort (imax u v)) ((a : A) → U a) ((b : B) → V b))
-    (fun {V : A → Sort v} (hUV : ∀ (a b : A), @HEq A a A b → @HEq (Sort v) (U a) (Sort v) (V b)) =>
-      @letFun (@Eq (A → Sort v) U V)
-        (fun (_ : @Eq (A → Sort v) U V) => @Eq (Sort (imax u v)) ((a : A) → U a) ((b : A) → V b))
-        (@funext A (fun (_ : A) => Sort v) U V fun (x : A) => @eq_of_heq (Sort v) (U x) (V x) (hUV x x (@HEq.rfl A x)))
-        fun (this : @Eq (A → Sort v) U V) =>
-        @Eq.ndrec (A → Sort v) U
-          (fun {V : A → Sort v} =>
-            (∀ (a b : A), @HEq A a A b → @HEq (Sort v) (U a) (Sort v) (V b)) →
-              @Eq (Sort (imax u v)) ((a : A) → U a) ((b : A) → V b))
-          (fun (_ : ∀ (a b : A), @HEq A a A b → @HEq (Sort v) (U a) (Sort v) (U b)) =>
-            @Eq.refl (Sort (imax u v)) ((a : A) → U a))
-          V this hUV)
-    B hAB V hUV
 
 end L4L

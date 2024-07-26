@@ -111,9 +111,11 @@ def ensureSortCore (e : PExpr) (s : Expr) : RecEE := do
   if e.toExpr.isSort then return (e, p?)
   throw <| .typeExpected (← getEnv) default s
 
+def assert (n : Nat) (b : Bool) : RecM Unit := do if not b then throw $ .other s!"assert fail {n}"
+
 def ensureSortCorePure (e : PExpr) (s : Expr) : RecM PExpr := do
   let (s, p?) ← (ensureSortCore e s)
-  assert! p? == none
+  assert 1 $ p? == none
   return s
 
 /--
@@ -138,7 +140,7 @@ Checks that `l` does not contain any level parameters not found in the context `
 -/
 def checkLevel (tc : Context) (l : Level) : Except KernelException Unit := do
   if let some n2 := l.getUndefParam tc.lparams then
-    throw <| .other s!"invalid reference to undefined universe level parameter '{n2}'"
+    throw <| .other s!"invalid reference to undefined universe level parameter '{n2}' {tc.lparams}"
 
 def inferFVar (tc : Context) (name : FVarId) : Except KernelException PExpr := do
   if let some decl := tc.lctx.find? name then
@@ -181,7 +183,7 @@ def inferTypePure (e : PExpr) : RecM PExpr := fun m => m.inferTypePure e
 def getConst (n : Name) (lvls : List Level) : RecM Expr := pure $ .const n lvls
 
 def maybeCast (p? : Option EExpr) (lvl : Level) (typLhs typRhs e : PExpr) : RecM PExpr := do
-  pure $ (← p?.mapM (fun (p : EExpr) => do pure (Lean.mkAppN (← getConst `L4L.cast [lvl]) #[typLhs, typRhs, p.toPExpr, e]).toPExpr)).getD e
+  pure $ (← p?.mapM (fun (p : EExpr) => do pure (Lean.mkAppN (← getConst `cast [lvl]) #[typLhs, typRhs, p.toPExpr, e]).toPExpr)).getD e
 
 /--
 Infers the type of lambda expression `e`.
@@ -189,7 +191,7 @@ Infers the type of lambda expression `e`.
 def inferLambda (e : Expr) : RecPE := loop #[] false e where
   loop fvars domPatched : Expr → RecPE -- TODO OK that fvars is not `Array PExpr`?
   | .lam name dom body bi => do
-    let mut d := dom.instantiateRev fvars
+    let d := dom.instantiateRev fvars
     let (typ, d'?) ← inferType d
     let (typ', p?) ← ensureSortCore typ d
     let lvl := typ'.toExpr.sortLevel!
@@ -200,12 +202,13 @@ def inferLambda (e : Expr) : RecPE := loop #[] false e where
       let fvars := fvars.push (.fvar id)
       loop fvars (domPatched || d'?.isSome || p?.isSome) body
   | e => do
-    let (r, e'?) ← inferType (e.instantiateRev fvars)
+    let e := e.instantiateRev fvars
+    let (r, e'?) ← inferType e
     let e' := e'?.getD e.toPExpr
     let r := r.toExpr.cheapBetaReduce |>.toPExpr
-    let (rSort, r'?) ← inferType (r.instantiateRev (fvars.map (·.toPExpr)))
+    let (rSort, r'?) ← inferType r
     let (rSort', p?) ← ensureSortCore rSort r -- TODO need to test this
-    assert! r'? == none
+    assert 2 $ r'? == none
     let lvl := rSort'.toExpr.sortLevel!
     let r' ← maybeCast p? lvl.succ rSort rSort' r
 
@@ -233,7 +236,8 @@ def inferForall (e : Expr) : RecPE := loop #[] #[] false e where
       let fvars := fvars.push (.fvar id)
       loop fvars us (domPatched || d'?.isSome || p?.isSome) body
   | e => do
-    let (r, e'?) ← inferType (e.instantiateRev fvars)
+    let e := e.instantiateRev fvars
+    let (r, e'?) ← inferType e
     let (r', p?) ← ensureSortCore r e
     let lvl := r'.toExpr.sortLevel!
     let e' ← maybeCast p? lvl.succ r r' (e'?.getD e.toPExpr)
@@ -284,7 +288,7 @@ def inferApp (e : PExpr) : RecM PExpr := do
     | _ =>
       fType := fType.toExpr.instantiateRevRange j i args |>.toPExpr
       let (fType', p?) ← ensureForallCore fType e
-      assert! p? == none -- sanity check; f should already have been cast as necessary
+      assert 3 $ p? == none -- sanity check; f should already have been cast as necessary
       fType := fType'.toExpr.bindingBody!.toPExpr -- TODO ask on zulip about how to avoid this kind of double-casting
       j := i
   return fType.toExpr.instantiateRevRange j args.size args |>.toPExpr
@@ -377,25 +381,25 @@ def inferProj (typeName : Name) (idx : Nat) (struct : PExpr) (patched : Bool) (s
   let mut r := c_info.instantiateTypeLevelParams I_levels |>.toPExpr
   for i in [:I_val.numParams] do
     let (.mk (.forallE _ _ b _), p?) ← whnf r | fail -- FIXME use ensureForall?
-    assert! p? == none -- FIXME can we guarantee this? if so should remove whnf, if not need to "cast" `c` in Inductive.add
+    assert 0 $ p? == none -- FIXME can we guarantee this? if so should remove whnf, if not need to "cast" `c` in Inductive.add
     r := b.instantiate1 args[i]! |>.toPExpr
   let (isPropType, p?) := ← isProp type
-  assert! p? == none
+  assert 0 $ p? == none
   for i in [:idx] do
     let (.mk (.forallE _ dom b _), p?) ← whnf r | fail -- FIXME use ensureForall?
-    assert! p? == none -- FIXME
+    assert 0 $ p? == none -- FIXME
     if b.hasLooseBVars then
       -- prop structs cannot have non-prop dependent fields
       let (isPropDom, p?) := ← isProp dom.toPExpr
-      assert! p? == none
+      assert 0 $ p? == none
       if isPropType then if !isPropDom then fail
       r := b.instantiate1 (.proj I_name i struct) |>.toPExpr
     else
       r := b.toPExpr
   let (.mk (.forallE _ dom _ _), p?) ← whnf r | fail -- FIXME use ensureForall?
-  assert! p? == none -- FIXME
+  assert 0 $ p? == none -- FIXME
   let (isPropDom, p?) := ← isProp dom.toPExpr
-  assert! p? == none -- FIXME
+  assert 0 $ p? == none -- FIXME
   if isPropType then if !isPropDom then fail
   let patched := patched || pType?.isSome
   let patch := if patched then some (Expr.proj typeName idx struct).toPExpr else none
@@ -410,16 +414,16 @@ def getTypeLevel (e : PExpr) : RecM (Level × PExpr) := do
   let eType ← inferTypePure e
   let eTypeSort ← inferTypePure eType
   let (eTypeSort', es?) ← ensureSortCore eTypeSort eType
-  assert! es? == none
+  assert 4 $ es? == none
   pure (eTypeSort'.toExpr.sortLevel!, eType)
 
 @[inherit_doc inferType]
 def inferType' (e : Expr) : RecPE := do
   if e.isBVar then
     throw <| .other
-      s!"type checker does not support loose bound variables, {""
+      s!"patcher does not support loose bound variables, {""
         }replace them with free variables before invoking it"
-  assert! !e.hasLooseBVars
+  assert 5 $ !e.hasLooseBVars
   let state ← get
   if let some r := state.inferTypeC.find? e then
     return r
@@ -431,8 +435,8 @@ def inferType' (e : Expr) : RecPE := do
       let e' := e'?.getD e.toPExpr
       inferProj s idx e' e'?.isSome t
     | .fvar n => pure (← inferFVar (← readThe Context) n, none)
-    | .mvar _ => throw <| .other "kernel type checker does not support meta variables"
-    | .bvar _ => unreachable!
+    | .mvar _ => throw <| .other "patcher does not support meta variables"
+    | .bvar _ => throw $ .other "unreachable 1"
     | .sort l =>
       checkLevel (← readThe Context) l
       pure <| (Expr.sort (.succ l) |>.toPExpr, none)
@@ -442,9 +446,9 @@ def inferType' (e : Expr) : RecPE := do
     | .app f a =>
       let (fType, f'?) ← inferType' f
       let (fTypeSort, fType''?) ← inferType fType
-      assert! fType''? == none
+      assert 6 $ fType''? == none
       let (fTypeSort', fs?) ← ensureSortCore fTypeSort fType
-      assert! fs? == none
+      assert 7 $ fs? == none
       let fTypeLvl := fTypeSort'.toExpr.sortLevel!
       let (fType', pf'?) ← ensureForallCore fType f
       let f' ← maybeCast pf'? fTypeLvl fType fType' (f'?.getD f.toPExpr)
@@ -471,7 +475,7 @@ def inferType' (e : Expr) : RecPE := do
 --     throw <| .other
 --       s!"type checker does not support loose bound variables, {""
 --         }replace them with free variables before invoking it"
---   assert! !e.hasLooseBVars
+--   assert 1 $ !e.hasLooseBVars
 --   let state ← get
 --   if let some r := state.inferTypeI.find? e then
 --     return r
@@ -483,7 +487,7 @@ def inferType' (e : Expr) : RecPE := do
 --       inferProjPure s idx e t .none
 --     | .fvar n => inferFVar (← readThe Context) n
 --     | .mvar _ => throw <| .other "kernel type checker does not support meta variables"
---     | .bvar _ => unreachable!
+--     | .bvar _ => throw $ .other "unreachable"
 --     | .sort l =>
 --       pure <| (Expr.sort (.succ l)).toPExpr
 --     | .const c ls => inferConstant (← readThe Context) c ls true
@@ -496,7 +500,7 @@ def inferType' (e : Expr) : RecPE := do
 
 def inferTypePure' (e : PExpr) : RecM PExpr := do -- TODO make more efficient
   let (type, e'?) ← inferType' e
-  assert! e'? == none
+  assert 8 $ e'? == none
   pure type
 
 /--
@@ -540,14 +544,14 @@ def appProjThm? (structName : Name) (projIdx : Nat) (struct structN : PExpr) (st
     let env ← getEnv
 
     let fieldName := getStructureFields env structName |>.get! projIdx
-    let some projFnName := getProjFnForField? env structName fieldName | unreachable!
+    let some projFnName := getProjFnForField? env structName fieldName | throw $ .other "unreachable 2"
     let info ← env.get projFnName
     let projFnType := info.instantiateTypeLevelParams [structLvl]
-    let .forallE n t b bi := projFnType | unreachable!
+    let .forallE n t b bi := projFnType | throw $ .other "unreachable 3"
 
     let projType := (Expr.lam n t b bi).toPExpr
     let projSort ← inferTypePure (Expr.app projType structN).toPExpr
-    let .sort projLvl := (← ensureSortCorePure projSort projType).toExpr | unreachable!
+    let .sort projLvl := (← ensureSortCorePure projSort projType).toExpr | throw $ .other "unreachable 4"
 
     let projThm ← getProjThm structName structType projIdx projType structLvl projLvl
     pure $ Lean.mkAppN projThm #[struct, structN, structEqstructN.toExpr] |>.toEExpr structEqstructN.data
@@ -562,7 +566,7 @@ def reduceProj (structName : Name) (projIdx : Nat) (struct : PExpr) (cheapRec ch
   -- -- TODO is this necessary? can we assume the type of c and struct are the same?
   -- -- if not, we will need to use a different patch theorem
   -- let cType ← inferTypePure c
-  -- let (.true, cTypeEqstructType?) ← isDefEq cType structType | unreachable!
+  -- let (.true, cTypeEqstructType?) ← isDefEq cType structType | throw $ .other "unreachable 2"
   -- c ← maybeCast cTypeEqstructType? lvl cType structType c 
 
   if let (.lit (.strVal s)) := structN.toExpr then
@@ -737,7 +741,7 @@ def isDefEqBinder (binDatas : Array ((Name × PExpr × PExpr × BinderInfo) × (
     else pure (none, none, none)
     let tType := tType?.getD (tDom.instantiateRev tvars) -- FIXME optimize something here?
     let sort ← inferTypePure tType
-    let .sort lvl := (← ensureSortCorePure sort tType).toExpr | unreachable!
+    let .sort lvl := (← ensureSortCorePure sort tType).toExpr | throw $ .other "unreachable 5"
     let sType := sType?.getD (sDom.instantiateRev svars)
     let idt := ⟨← mkFreshId⟩
     let ids := ⟨← mkFreshId⟩
@@ -757,7 +761,7 @@ def isDefEqBinder (binDatas : Array ((Name × PExpr × PExpr × BinderInfo) × (
               loop (idx + 1) tvars svars teqsvars domEqs
             else
               let tBody := tBody.instantiateRev tvars
-              let sBody := sBody.instantiateRev tvars
+              let sBody := sBody.instantiateRev svars
               let (defEq, ptbodEqsbod?) ← isDefEq tBody sBody
               if !defEq then return (false, none)
               pure (true, ← f tBody sBody ptbodEqsbod? tvars.reverse svars.reverse teqsvars.reverse domEqs.reverse) -- FIXME can iterate backwards instead of reversing lists?
@@ -869,7 +873,7 @@ def isDefEqForall' (t s : PExpr) : RecM (Bool × Option (Array ForallData × Opt
         if data.isEmpty then
           UaEqVb? := .none
         else
-          UaEqVb? := .some $ Lean.mkAppN (.const `L4L.forallHEq [u, v]) #[A, B, U, V, hAB, hUV] |>.toEExpr data
+          UaEqVb? := .some $ Lean.mkAppN (← getConst `L4L.forallHEq [u, v]) #[A, B, U, V, hAB, hUV] |>.toEExpr data
 
       datas := datas.push {A, B, hAB, hUV, hUVData, U, V, u, v}
       Ua := U
@@ -906,7 +910,7 @@ def quickIsDefEq (t s : PExpr) (useHash := false) : RecLB := do
   | .forallE .., .forallE .. => pure $ some $ ← isDefEqForall t s
   | .sort a1, .sort a2 => pure $ some $ ((a1.isEquiv a2), none)
   | .mdata _ a1, .mdata _ a2 => pure $ some $ ← isDefEq a1.toPExpr a2.toPExpr
-  | .mvar .., .mvar .. => unreachable!
+  | .mvar .., .mvar .. => throw $ .other "unreachable 6"
   | .lit a1, .lit a2 => pure $ some ((a1 == a2), none)
   | _, _ => pure none
   let some (defeq, p?) := res | return (.undef, none)
@@ -972,15 +976,15 @@ def isDefEqApp (t s : PExpr) (tfEqsf? : Option (Option EExpr) := none) (targsEqs
         let (tb, sb) ← alignForall tBody.toPExpr sBody.toPExpr remBinds'
         pure (Expr.forallE tName tDom tb tBi |>.toPExpr, Expr.forallE sName sDom sb sBi |>.toPExpr)
       | _, _ =>
-        unreachable!
+        throw $ .other "unreachable 7"
     else
       pure (t, s)
 
   (tfT, sfT) ← alignForall tfT sfT tArgs.size
 
   -- TODO(perf) restrict data collection to the case of `taEqsa?.isSome || ret?.isSome`
-  let (true, .some (datas, _)) ← isDefEqForall' tfT sfT | unreachable!
-  assert! datas.size == tArgs.size
+  let (true, .some (datas, _)) ← isDefEqForall' tfT sfT | throw $ .other "unreachable 8"
+  assert 9 $ datas.size >= tArgs.size
 
   for ((({A, B, hAB, hUV, hUVData, U, V, u, v}, ta), sa), taEqsa?) in datas.zip tArgs |>.zip sArgs |>.zip taEqsas do
     if taEqsa?.isSome || ret?.isSome then
@@ -1044,7 +1048,8 @@ def reduceRecursor (e : PExpr) (cheapRec cheapProj : Bool) : RecM (Option (PExpr
   let recReduced? ← inductiveReduceRec {
       isDefEq := isDefEq
       whnf  := whnf'
-      inferTypePure := inferTypePure
+      inferTypePure := fun x => do 
+        inferTypePure x
       appPrfIrrel := appPrfIrrel
       appHEqTrans? := appHEqTrans?
       isDefEqApp := fun t s (idx, p?) => isDefEqApp t s (targsEqsargs? := .insert default idx p?)
@@ -1070,7 +1075,7 @@ private def _whnfCore' (e' : Expr) (cheapRec := false) (cheapProj := false) : Re
     return r
   match e' with
   | .bvar .. | .sort .. | .mvar .. | .forallE .. | .const .. | .lam .. | .lit ..
-  | .mdata .. => unreachable!
+  | .mdata .. => throw $ .other "unreachable 9"
   | .fvar _ => return ← whnfFVar e cheapRec cheapProj
   | .app .. => -- beta-reduce at the head as much as possible, apply any remaining `rargs` to the resulting expression, and re-run `whnfCore`
     e'.withAppRev fun f0 rargs => do
@@ -1081,8 +1086,9 @@ private def _whnfCore' (e' : Expr) (cheapRec := false) (cheapProj := false) : Re
     let (_, frargs'?) ← inferType frargs
     let frargs' := frargs'?.getD frargs.toPExpr
     let rargs' := frargs'.toExpr.getAppArgs.reverse
-    assert! rargs'.size == rargs.size
-    let (.true, eEqfrargs'?) ← isDefEqApp e frargs' pf0Eqf? | unreachable!
+    assert 10 $ rargs'.size == rargs.size
+    let (.true, eEqfrargs'?) ← isDefEqApp e frargs' pf0Eqf? |
+      throw $ .other "unreachable 10"
 
     if let (.lam _ _ body _) := f.toExpr then
       let rec loop m (f : Expr) : RecEE :=
@@ -1155,7 +1161,7 @@ def whnf' (e : PExpr) : RecEE := _whnf' e
 
 def whnfPure' (e : PExpr) : RecM PExpr := do
   let (eN, p?) ← whnf' e
-  assert! p? == none
+  assert 11 $ p? == none
   pure eN
 
 /--
@@ -1165,7 +1171,7 @@ Checks if `t` and `s` are definitionally equivalent according to proof irrelevan
 def isDefEqProofIrrel (t s : PExpr) : RecLB := do
   let tType ← inferTypePure t
   let (prop, pprop?) ← isProp tType
-  assert! pprop? == none
+  assert 12 $ pprop? == none
   if !prop then return (.undef, none)
   let sType ← inferTypePure s
   let (ret, pt?) ← isDefEq tType sType
@@ -1325,7 +1331,7 @@ def lazyDeltaReduction (tn sn : PExpr) : RecM ReductionStatus := loop tn sn none
     | .notDelta => return .unknown ltn lsn tnEqltn? snEqlsn?
     | .bool .true ltnEqlsn? => return .bool .true (← appHEqTrans? tn ltn sn tnEqltn? <| ← appHEqTrans? ltn lsn sn ltnEqlsn? <| ← appHEqSymm? sn lsn snEqlsn?)
     | .bool .false _ => return .bool .false none
-    | .unknown .. => unreachable!
+    | .unknown .. => throw $ .other "unreachable 11"
 
 /--
 If `t` is a string literal and `s` is a string constructor application,
@@ -1352,7 +1358,7 @@ with one constructor without any fields or indices).
 -- because any two instances of a unit type must be definitionally equal to a constructor application
 def isDefEqUnitLike (t s : PExpr) : RecB := do
   let (tType, p?) ← whnf (← inferTypePure t)
-  assert! p? == none
+  assert 13 $ p? == none
   let .const I _ := tType.toExpr.getAppFn | return (false, none)
   let env ← getEnv
   let .inductInfo { isRec := false, ctors := [c], numIndices := 0, .. } ← env.get I
@@ -1374,6 +1380,9 @@ def isDefEqCore' (t s : PExpr) : RecB := do
 
   let (tn, tEqtn?) ← whnfCore t (cheapProj := true)
   let (sn, sEqsn?) ← whnfCore s (cheapProj := true)
+  if sn.toExpr.hasLooseBVars then
+    dbg_trace s!"before: {s.toExpr}"
+    dbg_trace s!"after: {sn.toExpr}"
 
   let mktEqs? (t' s' : PExpr) (tEqt'? sEqs'? t'Eqs'? : Option EExpr) := do appHEqTrans? t s' s (← appHEqTrans? t t' s' tEqt'? t'Eqs'?) (← appHEqSymm? s s' sEqs'?)
 
@@ -1392,7 +1401,7 @@ def isDefEqCore' (t s : PExpr) : RecB := do
 
   match ← lazyDeltaReduction tn sn with
   | .continue ..
-  | .notDelta => unreachable!
+  | .notDelta => throw $ .other "unreachable 12"
   | .bool b p? => return (b, p?)
   | .unknown tn' sn' tnEqtn'? snEqsn'? =>
 
@@ -1445,7 +1454,7 @@ def isDefEqCore' (t s : PExpr) : RecB := do
 
 def isDefEqCorePure' (t s : PExpr) : RecM Bool := do
   let (defEq, p?) ← isDefEqCore' t s
-  assert! p? == none
+  assert 14 $ p? == none
   pure defEq
 
 
@@ -1500,17 +1509,19 @@ first time, use `check`.
 def inferType (e : PExpr) : M PExpr := (Inner.inferTypePure e).run
 
 @[inherit_doc isDefEqCore]
-def isDefEq (t s : PExpr) : MB := (Inner.isDefEq t s).run
+def isDefEq (t s : PExpr) (lps : List Name) : MB :=
+  withReader ({ · with lparams := lps }) (Inner.isDefEq t s).run
 def isDefEqPure (t s : PExpr) : M Bool := (Inner.isDefEqPure t s).run
 
 @[inherit_doc ensureSortCore]
-def ensureSort (t : PExpr) (s := t) : MEE := RecM.run do 
-  ensureSortCore t s
+def ensureSort (t : PExpr) (lps : List Name) (s := t) : MEE := 
+  withReader ({ · with lparams := lps }) $ RecM.run do 
+    ensureSortCore t s
 
 @[inherit_doc ensureSortCore]
 def ensureSortPure (t : PExpr) (s := t) : M PExpr := RecM.run do 
   let (s, p?) ← (ensureSortCore t s)
-  assert! p? == none
+  assert 15 $ p? == none
   pure s
 
 @[inherit_doc ensureForallCore]
@@ -1519,11 +1530,23 @@ def ensureForall (t : PExpr) (s := t) : MEE := (ensureForallCore t s).run
 def maybeCast (p? : Option EExpr) (lvl : Level) (typLhs typRhs e : PExpr) : M PExpr := RecM.run do
   Inner.maybeCast p? lvl typLhs typRhs e
 
+-- def test' : MetaM String := do
+--   dbg_trace s!"test"
+--   unreachable!
+--   pure "HERE"
+--
+-- def test : MetaM Unit := do
+--   let x ← test'
+--   dbg_trace s!"{x}"
+--
+-- -- #eval test
+
 /--
 Ensures that `e` is defeq to some `e' := .sort (_ + 1)`, returning `e'`. If not,
 throws an error with `s` (the expression required be a type).
 -/
-def ensureType (e : PExpr) : MEE := do ensureSort (← inferType e) e -- FIXME transport e using proof from ensureSort?
+def ensureType (e : PExpr) : MEE := RecM.run $
+  do ensureSortCore (← inferType e) e -- FIXME transport e using proof from ensureSort?
 def ensureTypePure (e : PExpr) : M PExpr := do ensureSortPure (← inferType e) e -- FIXME transport e using proof from ensureSort?
 
 -- def etaExpand (e : Expr) : M Expr :=

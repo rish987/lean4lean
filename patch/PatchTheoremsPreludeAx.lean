@@ -1,5 +1,4 @@
 prelude
-namespace L4L
 universe u v
 
 inductive HEq : {α : Sort u} → α → {β : Sort u} → β → Prop where
@@ -10,6 +9,8 @@ inductive Eq : α → α → Prop where
 
 noncomputable def cast {α β : Sort u} (h : Eq α β) (a : α) : β :=
   h.rec a
+
+namespace L4L
 
 axiom prfIrrelHEq (P Q : Prop) (heq : Eq P Q) (p : Q) (q : P) : HEq p q
 

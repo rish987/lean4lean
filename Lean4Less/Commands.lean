@@ -16,8 +16,29 @@ def ppConst (env : Environment) (n : Name) : IO Unit := do
   | .some v => IO.println s!"\n{← (PrettyPrinter.ppExprLegacy env default default options v)}"
   | _ => IO.println ""
 
+def patchConsts : List Name := [
+`cast,
+`HEq,
+`HEq.refl,
+`Eq,
+`Eq.refl,
+`L4L.forallHEq,
+`L4L.prfIrrelHEq,
+`L4L.appHEq,
+`L4L.appHEqBinNatFn,
+`L4L.lambdaHEq,
+`L4L.appArgHEq,
+].foldl (init := default) fun acc name => acc.insert name
+
 def transL4L (n : Name) : Lean.Elab.Command.CommandElabM Environment := do
-  let (_, env) ← checkConstants (printErr := true) (← getEnv) (.insert default n) @Lean4Less.addDecl
+  let mut env := (← getEnv)
+  for const in patchConsts do
+    let (_, env') ← checkConstants (printErr := true) env (.insert default const) @Lean4Less.addDecl
+    env := env'
+    if n == const then break
+
+  let (_, env') ← checkConstants (printErr := true) env (.insert default n) @Lean4Less.addDecl
+  env := env'
   ppConst env n
   pure env
 
@@ -26,7 +47,7 @@ elab "#trans_l4l " i:ident : command => do
 
 elab "#check_l4l " i:ident : command => do
   let env ← transL4L i.getId
-  _ ← checkConstants (printErr := true) env (.insert default i.getId) @Lean4Lean.addDecl
+  _ ← checkConstants (printErr := true) env (.insert patchConsts i.getId) @Lean4Lean.addDecl
   -- match macroRes with
   -- | some (name, _) => logInfo s!"Next step is a macro: {name.toString}"
   -- | none =>
