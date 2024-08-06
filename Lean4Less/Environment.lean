@@ -53,6 +53,7 @@ def patchDefinition (env : Environment) (v : DefinitionVal) :
       let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
       let value' := value'?.getD v.value.toPExpr
       let (defEq, valueTypeEqtype?) ← isDefEq valueType type v.levelParams
+
       if !defEq then
         throw <| .declTypeMismatch env (.defnDecl v) valueType
       let value  ← maybeCast valueTypeEqtype? lvl valueType type value'

@@ -32,6 +32,7 @@ def patchConsts : List Name := [
 `L4L.forallHEq,
 `L4L.prfIrrelHEq,
 `L4L.appHEq,
+`L4L.appHEq',
 `L4L.appHEqBinNatFn,
 `L4L.lambdaHEq,
 `L4L.appArgHEq,

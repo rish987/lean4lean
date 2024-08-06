@@ -831,6 +831,8 @@ U : PExpr
 V : PExpr
 u : Level
 v : Level
+p? : Option EExpr
+deriving Inhabited
 
 /--
 If `t` and `s` are for-all expressions, checks that their domains are defeq and
@@ -869,8 +871,10 @@ def isDefEqForall' (t s : PExpr) : RecM (Bool × Option (Array ForallData × Opt
         else
           pure $ mk (← mkHRefl UaTypeLvl UaType Ua)
 
-      let U := (← getLCtx).mkForall #[a] Ua |>.toPExpr
-      let V := (← getLCtx).mkForall #[b] Vb |>.toPExpr
+      let U := (← getLCtx).mkLambda #[a] Ua |>.toPExpr
+      let V := (← getLCtx).mkLambda #[b] Vb |>.toPExpr
+      Ua := (← getLCtx).mkForall #[a] Ua |>.toPExpr
+      Vb := (← getLCtx).mkForall #[b] Vb |>.toPExpr
 
       let (ALvl, A) ← getTypeLevel a
       let AType ← inferTypePure A
@@ -891,9 +895,7 @@ def isDefEqForall' (t s : PExpr) : RecM (Bool × Option (Array ForallData × Opt
         else
           UaEqVb? := .some $ Lean.mkAppN (← getConst `L4L.forallHEq [u, v]) #[A, B, U, V, ← mkhAB, ← mkhUV] |>.toEExpr data
 
-      datas := datas.push {A, B, mkhAB, mkhUV, hUVData, U, V, u, v}
-      Ua := U
-      Vb := V
+      datas := datas.push {A, B, mkhAB, mkhUV, hUVData, U, V, u, v, p? := UaEqVb?}
     pure $ .some (datas, UaEqVb?)
 
 def isDefEqForall (t s : PExpr) : RecB := do
@@ -1002,16 +1004,25 @@ def isDefEqApp (t s : PExpr) (tfEqsf? : Option (Option EExpr) := none) (targsEqs
   let (true, .some (datas, _)) ← isDefEqForall' tfT sfT | throw $ .other "unreachable 8"
   assert 9 $ datas.size >= tArgs.size
 
-  for ((({A, B, mkhAB, mkhUV, hUVData, U, V, u, v}, ta), sa), taEqsa?) in datas.zip tArgs |>.zip sArgs |>.zip taEqsas do
+  -- let mut datas' := #[]
+  -- for data in datas do
+  --   datas' := datas' ++ #[data]
+  --   if data.p?.isNone then break
+
+  for ((({A, B, mkhAB, mkhUV, hUVData, U, V, u, v, p?}, ta), sa), taEqsa?) in datas.zip tArgs |>.zip sArgs |>.zip taEqsas do
     if taEqsa?.isSome || ret?.isSome then
       let (tfLvl, tfType) ← getTypeLevel tf
       let (taLvl, taType) ← getTypeLevel ta
       let ret ← ret?.getDM (mkHRefl tfLvl tfType tf)
       let taEqsa ← taEqsa?.getDM (mkHRefl taLvl taType ta)
-      let hUV ← mkhUV
-      let hAB ← mkhAB
-      ret? := .some $ Lean.mkAppN (← getConst `L4L.appHEq [u, v])
-        #[A, B, U, V, hAB, hUV, tf, sf, ta, sa, ret, taEqsa] |>.toEExpr (.mergeN #[taEqsa.data, hUVData, hAB.data])
+      if p?.isSome then
+        let hUV ← mkhUV
+        let hAB ← mkhAB
+        ret? := .some $ Lean.mkAppN (← getConst `L4L.appHEq [u, v])
+          #[A, B, U, V, hAB, hUV, tf, sf, ta, sa, ret, taEqsa] |>.toEExpr (.mergeN #[ret.data, taEqsa.data, hUVData, hAB.data])
+      else
+        ret? := .some $ Lean.mkAppN (← getConst `L4L.appHEq' [u, v])
+          #[A, U, tf, sf, ta, sa, ret, taEqsa] |>.toEExpr (.mergeN #[ret.data, taEqsa.data])
     tf := tf.toExpr.app ta |>.toPExpr
     sf := sf.toExpr.app sa |>.toPExpr
 

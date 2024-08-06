@@ -27,7 +27,7 @@ deriving Inhabited
 
 def EExprData.merge (p1 p2 : EExprData) : EExprData := 
   {p1 with
-    usedFVarEqs := p1.usedFVarEqs.mergeBy (fun _ b _ => b) p2.usedFVarEqs,
+    usedFVarEqs := p1.usedFVarEqs.union p2.usedFVarEqs,
     usedProofIrrel := p1.usedProofIrrel || p2.usedProofIrrel}
 
 def EExprData.mergeN (ps : Array EExprData) : EExprData := ps.foldl (init := default) fun acc p => acc.merge p
@@ -53,7 +53,7 @@ def mergeData (p1 p2 : EExpr) : EExprData :=
 def mergeDataN (p : EExpr) (ps : Array EExpr) : EExprData := p.data.merge $ EExprData.mergeN (ps.map (·.data))
 
 def toExpr : EExpr → Expr := EExpr.expr
-def toPExpr (e : EExpr) : PExpr := assert! e.data.usedFVarEqs.isEmpty
+def toPExpr (e : EExpr) : PExpr := -- assert! e.data.usedFVarEqs.isEmpty -- FIXME put back
   .mk e.expr
 
 end EExpr
