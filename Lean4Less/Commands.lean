@@ -9,6 +9,8 @@ open Lean4Lean
 def ppConst (env : Environment) (n : Name) : IO Unit := do
   let options := default
   let options := KVMap.set options `pp.proofs true
+  let options := KVMap.set options `pp.explicit true
+  let options := KVMap.set options `pp.funBinderTypes true
   let some info := env.find? n | unreachable!
   IO.print s!"{info.name}: {← (PrettyPrinter.ppExprLegacy env default default options info.type)}"
 
@@ -16,9 +18,14 @@ def ppConst (env : Environment) (n : Name) : IO Unit := do
   | .some v => IO.println s!"\n{← (PrettyPrinter.ppExprLegacy env default default options v)}"
   | _ => IO.println ""
 
+/--
+The set of all constants used to patch terms, in linearised order based on
+dependencies in the patched versions of their types/values.
+-/
 def patchConsts : List Name := [
 `cast,
 `HEq,
+`HEq.symm,
 `HEq.refl,
 `Eq,
 `Eq.refl,
@@ -28,16 +35,11 @@ def patchConsts : List Name := [
 `L4L.appHEqBinNatFn,
 `L4L.lambdaHEq,
 `L4L.appArgHEq,
-].foldl (init := default) fun acc name => acc.insert name
+]
 
 def transL4L (n : Name) : Lean.Elab.Command.CommandElabM Environment := do
   let mut env := (← getEnv)
-  for const in patchConsts do
-    let (_, env') ← checkConstants (printErr := true) env (.insert default const) @Lean4Less.addDecl
-    env := env'
-    if n == const then break
-
-  let (_, env') ← checkConstants (printErr := true) env (.insert default n) @Lean4Less.addDecl
+  let (_, env') ← checkConstants (printErr := true) env (.insert default n) @Lean4Less.addDecl (initConsts := patchConsts)
   env := env'
   ppConst env n
   pure env
@@ -47,7 +49,7 @@ elab "#trans_l4l " i:ident : command => do
 
 elab "#check_l4l " i:ident : command => do
   let env ← transL4L i.getId
-  _ ← checkConstants (printErr := true) env (.insert patchConsts i.getId) @Lean4Lean.addDecl
+  _ ← checkConstants (printErr := true) env (.insert default i.getId) @Lean4Lean.addDecl
   -- match macroRes with
   -- | some (name, _) => logInfo s!"Next step is a macro: {name.toString}"
   -- | none =>

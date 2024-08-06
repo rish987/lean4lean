@@ -1,5 +1,5 @@
 import Lean4Less.Commands
-import patch.PatchTheorems
+import patch.PatchTheoremsAx
 
 axiom P : Prop
 axiom Q : P → Prop
@@ -14,6 +14,13 @@ axiom t : T p Qp
 
 -- with proof irrelevance, `t` would suffice
 def ex : T q Qq := t
+example {α : Sort u} {a a' : α} (h : HEq a a') : Eq a a' :=
+  have : (α β : Sort u) → (a : α) → (b : β) → HEq a b → (h : Eq α β) → Eq (cast h a) b :=
+    fun A B a b h₁ =>
+      h₁.rec (fun _ => rfl)
+  this α α a a' h rfl
+
+#print eq_of_heq
 
 #check_l4l ex
 

@@ -180,7 +180,8 @@ def inferType (e : Expr) : RecPE := fun m => m.inferType e
 
 def inferTypePure (e : PExpr) : RecM PExpr := fun m => m.inferTypePure e
 
-def getConst (n : Name) (lvls : List Level) : RecM Expr := pure $ .const n lvls
+def getConst (n : Name) (lvls : List Level) : RecM Expr := do
+  pure $ .const n lvls
 
 def maybeCast (p? : Option EExpr) (lvl : Level) (typLhs typRhs e : PExpr) : RecM PExpr := do
   pure $ (← p?.mapM (fun (p : EExpr) => do pure (Lean.mkAppN (← getConst `cast [lvl]) #[typLhs, typRhs, p.toPExpr, e]).toPExpr)).getD e
@@ -666,12 +667,12 @@ def reduceBinNatOp (op : Name) (f : Nat → Nat → Nat) (a b : PExpr) : RecM (O
   let (b', pb?) := (← whnf b)
   let some v1 := natLitExt? a' | return none
   let some v2 := natLitExt? b' | return none
-  let ret? := if pa?.isSome || pb?.isSome then
-      let pa := pa?.getD (← mkHRefl (.succ .zero) (Expr.const `Nat []).toPExpr a')
-      let pb := pb?.getD (← mkHRefl (.succ .zero) (Expr.const `Nat []).toPExpr b')
-      .some $ Lean.mkAppN (← getConst `L4L.appHEqBinNatFn []) #[.const `Nat [], .const `Nat [], .const op [], a, a', b, b', pa, pb] |>.toEExprMerge pa pb
+  let ret? ← if pa?.isSome || pb?.isSome then
+      let pa ← pa?.getDM (mkHRefl (.succ .zero) (Expr.const `Nat []).toPExpr a')
+      let pb ← pb?.getDM (mkHRefl (.succ .zero) (Expr.const `Nat []).toPExpr b')
+      pure $ .some $ Lean.mkAppN (← getConst `L4L.appHEqBinNatFn []) #[.const `Nat [], .const `Nat [], .const op [], a, a', b, b', pa, pb] |>.toEExprMerge pa pb
     else
-      none
+      pure none
   return some <| ((Expr.lit <| .natVal <| f v1 v2).toPExpr, ret?)
 
 /--
@@ -685,12 +686,12 @@ def reduceBinNatPred (op : Name) (f : Nat → Nat → Bool) (a b : PExpr) : RecM
   let (b', pb?) := (← whnf b)
   let some v1 := natLitExt? a' | return none
   let some v2 := natLitExt? b' | return none
-  let ret? := if pa?.isSome || pb?.isSome then
-      let pa := pa?.getD (← mkHRefl (.succ .zero) (Expr.const `Nat []).toPExpr a')
-      let pb := pb?.getD (← mkHRefl (.succ .zero) (Expr.const `Nat []).toPExpr b')
-      .some $ Lean.mkAppN (← getConst `L4L.appHEqBinNatFn []) #[.const `Nat [], .const `Bool [], .const op [], a, a', b, b', pa, pb] |>.toEExprMerge pa pb
+  let ret? ← if pa?.isSome || pb?.isSome then
+      let pa ← pa?.getDM (mkHRefl (.succ .zero) (Expr.const `Nat []).toPExpr a')
+      let pb ← pb?.getDM (mkHRefl (.succ .zero) (Expr.const `Nat []).toPExpr b')
+      pure $ .some $ Lean.mkAppN (← getConst `L4L.appHEqBinNatFn []) #[.const `Nat [], .const `Bool [], .const op [], a, a', b, b', pa, pb] |>.toEExprMerge pa pb
     else
-      none
+      pure none
   return (toExpr (f v1 v2) |>.toPExpr, ret?)
 
 def mkNatSuccAppArgHEq? (p? : Option EExpr) (t s : PExpr) : RecM (Option EExpr) := do
@@ -732,25 +733,23 @@ def isDefEqBinder (binDatas : Array ((Name × PExpr × PExpr × BinderInfo) × (
 : RecM (Bool × (Option T)) := do
   let rec loop idx tvars svars teqsvars domEqs : RecM (Bool × (Option T)) := do
     let ((tName, tDom, tBody, tBi), (sName, sDom, sBody, sBi)) := binDatas.get! idx
-    let (tType?, sType?, p?) ← if tDom != sDom then
-      let tType := tDom.instantiateRev tvars
-      let sType := sDom.instantiateRev svars
-      let (defEq, p?) ← isDefEq tType sType
+    let tDom := tDom.instantiateRev tvars
+    let sDom := sDom.instantiateRev svars
+    let p? ← if tDom != sDom then
+      let (defEq, p?) ← isDefEq tDom sDom
       if !defEq then return (false, none)
-      pure (some tType, some sType, p?)
-    else pure (none, none, none)
-    let tType := tType?.getD (tDom.instantiateRev tvars) -- FIXME optimize something here?
-    let sort ← inferTypePure tType
-    let .sort lvl := (← ensureSortCorePure sort tType).toExpr | throw $ .other "unreachable 5"
-    let sType := sType?.getD (sDom.instantiateRev svars)
+      pure (p?)
+    else pure (none)
+    let sort ← inferTypePure tDom
+    let .sort lvl := (← ensureSortCorePure sort tDom).toExpr | throw $ .other "unreachable 5"
     let idt := ⟨← mkFreshId⟩
     let ids := ⟨← mkFreshId⟩
     let idteqs := ⟨← mkFreshId⟩
-    withLCtx ((← getLCtx).mkLocalDecl idt tName tType tBi) do
-      withLCtx ((← getLCtx).mkLocalDecl ids sName sType sBi) do
+    withLCtx ((← getLCtx).mkLocalDecl idt tName tDom tBi) do
+      withLCtx ((← getLCtx).mkLocalDecl ids sName sDom sBi) do
         let tvar := (Expr.fvar idt).toPExpr
         let svar := (Expr.fvar ids).toPExpr
-        let teqsType := mkAppN (.const `HEq [lvl]) #[tType, sType, tvar, svar]
+        let teqsType := mkAppN (.const `HEq [lvl]) #[tDom, sDom, tvar, svar]
         withLCtx ((← getLCtx).mkLocalDecl idteqs default teqsType default) do
           withEqFVar ids idt idteqs do
             let tvars := tvars.push tvar
@@ -803,7 +802,7 @@ def isDefEqLambda (t s : PExpr) : RecB :=
         let U := (← getLCtx).mkForall #[a] Ua
         let V := (← getLCtx).mkForall #[b] Vb
 
-        let faEqgb := faEqgb?.getD (← mkHRefl UaLvl Ua fa)
+        let faEqgb ← faEqgb?.getDM $ mkHRefl UaLvl Ua fa
         let hfgData := {faEqgb.data with usedFVarEqs := faEqgb.data.usedFVarEqs.erase idaEqb.name}
         let hAB := pAEqB?.getD (← mkRefl ALvl.succ AType A)
 
@@ -821,8 +820,12 @@ def isDefEqLambda (t s : PExpr) : RecB :=
 structure ForallData where 
 A : PExpr
 B : PExpr
-hAB : EExpr
-hUV : PExpr
+mkhAB : RecM EExpr
+/--
+Data carried separately in `hUVData` because hUV is not of equality type
+(and therefore cannot be an `EExpr`).
+-/
+mkhUV : RecM PExpr
 hUVData : EExprData
 U : PExpr
 V : PExpr
@@ -852,9 +855,19 @@ def isDefEqForall' (t s : PExpr) : RecM (Bool × Option (Array ForallData × Opt
       let UaType ← whnfPure UaType
       let UaLvl := UaType.toExpr.sortLevel!
 
-      let UaEqVb := UaEqVb?.getD (← mkHRefl UaTypeLvl UaType Ua)
-      let hUV := (← getLCtx).mkForall #[a, b, .fvar idaEqb] UaEqVb |>.toPExpr
-      let hUVData := {UaEqVb.data with usedFVarEqs := UaEqVb.data.usedFVarEqs.erase idaEqb.name}
+      let lctx ← getLCtx
+      -- let UaEqVb ← UaEqVb?.getDM $ mkHRefl UaTypeLvl UaType Ua
+      let hUVData :=
+        if let .some UaEqVb := UaEqVb? then 
+          {UaEqVb.data with usedFVarEqs := UaEqVb.data.usedFVarEqs.erase idaEqb.name}
+        else {}
+
+      let mkhUV : RecM PExpr := do
+        let mk (UaEqVb : EExpr) := lctx.mkLambda #[a, b, .fvar idaEqb] UaEqVb |>.toPExpr
+        if let .some UaEqVb := UaEqVb? then 
+          pure $ mk UaEqVb
+        else
+          pure $ mk (← mkHRefl UaTypeLvl UaType Ua)
 
       let U := (← getLCtx).mkForall #[a] Ua |>.toPExpr
       let V := (← getLCtx).mkForall #[b] Vb |>.toPExpr
@@ -862,20 +875,23 @@ def isDefEqForall' (t s : PExpr) : RecM (Bool × Option (Array ForallData × Opt
       let (ALvl, A) ← getTypeLevel a
       let AType ← inferTypePure A
       -- TODO check all usages of refl vs hrefl
-      let hAB := pAEqB?.getD (← mkRefl ALvl.succ AType A)
 
       let B ← inferTypePure b
       let u := ALvl
       let v := UaLvl
 
-      let data := hAB.data.merge hUVData
+      let mkhAB : RecM EExpr := do
+        pure $ pAEqB?.getD (← mkRefl ALvl.succ AType A)
+
       if pAEqB?.isSome || UaEqVb?.isSome then
+        let hABData := (pAEqB?.map fun hAB => hAB.data) |>.getD {}
+        let data := hABData.merge hUVData
         if data.isEmpty then
           UaEqVb? := .none
         else
-          UaEqVb? := .some $ Lean.mkAppN (← getConst `L4L.forallHEq [u, v]) #[A, B, U, V, hAB, hUV] |>.toEExpr data
+          UaEqVb? := .some $ Lean.mkAppN (← getConst `L4L.forallHEq [u, v]) #[A, B, U, V, ← mkhAB, ← mkhUV] |>.toEExpr data
 
-      datas := datas.push {A, B, hAB, hUV, hUVData, U, V, u, v}
+      datas := datas.push {A, B, mkhAB, mkhUV, hUVData, U, V, u, v}
       Ua := U
       Vb := V
     pure $ .some (datas, UaEqVb?)
@@ -986,12 +1002,14 @@ def isDefEqApp (t s : PExpr) (tfEqsf? : Option (Option EExpr) := none) (targsEqs
   let (true, .some (datas, _)) ← isDefEqForall' tfT sfT | throw $ .other "unreachable 8"
   assert 9 $ datas.size >= tArgs.size
 
-  for ((({A, B, hAB, hUV, hUVData, U, V, u, v}, ta), sa), taEqsa?) in datas.zip tArgs |>.zip sArgs |>.zip taEqsas do
+  for ((({A, B, mkhAB, mkhUV, hUVData, U, V, u, v}, ta), sa), taEqsa?) in datas.zip tArgs |>.zip sArgs |>.zip taEqsas do
     if taEqsa?.isSome || ret?.isSome then
       let (tfLvl, tfType) ← getTypeLevel tf
       let (taLvl, taType) ← getTypeLevel ta
-      let ret := ret?.getD (← mkHRefl tfLvl tfType tf)
-      let taEqsa := taEqsa?.getD (← mkHRefl taLvl taType ta)
+      let ret ← ret?.getDM (mkHRefl tfLvl tfType tf)
+      let taEqsa ← taEqsa?.getDM (mkHRefl taLvl taType ta)
+      let hUV ← mkhUV
+      let hAB ← mkhAB
       ret? := .some $ Lean.mkAppN (← getConst `L4L.appHEq [u, v])
         #[A, B, U, V, hAB, hUV, tf, sf, ta, sa, ret, taEqsa] |>.toEExpr (.mergeN #[taEqsa.data, hUVData, hAB.data])
     tf := tf.toExpr.app ta |>.toPExpr
@@ -1491,8 +1509,17 @@ With the level context `lps`, infers the type of expression `e` and checks that
 
 Use `inferType` to infer type alone.
 -/
-def check (e : Expr) (lps : List Name) : MPE :=
-  withReader ({ · with lparams := lps }) (inferType e).run
+def check (e : Expr) (lps : List Name) : MPE := do
+  let ret ← withReader ({ · with lparams := lps }) (inferType e).run
+  let (_, e'?) := ret
+
+  if let some e' := e'? then
+    for c in e'.toExpr.getUsedConstants do
+      if not ((← getEnv).find? c).isSome then
+        throw $ .other s!"possible patching loop detected ({c})"
+
+  pure ret
+  
 
 def checkPure (e : Expr) (lps : List Name) : M PExpr :=
   withReader ({ · with lparams := lps }) (inferTypePure e.toPExpr).run
