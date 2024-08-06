@@ -132,6 +132,7 @@ and add it to the environment.
 -/
 partial def replayConstant (name : Name) (addDeclFn : Declaration → M Unit) : M Unit := do
   if ← isTodo name then
+    -- dbg_trace s!"Processing deps: {name}"
     let some ci := (← read).newConstants.find? name | unreachable!
     replayConstants ci.getUsedConstants addDeclFn
     -- Check that this name is still pending: a mutual block may have taken care of it.
@@ -181,6 +182,9 @@ partial def replayConstant (name : Name) (addDeclFn : Declaration → M Unit) : 
       | .quotInfo _ =>
         addDeclFn (Declaration.quotDecl)
       modify fun s => { s with pending := s.pending.erase name }
+    -- dbg_trace s!"DONE:            {name}"
+  -- else 
+    -- dbg_trace s!"DBG[14]: {name}"
 
 /-- Replay a set of constants one at a time. -/
 partial def replayConstants (names : NameSet) (addDeclFn : Declaration → M Unit) : M Unit := do
@@ -210,7 +214,7 @@ def checkPostponedRecursors : M Unit := do
       if ! (info == info') then throw <| IO.userError s!"Invalid recursor {ctor}"
     | _, _ => throw <| IO.userError s!"No such recursor {ctor}"
 
-variable  (addDeclFn : Declaration → M Unit)
+variable (addDeclFn : Declaration → M Unit)
 
 /-- "Replay" some constants into an `Environment`, sending them to the kernel for checking. -/
 def replay (ctx : Context) (env : Environment) (decl : Option Name := none) : IO Environment := do
