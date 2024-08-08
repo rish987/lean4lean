@@ -751,17 +751,29 @@ v : Level
 p? : Option EExpr
 deriving Inhabited
 
+structure AppDataAB where
+B : PExpr
+hAB : EExpr
+deriving Inhabited
+
+structure AppDataUV where
+V : PExpr
+hUV : PExpr
+hUVData : EExprData
+deriving Inhabited
+
+inductive AppDataExtra where
+| none : AppDataExtra
+| UV : AppDataUV → AppDataExtra
+| ABUV : AppDataAB → AppDataUV → AppDataExtra
+deriving Inhabited
+
 structure AppData where
 U : PExpr
 A : PExpr
 u : Level
 v : Level
-
-V : PExpr
-hUV : PExpr
-hUVData : EExprData
-B : PExpr
-hAB : EExpr
+extra : AppDataExtra
 deriving Inhabited
 
 def isDefEqBinderForApp' (as bs aEqbs : Array PExpr) (aVals bVals : Array PExpr) (U' V' : PExpr)
@@ -779,42 +791,66 @@ def isDefEqBinderForApp' (as bs aEqbs : Array PExpr) (aVals bVals : Array PExpr)
       pure AEqB?
     else pure (none)
 
-    let (u, _) ← getTypeLevel a
-    let AType ← inferTypePure A
-
-    let hAB := AEqB?.getD (← mkRefl u.succ AType A)
-
     let lctx ← getLCtx
 
+    let (u, _) ← getTypeLevel a
+
+    let mut extra := default
+
     let Ua' : PExpr := U'.instantiateRev $ aVals[:idx] ++ as[idx:]
-    let Vb' : PExpr := V'.instantiateRev $ bVals[:idx] ++ bs[idx:]
     let Ua := lctx.mkForall (as[idx + 1:].toArray.map (·.toExpr)) Ua' |>.toPExpr
-    let Vb := lctx.mkForall (bs[idx + 1:].toArray.map (·.toExpr)) Vb' |>.toPExpr
-    let (defEq, UaEqVb?) ← isDefEq Ua Vb
-    assert 23 defEq
 
     let (UaTypeLvl, UaType) ← getTypeLevel Ua
     let UaType ← whnfPure UaType
     let v := UaType.toExpr.sortLevel!
 
-    let hUVData :=
-      if let .some UaEqVb := UaEqVb? then 
-        {UaEqVb.data with usedFVarEqs := UaEqVb.data.usedFVarEqs.erase aEqb.toExpr.fvarId!.name}
-      else {}
-    let mk (UaEqVb : EExpr) := lctx.mkLambda #[a, b, aEqb.toExpr] UaEqVb |>.toPExpr
-    let hUV ← if let .some UaEqVb := UaEqVb? then 
-        pure $ mk UaEqVb
-      else
-        pure $ mk (← mkHRefl UaTypeLvl UaType Ua)
-
     let U := lctx.mkLambda #[a.toExpr] Ua |>.toPExpr
-    let V := lctx.mkLambda #[b.toExpr] Vb |>.toPExpr
 
-    let datas := datas.push {A, B, hAB, U, V, hUV, hUVData, u, v}
+    if let .some AEqB := AEqB? then
+      let AType ← inferTypePure A
+
+      let hAB := AEqB?.getD (← mkRefl u.succ AType A)
+
+      let Vb' : PExpr := V'.instantiateRev $ bVals[:idx] ++ bs[idx:]
+      let Vb := lctx.mkForall (bs[idx + 1:].toArray.map (·.toExpr)) Vb' |>.toPExpr
+      let (defEq, UaEqVb?) ← isDefEq Ua Vb
+      assert 23 defEq
+
+      let UaEqVb ← if let .some UaEqVb := UaEqVb? then 
+          pure UaEqVb
+        else
+          pure (← mkHRefl UaTypeLvl UaType Ua)
+
+      let hUVData :=
+          {UaEqVb.data with usedFVarEqs := UaEqVb.data.usedFVarEqs.erase aEqb.toExpr.fvarId!.name}
+
+      let hUV := lctx.mkLambda #[a, b, aEqb.toExpr] UaEqVb |>.toPExpr
+
+      let V := lctx.mkLambda #[b.toExpr] Vb |>.toPExpr
+      extra := .ABUV {B, hAB} {V, hUV, hUVData}
+    else
+      let Va' : PExpr := V'.instantiateRev $ bVals[:idx] ++ #[a] ++ bs[idx + 1:]
+      let Ua := lctx.mkForall (as[idx + 1:].toArray.map (·.toExpr)) Ua' |>.toPExpr
+      let Va := lctx.mkForall (bs[idx + 1:].toArray.map (·.toExpr)) Va' |>.toPExpr
+      let (defEq, UaEqVa?) ← isDefEq Ua Va
+      assert 24 defEq
+
+      if let .some UaEqVa := UaEqVa? then
+        let hUVData := UaEqVa.data
+
+        let hUV := lctx.mkLambda #[a] UaEqVa |>.toPExpr
+
+        let V := lctx.mkLambda #[a.toExpr] Va |>.toPExpr
+        extra := .UV {V, hUV, hUVData}
+      else
+        extra := .none
+
+    let datas := datas.push {A, U, u, v, extra}
     if _h : idx < as.size - 1 then
       loop (idx + 1) datas
     else
       pure datas
+
   termination_by (as.size - 1) - idx
   loop 0 #[]
 
