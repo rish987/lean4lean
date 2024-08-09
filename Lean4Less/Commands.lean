@@ -24,6 +24,7 @@ dependencies in the patched versions of their types/values.
 -/
 def patchConsts : List Name := [
 `cast,
+`L4L.castHEq,
 `HEq,
 `HEq.symm,
 `HEq.refl,

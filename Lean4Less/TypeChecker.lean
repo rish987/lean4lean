@@ -7,6 +7,7 @@ import Lean4Lean.ForEachExprV
 import Lean4Lean.EquivManager
 import Lean4Lean.Declaration
 import Lean4Lean.Level
+import Lean4Lean.Util
 import Lean4Lean.Instantiate
 
 namespace Lean4Less
@@ -184,7 +185,7 @@ def getConst (n : Name) (lvls : List Level) : RecM Expr := do
   pure $ .const n lvls
 
 def maybeCast (p? : Option EExpr) (lvl : Level) (typLhs typRhs e : PExpr) : RecM PExpr := do
-  pure $ (← p?.mapM (fun (p : EExpr) => do pure (Lean.mkAppN (← getConst `cast [lvl]) #[typLhs, typRhs, p.toPExpr, e]).toPExpr)).getD e
+  pure $ (← p?.mapM (fun (p : EExpr) => do pure (Lean.mkAppN (← getConst `L4L.castHEq [lvl]) #[typLhs, typRhs, p.toExpr, e]).toPExpr)).getD e
 
 /--
 Infers the type of lambda expression `e`.
@@ -466,6 +467,8 @@ def inferType' (e : Expr) : RecPE := do
         let patch := if f'?.isSome || a'?.isSome || pf'?.isSome || pa'?.isSome then .some (Expr.app f' a').toPExpr else none
         pure ((Expr.bindingBody! fType').instantiate1 a' |>.toPExpr, patch)
       else
+        dbg_trace s!"DBG[60]: TypeChecker.lean:449: f={f}"
+        dbg_trace s!"DBG[61]: TypeChecker.lean:449: f'={f'?.get!.toExpr}"
         throw <| .appTypeMismatch (← getEnv) (← getLCtx) e fType' aType
     | .letE .. => inferLet e
   modify fun s => { s with inferTypeC := s.inferTypeC.insert e (r, ep?) }
@@ -792,7 +795,7 @@ def isDefEqBinderForApp' (as bs aEqbs : Array PExpr) (aVals bVals : Array PExpr)
     if let .some AEqB := AEqB? then
       let AType ← inferTypePure A
 
-      let hAB := AEqB?.getD (← mkRefl u.succ AType A)
+      let hAB := AEqB?.getD (← mkHRefl u.succ AType A)
 
       let Vb' : PExpr := V'.instantiateRev $ bVals[:idx] ++ bs[idx:]
       let Vb := lctx.mkForall (bs[idx + 1:].toArray.map (·.toExpr)) Vb' |>.toPExpr
@@ -854,7 +857,7 @@ def isDefEqBinderForApp (binDatas : Array (BinderData × BinderData)) (U' V' : P
       withLCtx ((← getLCtx).mkLocalDecl idb bName B bBi) do
         let a := (Expr.fvar ida).toPExpr
         let b := (Expr.fvar idb).toPExpr
-        let teqsType := mkAppN (.const `HEq [lvl]) #[A, B, a, b]
+        let teqsType := mkAppN (.const `HEq [lvl]) #[A, a, B, b]
         withLCtx ((← getLCtx).mkLocalDecl idaEqb default teqsType default) do
           withEqFVar ida idb idaEqb do
             let aEqb := (Expr.fvar idaEqb).toPExpr
@@ -905,7 +908,7 @@ def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : P
         let ids := ⟨← mkFreshId⟩
         withLCtx ((← getLCtx).mkLocalDecl ids sName sDom sBi) do
           let svar := (Expr.fvar ids).toPExpr
-          let teqsType := mkAppN (.const `HEq [lvl]) #[tDom, sDom, tvar, svar]
+          let teqsType := mkAppN (.const `HEq [lvl]) #[tDom, tvar, sDom, svar]
           let idtEqs := ⟨← mkFreshId⟩
           withLCtx ((← getLCtx).mkLocalDecl idtEqs default teqsType default) do
             withEqFVar idt ids idtEqs do
@@ -1224,7 +1227,7 @@ def tryEtaStruct (t s : PExpr) : RecB := do
     return (true, ← appHEqSymm? s t sEqt?)
 
 def appPrfIrrel (P Q : PExpr) (PEqQ? : Option EExpr) (p q : PExpr) : RecM EExpr := do
-  let PEqQ := PEqQ?.getD (← mkRefl 1 (Expr.sort 0).toPExpr P)
+  let PEqQ := PEqQ?.getD (← mkHRefl 1 (Expr.sort 0).toPExpr P)
   return Lean.mkAppN (← getConst `L4L.prfIrrelHEq []) #[P, Q, PEqQ, p, q] |>.toEExpr (PEqQ.data.merge {usedProofIrrel := true})
 
 def reduceRecursor (e : PExpr) (cheapRec cheapProj : Bool) : RecM (Option (PExpr × Option EExpr)) := do

@@ -23,6 +23,7 @@ example {α : Sort u} {a a' : α} (h : HEq a a') : Eq a a' :=
 #print eq_of_heq
 
 #check_l4l ex
+
 -- axiom T : Type → Type
 -- axiom t : T Prop
 --
