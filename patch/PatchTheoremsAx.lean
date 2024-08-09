@@ -7,7 +7,11 @@ namespace L4L
 
 universe u v
 
-axiom forallHEq {A B : Sort u} {U : A → Sort v} {V : B → Sort v}
+axiom forallHEq {A : Sort u} {U : A → Sort v} {V : A → Sort v}
+  (hUV : (a : A) → HEq (U a) (V a))
+  : ((a : A) → U a) = ((b : A) → V b)
+
+axiom forallHEqAB {A B : Sort u} {U : A → Sort v} {V : B → Sort v}
   (hAB : A = B) (hUV : (a : A) → (b : B) → HEq a b → HEq (U a) (V b))
   : ((a : A) → U a) = ((b : B) → V b)
 

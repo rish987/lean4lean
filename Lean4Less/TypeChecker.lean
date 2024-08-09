@@ -977,10 +977,10 @@ def isDefEqLambda (t s : PExpr) : RecB := do
       gb := g
     pure faEqgb?
 
-def isDefEqForallForApp (t s : PExpr) (tArgs sArgs : Array PExpr) : RecM (Array AppData) := do
+def getAppDatas (t s : PExpr) (tArgs sArgs : Array PExpr) : RecM (Array AppData) := do
   let rec getData t s := do
     match t, s with
-    | .forallE tName tDom tBody tBi, .lam sName sDom sBody sBi =>
+    | .forallE tName tDom tBody tBi, .forallE sName sDom sBody sBi =>
       let (datas, tBody, sBody) ← getData tBody sBody
       pure (#[({name := tName, dom := tDom.toPExpr, info := tBi}, {name := sName, dom := sDom.toPExpr, info := sBi})] ++ datas, tBody, sBody)
     | tBody, sBody =>
@@ -1157,7 +1157,7 @@ def isDefEqApp (t s : PExpr) (tfEqsf? : Option (Option EExpr) := none) (targsEqs
   (tfT, sfT) ← alignForall tfT sfT tArgs.size
 
   -- TODO(perf) restrict data collection to the case of `taEqsa?.isSome || ret?.isSome`
-  let datas ← isDefEqForallForApp tfT sfT tArgs sArgs
+  let datas ← getAppDatas tfT sfT tArgs sArgs
   assert 9 $ datas.size >= tArgs.size
 
   -- let mut datas' := #[]
@@ -1166,20 +1166,24 @@ def isDefEqApp (t s : PExpr) (tfEqsf? : Option (Option EExpr) := none) (targsEqs
   --   if data.p?.isNone then break
 
   for i in [:tArgs.size] do
-    let ({A, B, hAB, hUV, hUVData, U, V, u, v}, ta, sa, taEqsa?) := (datas[i]!, tArgs[i]!, sArgs[i]!, taEqsas[i]!)
+    let ({A, U, u, v, extra}, ta, sa, taEqsa?) := (datas[i]!, tArgs[i]!, sArgs[i]!, taEqsas[i]!)
     if taEqsa?.isSome || ret?.isSome then
-      let (tfLvl, tfType) ← getTypeLevel tf
-      let (taLvl, taType) ← getTypeLevel ta
-      let ret ← ret?.getDM (mkHRefl tfLvl tfType tf)
-      let taEqsa ← taEqsa?.getDM (mkHRefl taLvl taType ta)
-      if p?.isSome then
-        let hUV ← mkhUV
-        let hAB ← mkhAB
-        ret? := .some $ Lean.mkAppN (← getConst `L4L.appHEq [u, v])
-          #[A, B, U, V, hAB, hUV, tf, sf, ta, sa, ret, taEqsa] |>.toEExpr (.mergeN #[ret.data, taEqsa.data, hUVData, hAB.data])
-      else
-        ret? := .some $ Lean.mkAppN (← getConst `L4L.appHEq' [u, v])
+      let ret ← ret?.getDM do
+        let (tfLvl, tfType) ← getTypeLevel tf
+        (mkHRefl tfLvl tfType tf)
+      let taEqsa ← taEqsa?.getDM do
+        let (taLvl, taType) ← getTypeLevel ta
+        (mkHRefl taLvl taType ta)
+      ret? := .some $ ← match extra with
+      | .none => do
+        pure $ Lean.mkAppN (← getConst `L4L.appHEq [u, v])
           #[A, U, tf, sf, ta, sa, ret, taEqsa] |>.toEExpr (.mergeN #[ret.data, taEqsa.data])
+      | .UV {V, hUV, hUVData} => do
+        pure $ Lean.mkAppN (← getConst `L4L.appHEqUV [u, v])
+          #[A, U, V, hUV, tf, sf, ta, sa, ret, taEqsa] |>.toEExpr (.mergeN #[ret.data, taEqsa.data, hUVData])
+      | .ABUV {B, hAB} {V, hUV, hUVData} => do
+        pure $ Lean.mkAppN (← getConst `L4L.appHEqABUV [u, v])
+          #[A, B, U, V, hAB, hUV, tf, sf, ta, sa, ret, taEqsa] |>.toEExpr (.mergeN #[ret.data, taEqsa.data, hUVData, hAB.data])
     tf := tf.toExpr.app ta |>.toPExpr
     sf := sf.toExpr.app sa |>.toPExpr
 
