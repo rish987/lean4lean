@@ -7,7 +7,7 @@ namespace L4L
 
 universe u v
 
-axiom forallHEq {A : Sort u} {U : A → Sort v} {V : A → Sort v}
+axiom forallHEq {A : Sort u} {U V : A → Sort v}
   (hUV : (a : A) → HEq (U a) (V a))
   : ((a : A) → U a) = ((b : A) → V b)
 
@@ -30,7 +30,7 @@ axiom appHEq {A : Sort u} {U : A → Sort v}
   (hfg : HEq f g) (hab : HEq a b)
   : HEq (f a) (g b)
 
-axiom appHEqUV {A : Sort u} {U : A → Sort v} {V : A → Sort v}
+axiom appHEqUV {A : Sort u} {U V : A → Sort v}
   (hUV : (a : A) → HEq (U a) (V a))
   {f : (a : A) → U a} {g : (b : A) → V b} {a : A} {b : A}
   (hfg : HEq f g) (hab : HEq a b)
@@ -48,7 +48,12 @@ axiom appHEqBinNatFn {N : Type} {T : Type}
   (hb : HEq b1 b2)
   : HEq (f a1 b1) (f a2 b2)
 
-axiom lambdaHEq {A B : Sort u} {U : A → Sort v} {V : B → Sort v}
+axiom lambdaHEq {A : Sort u} {U V : A → Sort v}
+  (f : (a : A) → U a) (g : (b : A) → V b)
+  (hfg : (a : A) → HEq (f a) (g a))
+  : HEq (fun a => f a) (fun b => g b)
+
+axiom lambdaHEqAB {A B : Sort u} {U : A → Sort v} {V : B → Sort v}
   (f : (a : A) → U a) (g : (b : B) → V b)
   (hAB : A = B) (hfg : (a : A) → (b : B) → HEq a b → HEq (f a) (g b))
   : HEq (fun a => f a) (fun b => g b)
