@@ -17,7 +17,7 @@ axiom forallHEqAB {A B : Sort u} {U : A → Sort v} {V : B → Sort v}
   (hAB : HEq A B) (hUV : (a : A) → (b : B) → HEq a b → HEq (U a) (V b))
   : HEq ((a : A) → U a) ((b : B) → V b)
 
-axiom prfIrrelHEq (P Q : Prop) (heq : HEq P Q) (p : Q) (q : P) : HEq p q
+axiom prfIrrelHEq (P Q : Prop) (heq : HEq P Q) (p : P) (q : Q) : HEq p q
 
 axiom appArgHEq {A : Sort u} {U : A → Sort v}
   (f : (a : A) → U a)
