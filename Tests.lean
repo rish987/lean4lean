@@ -27,6 +27,42 @@ inductive K (a b : Nat) : Nat → Prop where
 theorem kLikeReduction (a b : Nat) (h : K a b 0) 
   : @K.rec a b (fun _ _ => Nat) 10 0 h = 10 := rfl
 
+-- succeeds because of K-like reduction
+-- (do not need constructor application to reduce)
+theorem kLikeReduction' : (a b : Nat) → (h : K a b 0) →
+  @K.rec a b (fun _ _ => Nat) 10 0 h = 10 := 
+   @L4L.castHEq
+     (∀ (a b : Nat) (h : K a b 0),
+       @Eq Nat (@K.rec a b (fun (x : Nat) (x : K a b x) => Nat) 10 0 h)
+         (@K.rec a b (fun (x : Nat) (x : K a b x) => Nat) 10 0 h))
+     (∀ (a b : Nat) (h : K a b 0), @Eq Nat (@K.rec a b (fun (x : Nat) (x : K a b x) => Nat) 10 0 h) 10)
+     (@L4L.forallHEq Nat
+       (fun (a : Nat) =>
+         ∀ (b : Nat) (h : K a b 0),
+           @Eq Nat (@K.rec a b (fun (x : Nat) (x : K a b x) => Nat) 10 0 h)
+             (@K.rec a b (fun (x : Nat) (x : K a b x) => Nat) 10 0 h))
+       (fun (a : Nat) => ∀ (b : Nat) (h : K a b 0), @Eq Nat (@K.rec a b (fun (x : Nat) (x : K a b x) => Nat) 10 0 h) 10)
+       fun (a : Nat) =>
+       @L4L.forallHEq Nat
+         (fun (b : Nat) =>
+           ∀ (h : K a b 0),
+             @Eq Nat (@K.rec a b (fun (x : Nat) (x : K a b x) => Nat) 10 0 h)
+               (@K.rec a b (fun (x : Nat) (x : K a b x) => Nat) 10 0 h))
+         (fun (b : Nat) => ∀ (h : K a b 0), @Eq Nat (@K.rec a b (fun (x : Nat) (x : K a b x) => Nat) 10 0 h) 10)
+         fun (b : Nat) =>
+         @L4L.forallHEq (K a b 0)
+           (fun (h : K a b 0) =>
+             @Eq Nat (@K.rec a b (fun (x : Nat) (x : K a b x) => Nat) 10 0 h)
+               (@K.rec a b (fun (x : Nat) (x : K a b x) => Nat) 10 0 h))
+           (fun (h : K a b 0) => @Eq Nat (@K.rec a b (fun (x : Nat) (x : K a b x) => Nat) 10 0 h) 10) fun (h : K a b 0) =>
+           @L4L.appArgHEq Nat (fun (a : Nat) => Prop) (@Eq Nat (@K.rec a b (fun (x : Nat) (x : K a b x) => Nat) 10 0 h))
+             (@K.rec a b (fun (x : Nat) (x : K a b x) => Nat) 10 0 h) 10
+             (@L4L.appArgHEq (K a b 0) (fun (t : K a b 0) => (fun (x : Nat) (x : K a b x) => Nat) 0 t)
+               (@K.rec a b (fun (x : Nat) (x : K a b x) => Nat) 10 0) h (@K.mk a b)
+               (L4L.prfIrrel (K a b 0) h (@K.mk a b))))
+     fun (a b : Nat) (h : K a b 0) => @rfl Nat (@K.rec a b (fun (x : Nat) (x : K a b x) => Nat) 10 0 h)
+
+
 -- def ex' : T q Qq := 
 --    @L4L.castHEq (T p Qp) (T q Qq)
 --      (@L4L.appHEqABUV (Q p) (Q q) (fun (a : Q p) => Prop) (fun (a : Q q) => Prop)
@@ -51,7 +87,7 @@ example {α : Sort u} {a a' : α} (h : HEq a a') : Eq a a' :=
       h₁.rec (fun _ => rfl)
   this α α a a' h rfl
 
-#check_l4l kLikeReduction
+#check_l4l nestedPrfIrrel
 -- axiom T : Type → Type
 -- axiom t : T Prop
 --

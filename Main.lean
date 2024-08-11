@@ -4,12 +4,15 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Scott Morrison
 -/
 import Lean.CoreM
+import Cli
 import Lean.Util.FoldConsts
 import Lean4Less.Environment
 import Lean4Less.Replay
+import Lean4Less.Commands
 
 open Lean
 open Lean4Lean
+open Cli
 
 def outDir : System.FilePath := System.mkFilePath [".", "out"]
 
@@ -23,26 +26,39 @@ as it was at the beginning of the file, using the kernel to check them.
 You can also use `lake exe lean4lean --fresh Mathlib.Data.Nat.Basic` to replay all the constants
 (both imported and defined in that file) into a fresh environment.
 -/
-unsafe def main (args : List String) : IO UInt32 := do
+unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
   initSearchPath (← findSysroot)
-  let (flags, args) := args.partition fun s => s.startsWith "--"
-  let verbose : Bool := "--verbose" ∈ flags
-  match args with
-    | [mod] => match mod.toName with
-      | .anonymous => throw <| IO.userError s!"Could not resolve module: {mod}"
-      | m =>
-          replayFromFresh Lean4Less.addDecl m verbose false
-    | _ => do
-      throw <| IO.userError "TODO not implemented"
-      -- let sp ← searchPathRef.get
-      -- let sp := [sp[0]!] -- FIXME
-      -- let mut tasks : Array (Name × Task (Except IO.Error Unit)) := #[]
-      -- for path in (← SearchPath.findAllWithExt sp "olean") do
-      --   dbg_trace s!"DBG[2]: Main.lean:44: m={path}"
-      --   if let some m ← searchModuleNameOfFileName path sp then
-      --     replayFromImports m verbose compare
-      -- for (m, t) in tasks do
-      --   if let .error e := t.get then
-      --     IO.eprintln s!"lean4lean found a problem in {m}"
-      --     throw e
+  let mod : Name := p.positionalArg! "input" |>.value
+  let onlyConsts? := p.flag? "only" |>.map fun onlys => 
+    onlys.as! (Array String)
+  match mod with
+    | .anonymous => throw <| IO.userError s!"Could not resolve module: {mod}"
+    | _ =>
+      if let some onlyConsts := onlyConsts? then
+        Lean.withImportModules #[{module := mod}] {} 0 fun env => do
+          Lean4Less.transL4L' (onlyConsts.map (·.toName)) env
+      else
+        throw <| IO.userError "TODO not implemented"
   return 0
+
+unsafe def transCmd : Cmd := `[Cli|
+  transCmd VIA runTransCmd; ["0.0.1"]
+  "Translate from Lean to Lean-."
+
+  FLAGS:
+    -- p, print;               "Print translation of specified constants to standard output (relevant only with '-o ...')."
+    -- w, write;               "Also write translation of specified constants (with dependencies) to file (relevant only with '-p')."
+    o, only : Array String; "Only translate the specified constants and their dependencies."
+
+  ARGS:
+    input : String;         "Input .lean file."
+
+  -- The EXTENSIONS section denotes features that
+  -- were added as an external extension to the library.
+  -- `./Cli/Extensions.lean` provides some commonly useful examples.
+  EXTENSIONS:
+    author "rish987"
+]
+
+unsafe def main (args : List String) : IO UInt32 := do
+  transCmd.validate args

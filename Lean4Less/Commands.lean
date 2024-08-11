@@ -6,6 +6,8 @@ import Lean4Lean.Commands
 open Lean
 open Lean4Lean
 
+namespace Lean4Less
+
 def ppConst (env : Environment) (n : Name) : IO Unit := do
   let options := default
   let options := KVMap.set options `pp.proofs true
@@ -45,19 +47,26 @@ def patchConsts : List Name := [
 `L4L.appArgHEq,
 ]
 
-def transL4L (n : Name) : Lean.Elab.Command.CommandElabM Environment := do
-  let mut env := (← getEnv)
-  let (_, env') ← checkConstants (printErr := true) env (.insert default n) @Lean4Less.addDecl (initConsts := patchConsts)
-  env := env'
-  ppConst env n
+def transL4L' (n : Array Name) (env : Environment) : IO Environment := do
+  let mut env := env
+  for n in n do
+    let (_, env') ← checkConstants (printErr := true) env (.insert default n) @Lean4Less.addDecl (initConsts := patchConsts)
+    env := env'
+    ppConst env n
   pure env
 
+def transL4L (n : Array Name) (env? : Option Environment := none) : Lean.Elab.Command.CommandElabM Environment := do
+  let env ← env?.getDM getEnv
+  transL4L' n env
+
 elab "#trans_l4l " i:ident : command => do
-  _ ← transL4L i.getId
+  _ ← transL4L #[i.getId]
 
 elab "#check_l4l " i:ident : command => do
-  let env ← transL4L i.getId
+  let env ← transL4L #[i.getId]
   _ ← checkConstants (printErr := true) env (.insert default i.getId) @Lean4Lean.addDecl
+
+end Lean4Less
   -- match macroRes with
   -- | some (name, _) => logInfo s!"Next step is a macro: {name.toString}"
   -- | none =>
