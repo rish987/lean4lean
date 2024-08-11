@@ -1187,22 +1187,40 @@ def isDefEqApp (t s : PExpr) (tfEqsf? : Option (Option EExpr) := none) (targsEqs
   for i in [:tArgs.size] do
     let ({A, U, u, v, extra}, ta, sa, taEqsa?) := (datas[i]!, tArgs[i]!, sArgs[i]!, taEqsas[i]!)
     if taEqsa?.isSome || ret?.isSome then
-      let ret ← ret?.getDM do
-        let (tfLvl, tfType) ← getTypeLevel tf
-        (mkHRefl tfLvl tfType tf)
-      let taEqsa ← taEqsa?.getDM do
-        let (taLvl, taType) ← getTypeLevel ta
-        (mkHRefl taLvl taType ta)
       ret? := .some $ ← match extra with
       | .none => do
-        pure $ Lean.mkAppN (← getConst `L4L.appHEq [u, v])
-          #[A, U, tf, sf, ta, sa, ret, taEqsa] |>.toEExpr (.mergeN #[ret.data, taEqsa.data])
+        if let some taEqsa := taEqsa? then
+          if let some ret := ret? then
+            pure $ Lean.mkAppN (← getConst `L4L.appHEq [u, v])
+              #[A, U, tf, sf, ta, sa, ret, taEqsa] |>.toEExpr (.mergeN #[ret.data, taEqsa.data])
+          else
+            pure $ Lean.mkAppN (← getConst `L4L.appArgHEq [u, v])
+              #[A, U, tf, ta, sa, taEqsa] |>.toEExpr (.mergeN #[taEqsa.data])
+        else if let some ret := ret? then
+          pure $ Lean.mkAppN (← getConst `L4L.appFunHEq [u, v])
+            #[A, U, tf, sf, ta, ret] |>.toEExpr (.mergeN #[ret.data])
+        else
+          throw $ .other "unreachable 13"
       | .UV {V, hUV, hUVData} => do
-        pure $ Lean.mkAppN (← getConst `L4L.appHEqUV [u, v])
-          #[A, U, V, hUV, tf, sf, ta, sa, ret, taEqsa] |>.toEExpr (.mergeN #[ret.data, taEqsa.data, hUVData])
+        if let some ret := ret? then
+          if let some taEqsa := taEqsa? then
+            pure $ Lean.mkAppN (← getConst `L4L.appHEqUV [u, v])
+              #[A, U, V, hUV, tf, sf, ta, sa, ret, taEqsa] |>.toEExpr (.mergeN #[ret.data, taEqsa.data, hUVData])
+          else
+            pure $ Lean.mkAppN (← getConst `L4L.appFunHEqUV [u, v])
+              #[A, U, V, hUV, tf, sf, ta, ret] |>.toEExpr (.mergeN #[ret.data, hUVData])
+        else
+          throw $ .other "unreachable 14"
       | .ABUV {B, hAB} {V, hUV, hUVData} => do
-        pure $ Lean.mkAppN (← getConst `L4L.appHEqABUV [u, v])
-          #[A, B, U, V, hAB, hUV, tf, sf, ta, sa, ret, taEqsa] |>.toEExpr (.mergeN #[ret.data, taEqsa.data, hUVData, hAB.data])
+        if let some ret := ret? then
+          if let some taEqsa := taEqsa? then
+            pure $ (Lean.mkAppN (← getConst `L4L.appHEqABUV [u, v])
+            #[A, B, U, V, hAB, hUV, tf, sf, ta, sa, ret, taEqsa]).toEExpr (.mergeN #[ret.data, taEqsa.data, hUVData, hAB.data])
+          else
+            throw $ .other "unreachable 15"
+        else
+          throw $ .other "unreachable 16"
+
     tf := tf.toExpr.app ta |>.toPExpr
     sf := sf.toExpr.app sa |>.toPExpr
 
@@ -1244,9 +1262,11 @@ def tryEtaStruct (t s : PExpr) : RecB := do
     let (true, sEqt?) ← tryEtaStructCore s t | return (false, none)
     return (true, ← appHEqSymm? s t sEqt?)
 
-def appPrfIrrel (P Q : PExpr) (PEqQ? : Option EExpr) (p q : PExpr) : RecM EExpr := do
-  let PEqQ := PEqQ?.getD (← mkHRefl 1 (Expr.sort 0).toPExpr P)
+def appPrfIrrelHEq (P Q : PExpr) (PEqQ : EExpr) (p q : PExpr) : RecM EExpr := do
   return Lean.mkAppN (← getConst `L4L.prfIrrelHEq []) #[P, Q, PEqQ, p, q] |>.toEExpr (PEqQ.data.merge {usedProofIrrel := true})
+
+def appPrfIrrel (P : PExpr) (p q : PExpr) : RecM EExpr := do
+  return Lean.mkAppN (← getConst `L4L.prfIrrel []) #[P, p, q] |>.toEExpr {usedProofIrrel := true}
 
 def reduceRecursor (e : PExpr) (cheapRec cheapProj : Bool) : RecM (Option (PExpr × Option EExpr)) := do
   let env ← getEnv
@@ -1259,6 +1279,7 @@ def reduceRecursor (e : PExpr) (cheapRec cheapProj : Bool) : RecM (Option (PExpr
       whnf  := whnf'
       inferTypePure := fun x => do 
         inferTypePure x
+      appPrfIrrelHEq := appPrfIrrelHEq
       appPrfIrrel := appPrfIrrel
       appHEqTrans? := appHEqTrans?
       isDefEqApp := fun t s (idx, p?) => isDefEqApp t s (targsEqsargs? := .insert default idx p?)
@@ -1385,8 +1406,11 @@ def isDefEqProofIrrel (t s : PExpr) : RecLB := do
   let sType ← inferTypePure s
   let (ret, pt?) ← isDefEq tType sType
   if ret == .true then
-    let p ← appPrfIrrel tType sType pt? t s
-    return (.true, .some p) -- FIXME return .some p
+    let p ← if let some pt := pt? then
+      appPrfIrrelHEq tType sType pt t s
+    else
+      appPrfIrrel tType t s
+    return (.true, .some p)
   pure (.undef, none)
 
 def failedBefore (failure : HashSet (Expr × Expr)) (t s : Expr) : Bool :=

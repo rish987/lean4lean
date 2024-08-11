@@ -17,12 +17,18 @@ axiom forallHEqAB {A B : Sort u} {U : A → Sort v} {V : B → Sort v}
   (hAB : HEq A B) (hUV : (a : A) → (b : B) → HEq a b → HEq (U a) (V b))
   : HEq ((a : A) → U a) ((b : B) → V b)
 
+axiom prfIrrel (P : Prop) (p q : P) : HEq p q
 axiom prfIrrelHEq (P Q : Prop) (heq : HEq P Q) (p : P) (q : Q) : HEq p q
 
 axiom appArgHEq {A : Sort u} {U : A → Sort v}
   (f : (a : A) → U a)
   {a b : A} (hab : HEq a b)
   : HEq (f a) (f b)
+
+axiom appFunHEq {A : Sort u} {U : A → Sort v}
+  {f g : (a : A) → U a} (a : A)
+  (hfg : HEq f g)
+  : HEq (f a) (g a)
 
 -- axiom forallHEq {A B : Sort u} {U : A → Sort v} {V : B → Sort v} (hAB : A = B) (hUV : (a : A) → (b : B) → HEq a b → HEq (U a) (V b))
 --   : ((a : A) → U a) = ((b : B) → V b)
@@ -31,6 +37,12 @@ axiom appHEq {A : Sort u} {U : A → Sort v}
   {f g : (a : A) → U a} {a b : A}
   (hfg : HEq f g) (hab : HEq a b)
   : HEq (f a) (g b)
+
+axiom appFunHEqUV {A : Sort u} {U V : A → Sort v}
+  (hUV : (a : A) → HEq (U a) (V a))
+  {f : (a : A) → U a} {g : (b : A) → V b} (a : A) 
+  (hfg : HEq f g)
+  : HEq (f a) (g a)
 
 axiom appHEqUV {A : Sort u} {U V : A → Sort v}
   (hUV : (a : A) → HEq (U a) (V a))

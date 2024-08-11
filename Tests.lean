@@ -13,7 +13,19 @@ axiom T : (p : P) → Q p → Prop
 axiom t : T p Qp
 
 -- with proof irrelevance, `t` would suffice
-def ex : T q Qq := t
+def nestedPrfIrrel : T q Qq := t
+
+inductive K (a b : Nat) : Nat → Prop where
+  | mk : K a b 0
+-- K.rec.{u} {a b : Nat}
+--   {motive : (c : Nat) → K a b c → Sort u} 
+--   (mk : motive 0 (K.mk a b)) {c : Nat}
+--   (t : K a b c) : motive c t
+
+-- succeeds because of K-like reduction
+-- (do not need constructor application to reduce)
+theorem kLikeReduction (a b : Nat) (h : K a b 0) 
+  : @K.rec a b (fun _ _ => Nat) 10 0 h = 10 := rfl
 
 -- def ex' : T q Qq := 
 --    @L4L.castHEq (T p Qp) (T q Qq)
@@ -39,9 +51,7 @@ example {α : Sort u} {a a' : α} (h : HEq a a') : Eq a a' :=
       h₁.rec (fun _ => rfl)
   this α α a a' h rfl
 
-#print eq_of_heq
-
-#check_l4l ex
+#check_l4l kLikeReduction
 -- axiom T : Type → Type
 -- axiom t : T Prop
 --
