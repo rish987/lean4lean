@@ -49,6 +49,8 @@ def toCtorWhenK (rval : RecursorVal) (e : PExpr) : m (PExpr × Option EExpr) := 
     for h : i in [rval.numParams:appTypeArgs.size] do
       if (appTypeArgs[i]'h.2).hasExprMVar then return (e, none)
   let some newCtorApp := mkNullaryCtor env appType rval.numParams | return (e, none)
+  let (defEq, p?) ← meth.isDefEq e newCtorApp
+  if defEq && p?.isNone then return (e, none)
   -- check that the indices of types of `e` and `newCtorApp` match
   let (defEq, p?) ← meth.isDefEq appType (← meth.inferTypePure newCtorApp)
   assert! p? == none
