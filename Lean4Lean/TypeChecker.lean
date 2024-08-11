@@ -673,8 +673,8 @@ def isDefEqCore' (t s : Expr) : RecM Bool := do
     let r ← quickIsDefEq tn sn
     if r != .undef then return r == .true
 
-  let r ← isDefEqProofIrrel tn sn
-  if r != .undef then return r == .true
+  -- let r ← isDefEqProofIrrel tn sn
+  -- if r != .undef then return r == .true
 
   match ← lazyDeltaReduction tn sn with
   | .continue .. => unreachable!
