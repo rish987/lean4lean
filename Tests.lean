@@ -32,13 +32,13 @@ theorem kLikeReduction : B true := hk
 
 -- succeeds because of K-like reduction
 -- (do not need constructor application to reduce)
-theorem kLikeReduction' : B true := 
-   @L4L.castHEq (B (@K.rec (fun (x : K) => Bool) Bool.true k)) (B Bool.true)
-     (@L4L.appArgHEq Bool (fun (a : Bool) => Type) B (@K.rec (fun (x : K) => Bool) Bool.true k) Bool.true
-       (@L4L.appArgHEq K (fun (t : K) => (fun (x : K) => Bool) t) (@K.rec (fun (x : K) => Bool) Bool.true) k K.mk
-         (L4L.prfIrrel K k K.mk)))
-     hk
-
+-- theorem kLikeReduction' : B true := 
+--    @L4L.castHEq (B (@K.rec (fun (x : K) => Bool) Bool.true k)) (B Bool.true)
+--      (@L4L.appArgHEq Bool (fun (a : Bool) => Type) B (@K.rec (fun (x : K) => Bool) Bool.true k) Bool.true
+--        (@L4L.appArgHEq K (fun (t : K) => (fun (x : K) => Bool) t) (@K.rec (fun (x : K) => Bool) Bool.true) k K.mk
+--          (L4L.prfIrrel K k K.mk)))
+--      hk
+--
 -- def ex' : T q Qq := 
 --    @L4L.castHEq (T p Qp) (T q Qq)
 --      (@L4L.appHEqABUV (Q p) (Q q) (fun (a : Q p) => Prop) (fun (a : Q q) => Prop)
