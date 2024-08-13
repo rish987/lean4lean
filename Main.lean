@@ -45,16 +45,19 @@ unsafe def main (args : List String) : IO UInt32 := do
           tasks := tasks.push (m, ← IO.asTask (replayFromImports addDecl m verbose compare))
 
       let mut numDone := 0
+      let mut finished : NameSet := default
       while true do
         let mut allDone := true
         let mut numDone' := 0
         for (m, t) in tasks do
-          match ← IO.getTaskState t with
-          | .finished =>
-            if let .error e := t.get then
-              IO.eprintln s!"lean4lean found a problem in {m}: {e}"
-            numDone' := numDone' + 1
-          | _ => allDone := false
+          if not (finished.find? m |>.isSome) then
+            match ← IO.getTaskState t with
+            | .finished =>
+              if let .error e := t.get then
+                IO.eprintln s!"lean4lean found a problem in {m}: {e}"
+              numDone' := numDone' + 1
+              finished := finished.insert m
+            | _ => allDone := false
         if numDone' != numDone then
           numDone := numDone'
           IO.println s!"{numDone}/{tasks.size} tasks completed"
