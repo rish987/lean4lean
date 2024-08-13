@@ -3,12 +3,12 @@ open Lake DSL
 
 package lean4less
 
-require std from git "https://github.com/leanprover/std4" @ "v4.7.0-rc2"
+require batteries from git "https://github.com/leanprover-community/batteries" @ "v4.10.0"
 
 require lean4lean from "/home/rish/lean4lean/"
 
 require Cli from git
-  "https://github.com/leanprover/lean4-cli" @ "8b1b1ac817cc2f5589a8efca18c59c828d3ca560"
+  "https://github.com/leanprover/lean4-cli" @ "main"
 
 @[default_target]
 lean_lib patch { globs := #[Glob.submodules `patch] }

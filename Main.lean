@@ -28,7 +28,7 @@ You can also use `lake exe lean4lean --fresh Mathlib.Data.Nat.Basic` to replay a
 -/
 unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
   initSearchPath (← findSysroot)
-  let mod : Name := p.positionalArg! "input" |>.value
+  let mod : Name := p.positionalArg! "input" |>.value.toName
   let onlyConsts? := p.flag? "only" |>.map fun onlys => 
     onlys.as! (Array String)
   match mod with

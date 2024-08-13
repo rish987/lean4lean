@@ -1,4 +1,4 @@
-import Std.Tactic.OpenPrivate
+import Batteries.Tactic.OpenPrivate
 import Lean4Less.PExpr
 
 namespace Lean4Less

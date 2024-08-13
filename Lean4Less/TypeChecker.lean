@@ -214,7 +214,11 @@ def inferLambda (e : Expr) : RecPE := loop #[] false e where
     let lvl := rSort'.toExpr.sortLevel!
     let r' ← maybeCast p? lvl.succ rSort rSort' r
 
-    let patch := if domPatched || e'?.isSome then some $ ((← getLCtx).mkLambda fvars e').toPExpr else none
+    let patch ←
+      if domPatched || e'?.isSome then do
+        pure $ some $ ((← getLCtx).mkLambda fvars e').toPExpr
+      else 
+        pure none
     -- TODO only return .some if any of the fvars had domains that were patched, or if e'? := some e'
     return (( (← getLCtx).mkForall fvars r').toPExpr, patch)
 
@@ -244,7 +248,11 @@ def inferForall (e : Expr) : RecPE := loop #[] #[] false e where
     let lvl := r'.toExpr.sortLevel!
     let e' ← maybeCast p? lvl.succ r r' (e'?.getD e.toPExpr)
 
-    let patch? := if domPatched || e'?.isSome || p?.isSome then .some $ ((← getLCtx).mkForall fvars e').toPExpr else none
+    let patch? ←
+      if domPatched || e'?.isSome || p?.isSome then do
+        pure $ .some $ ((← getLCtx).mkForall fvars e').toPExpr
+      else
+        pure none
     return ((Expr.sort <| us.foldr mkLevelIMax' lvl ).toPExpr, patch?)
 
 -- def inferForallPure (e : PExpr) : RecM PExpr := sorry
@@ -347,7 +355,11 @@ def inferLet (e : Expr) : RecPE := loop #[] #[] false e where
       if b then
         usedFVars := usedFVars.push fvar
     -- FIXME `usedFVars` is never used
-    let patch? := if typePatched || e'?.isSome then .some $ (← getLCtx).mkForall fvars e' |>.toPExpr else none
+    let patch? ←
+      if typePatched || e'?.isSome then do
+        pure $ .some $ (← getLCtx).mkForall fvars e' |>.toPExpr
+      else
+        pure none
     return ((← getLCtx).mkForall fvars r |>.toPExpr, patch?)
 
 -- def inferLetPure (e : PExpr) : RecM PExpr := sorry
@@ -655,7 +667,7 @@ def mkRefl (lvl : Level) (T : PExpr) (t : PExpr) : RecM EExpr := do
 def mkHRefl (lvl : Level) (T : PExpr) (t : PExpr) : RecM EExpr := do
   pure $ Lean.mkAppN (← getConst `HEq.refl [lvl]) #[T, t] |>.toEExprD
 
-def natLitExt? (e : Expr) : Option Nat := if e == .natZero then some 0 else e.natLit?
+def natLitExt? (e : Expr) : Option Nat := if e == .natZero then some 0 else e.rawNatLit?
 
 /--
 Reduces the application `f a b` to a Nat literal if `a` and `b` can be reduced

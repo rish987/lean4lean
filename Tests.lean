@@ -28,7 +28,7 @@ axiom hk : B (@K.rec (fun _ => Bool) true k)
 
 -- succeeds because of K-like reduction
 -- (do not need constructor application to reduce)
-theorem kLikeReduction : B true := hk
+noncomputable def kLikeReduction : B true := hk
 
 -- succeeds because of K-like reduction
 -- (do not need constructor application to reduce)
@@ -57,11 +57,11 @@ theorem kLikeReduction : B true := hk
 --          Qp Qq))
 --      t
 
-example {α : Sort u} {a a' : α} (h : HEq a a') : Eq a a' :=
-  have : (α β : Sort u) → (a : α) → (b : β) → HEq a b → (h : Eq α β) → Eq (cast h a) b :=
-    fun A B a b h₁ =>
-      h₁.rec (fun _ => rfl)
-  this α α a a' h rfl
+-- example {α : Sort u} {a a' : α} (h : HEq a a') : Eq a a' :=
+--   have : (α β : Sort u) → (a : α) → (b : β) → HEq a b → (h : Eq α β) → Eq (cast h a) b :=
+--     fun A B a b h₁ =>
+--       h₁.rec (fun _ => rfl)
+--   this α α a a' h rfl
 
 #check_l4l kLikeReduction
 -- axiom T : Type → Type
