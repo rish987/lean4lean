@@ -36,7 +36,7 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
     | _ =>
       if let some onlyConsts := onlyConsts? then
         Lean.withImportModules #[{module := mod}] {} 0 fun env => do
-          Lean4Less.transL4L' (onlyConsts.map (·.toName)) env
+          Lean4Less.checkL4L (onlyConsts.map (·.toName)) env
       else
         throw <| IO.userError "TODO not implemented"
   return 0

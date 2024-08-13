@@ -64,23 +64,29 @@ def patchConsts : List Name := [
 ]
 
 def transL4L' (n : Array Name) (env : Environment) : IO Environment := do
-  let mut env := env
+  let mut newEnv := env
   for n in n do
-    let (_, env') ← checkConstants (printErr := true) env (.insert default n) @Lean4Less.addDecl (initConsts := patchConsts)
-    env := env'
-    ppConst env n
-  pure env
+    let (_, env') ← checkConstants (printErr := true) newEnv (.insert default n) @Lean4Less.addDecl (initConsts := patchConsts)
+    newEnv := env'
+    ppConst newEnv n
+  pure newEnv
 
 def transL4L (n : Array Name) (env? : Option Environment := none) : Lean.Elab.Command.CommandElabM Environment := do
   let env ← env?.getDM getEnv
   transL4L' n env
+
+def checkL4L (n : Array Name) (env : Environment) : IO Environment := do
+  let env ← transL4L' n env
+  let nSet := n.foldl (init := default) fun acc n => acc.insert n
+  let (_, env) ← checkConstants (printErr := true) env nSet @Lean4Lean.addDecl (opts := {proofIrrelevance := false, kLikeReduction := false})
+  pure env
 
 elab "#trans_l4l " i:ident : command => do
   _ ← transL4L #[i.getId]
 
 elab "#check_l4l " i:ident : command => do
   let env ← transL4L #[i.getId]
-  _ ← checkConstants (printErr := true) env (.insert default i.getId) @Lean4Lean.addDecl
+  _ ← checkConstants (printErr := true) env (.insert default i.getId) @Lean4Lean.addDecl (opts := {proofIrrelevance := false, kLikeReduction := false})
 
 end Lean4Less
   -- match macroRes with
