@@ -52,6 +52,7 @@ def getRecRuleFor (rval : RecursorVal) (major : Expr) : Option RecursorRule := d
   let .const fn _ := major.getAppFn | none
   rval.rules.find? (·.ctor == fn)
 
+set_option linter.unusedVariables false in
 def inductiveReduceRec [Monad m] (env : Environment) (e : Expr)
     (whnf : Expr → m Expr) (inferType : Expr → m Expr) (isDefEq : Expr → Expr → m Bool) :
     m (Option Expr) := do
