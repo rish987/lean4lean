@@ -19,8 +19,13 @@ structure TypeChecker.State where
   eqvManager : EquivManager := {}
   failure : HashSet (Expr × Expr) := {}
 
+structure TypeCheckerOpts where
+  proofIrrelevance := true
+  kLikeReduction := true
+
 structure TypeChecker.Context where
   env : Environment
+  opts : TypeCheckerOpts := {}
   lctx : LocalContext := {}
   safety : DefinitionSafety := .safe
   lparams : List Name := []
@@ -29,9 +34,9 @@ namespace TypeChecker
 
 abbrev M := ReaderT Context <| StateT State <| Except KernelException
 
-def M.run (env : Environment) (safety : DefinitionSafety := .safe) (lctx : LocalContext := {})
+def M.run (env : Environment) (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {})
     (x : M α) : Except KernelException α :=
-  x { env, safety, lctx } |>.run' {}
+  x { env, safety, lctx, opts } |>.run' {}
 
 instance : MonadEnv M where
   getEnv := return (← read).env
@@ -285,7 +290,7 @@ def reduceRecursor (e : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) :
     if let some r ← quotReduceRec e whnf then
       return r
   let whnf' e := if cheapRec then whnfCore e cheapRec cheapProj else whnf e
-  if let some r ← inductiveReduceRec env e whnf' inferType isDefEq then
+  if let some r ← inductiveReduceRec env e whnf' inferType isDefEq (← readThe Context).opts.kLikeReduction then
     return r
   return none
 
@@ -673,8 +678,9 @@ def isDefEqCore' (t s : Expr) : RecM Bool := do
     let r ← quickIsDefEq tn sn
     if r != .undef then return r == .true
 
-  -- let r ← isDefEqProofIrrel tn sn
-  -- if r != .undef then return r == .true
+  if (← readThe Context).opts.proofIrrelevance then
+    let r ← isDefEqProofIrrel tn sn
+    if r != .undef then return r == .true
 
   match ← lazyDeltaReduction tn sn with
   | .continue .. => unreachable!

@@ -60,6 +60,7 @@ def Lean.Declaration.name : Declaration → String
 namespace Lean4Lean
 
 structure Context where
+  opts : TypeCheckerOpts := {}
   newConstants : HashMap Name ConstantInfo
   verbose := false
   compare := false
@@ -93,7 +94,7 @@ def addDecl (d : Declaration) : M Unit := do
   if (← read).verbose then
     println! "adding {d.name}"
   let t1 ← IO.monoMsNow
-  match (← get).env.addDecl' d true with
+  match (← get).env.addDecl' d true (← read).opts with
   | .ok env =>
     let t2 ← IO.monoMsNow
     if t2 - t1 > 1000 then

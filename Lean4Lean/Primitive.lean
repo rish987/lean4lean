@@ -101,7 +101,7 @@ def checkPrimitiveDef (env : Environment) (v : DefinitionVal) : M Bool := do
   return true
 
 def checkPrimitiveInductive (env : Environment) (lparams : List Name) (nparams : Nat)
-    (types : List InductiveType) (isUnsafe : Bool) : Except KernelException Bool := do
+    (types : List InductiveType) (isUnsafe : Bool) (opts : TypeCheckerOpts) : Except KernelException Bool := do
   unless !isUnsafe && lparams.isEmpty && nparams == 0 do return false
   let [type] := types | return false
   unless type.type == .sort (.succ .zero) do return false
@@ -119,7 +119,7 @@ def checkPrimitiveInductive (env : Environment) (lparams : List Name) (nparams :
     let [⟨``String.mk,
       .forallE _ (.app (.const ``List [.zero]) (.const ``Char [])) (.const ``String []) _
     ⟩] := type.ctors | fail
-    M.run env (safety := .safe) (lctx := {}) do
+    M.run env (safety := .safe) (opts := opts) (lctx := {}) do
       -- We need the following definitions for `strLitToConstructor` to work:
       -- Nat : Type (this is primitive so checking for existence suffices)
       let nat := .const ``Nat []

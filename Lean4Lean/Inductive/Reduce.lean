@@ -54,7 +54,7 @@ def getRecRuleFor (rval : RecursorVal) (major : Expr) : Option RecursorRule := d
 
 set_option linter.unusedVariables false in
 def inductiveReduceRec [Monad m] (env : Environment) (e : Expr)
-    (whnf : Expr → m Expr) (inferType : Expr → m Expr) (isDefEq : Expr → Expr → m Bool) :
+    (whnf : Expr → m Expr) (inferType : Expr → m Expr) (isDefEq : Expr → Expr → m Bool) (kLikeReduction : Bool := true) :
     m (Option Expr) := do
   let .const recFn ls := e.getAppFn | return none
   let some (.recInfo info) := env.find? recFn | return none
@@ -62,8 +62,9 @@ def inductiveReduceRec [Monad m] (env : Environment) (e : Expr)
   let majorIdx := info.getMajorIdx
   let some major := recArgs[majorIdx]? | return none
   let mut major := major
-  -- if info.k then
-  --   major ← toCtorWhenK env whnf inferType isDefEq info major
+  if kLikeReduction then
+    if info.k then
+      major ← toCtorWhenK env whnf inferType isDefEq info major
   match ← whnf major with
   | .lit l => major := l.toConstructor
   | e => major ← toCtorWhenStruct env whnf inferType info.getInduct e

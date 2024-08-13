@@ -27,6 +27,7 @@ structure InductiveStats where
 
 structure Context where
   env : Environment
+  opts : TypeCheckerOpts
   lctx : LocalContext := {}
   ngen : NameGenerator := { namePrefix := `_ind_fresh }
   safety : DefinitionSafety
@@ -38,7 +39,7 @@ instance : MonadLocalNameGenerator M where
   withFreshId f c := f c.ngen.curr { c with ngen := c.ngen.next }
 
 instance (priority := low) : MonadLift TypeChecker.M M where
-  monadLift x c := x.run c.env c.safety c.lctx
+  monadLift x c := x.run c.env c.safety c.opts c.lctx
 
 instance (priority := low+1) : MonadWithReaderOf LocalContext M where
   withReader f x := withReader (fun c => { c with lctx := f c.lctx }) x
@@ -711,13 +712,13 @@ def mkAuxRecNameMap (env' : Environment) (types : List InductiveType) :
   return (oldRecNames.toList, recMap)
 
 def Environment.addInductive (env : Environment) (lparams : List Name) (nparams : Nat)
-    (types : List InductiveType) (isUnsafe allowPrimitive : Bool) :
+    (types : List InductiveType) (isUnsafe allowPrimitive : Bool) (opts : TypeCheckerOpts) :
     Except KernelException Environment := do
   let res ← ElimNestedInductive.run nparams types env
     |>.run' { lvls := lparams.map .param, newTypes := types.toArray }
   let isNested := !res.aux2nested.isEmpty
   let env' ← AddInductive.run lparams nparams res.types isNested
-    { env, allowPrimitive, safety := if isUnsafe then .unsafe else .safe }
+    { env, allowPrimitive, safety := if isUnsafe then .unsafe else .safe, opts}
   if !isNested then return env'
   let allIndNames := types.map (·.name)
   let (recNames', recNameMap') := mkAuxRecNameMap env' types

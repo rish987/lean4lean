@@ -43,8 +43,21 @@ unsafe def main (args : List String) : IO UInt32 := do
       for path in (← SearchPath.findAllWithExt sp "olean") do
         if let some m ← searchModuleNameOfFileName path sp then
           tasks := tasks.push (m, ← IO.asTask (replayFromImports addDecl m verbose compare))
-      for (m, t) in tasks do
-        if let .error e := t.get then
-          IO.eprintln s!"lean4lean found a problem in {m}"
-          throw e
+
+      let mut numDone := 0
+      while true do
+        let mut allDone := true
+        let mut numDone' := 0
+        for (m, t) in tasks do
+          match ← IO.getTaskState t with
+          | .finished =>
+            if let .error e := t.get then
+              IO.eprintln s!"lean4lean found a problem in {m}: {e}"
+            numDone' := numDone' + 1
+          | _ => allDone := false
+        if numDone' != numDone then
+          numDone := numDone'
+          IO.println s!"{numDone}/{tasks.size} tasks completed"
+        if allDone then break
+        IO.sleep 1000
   return 0

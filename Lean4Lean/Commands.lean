@@ -6,7 +6,7 @@ open Lean
 
 namespace Lean4Lean
 
-def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn : Declaration → M Unit) (initConsts : List Name := []) (printErr := false) : IO (Lean.NameSet × Environment) := do
+def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn : Declaration → M Unit) (initConsts : List Name := []) (printErr := false) (opts : TypeCheckerOpts := {}) : IO (Lean.NameSet × Environment) := do
   let mut onlyConstsToTrans : Lean.NameSet := default
 
   -- constants that should be skipped on account of already having been typechecked
@@ -28,7 +28,7 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn :
         for skipConst in skippedConsts do
           map := map.erase skipConst
 
-        modEnv ← replay addDeclFn {newConstants := map} modEnv
+        modEnv ← replay addDeclFn {newConstants := map, opts} modEnv
         skipConsts := skipConsts.union mapConsts -- TC success, so want to skip in future runs (already in environment)
       onlyConstsToTrans := onlyConstsToTrans.insert const
     catch
