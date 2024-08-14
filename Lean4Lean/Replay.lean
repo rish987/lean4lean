@@ -67,6 +67,7 @@ structure Context where
 
 structure State where
   env : Environment
+  printNewLine := false
   numConstants : Nat
   remaining : NameSet := {}
   pending : NameSet := {}
@@ -74,6 +75,30 @@ structure State where
   postponedRecursors : NameSet := {}
 
 abbrev M := ReaderT Context <| StateRefT State IO
+
+def Ansi.resetLine : String :=
+  "\x1B[2K\r"
+
+def maybePrintln : M Unit := do
+  if (← get).printNewLine then
+    IO.println ""
+  modify fun s => {s with printNewLine := false}
+
+def println (m : String) : M Unit := do
+  maybePrintln
+  IO.println m
+
+def print (m : String) : M Unit := do
+  maybePrintln
+  IO.print m
+
+def printProgress : M Unit := do
+  let numConstants := (← get).numConstants
+  let numFinished := numConstants - (← get).remaining.size
+  IO.print s!"{Ansi.resetLine}[{numFinished}/{numConstants}] ({(numFinished  * 100) / numConstants}%) constants typechecked"
+  modify fun s => {s with printNewLine := true}
+  let stdout ← IO.getStdout
+  stdout.flush
 
 /-- Check if a `Name` still needs processing. If so, move it from `remaining` to `pending`. -/
 def isTodo (name : Name) : M Bool := do
@@ -93,10 +118,14 @@ def throwKernelException (ex : KernelException) : M α := do
 /-- Add a declaration, possibly throwing a `KernelException`. -/
 def addDecl (d : Declaration) : M Unit := do
   if (← read).verbose then
-    println! "adding {d.name}"
+    println s!"adding {d.name}"
   let t1 ← IO.monoMsNow
-  match (← get).env.addDecl' d true (← read).opts with
-  | .ok env =>
+  match (← get).env.addDecl' d (← read).opts with
+  | .ok (env, data) =>
+    if data.usedKLikeReduction then
+      println s!"{d.name} used K-like reduction"
+    if data.usedProofIrrelevance then
+      println s!"{d.name} used proof irrelevance"
     let t2 ← IO.monoMsNow
     if t2 - t1 > 1000 then
       if (← read).compare then
@@ -104,12 +133,12 @@ def addDecl (d : Declaration) : M Unit := do
         | .ok _ => IO.monoMsNow
         | .error ex => throwKernelException ex
         if (t2 - t1) > 2 * (t3 - t2) then
-          println!
-            "{(← get).env.mainModule}:{d.name}: lean took {t3 - t2}, lean4lean took {t2 - t1}"
+          println
+            s!"{(← get).env.mainModule}:{d.name}: lean took {t3 - t2}, lean4lean took {t2 - t1}"
         else
-          println! "{(← get).env.mainModule}:{d.name}: lean4lean took {t2 - t1}"
+          println s!"{(← get).env.mainModule}:{d.name}: lean4lean took {t2 - t1}"
       else
-        println! "{(← get).env.mainModule}:{d.name}: lean4lean took {t2 - t1}"
+        println s!"{(← get).env.mainModule}:{d.name}: lean4lean took {t2 - t1}"
     modify fun s => { s with env := env }
   | .error ex =>
     throwKernelException ex
@@ -121,8 +150,6 @@ deriving instance BEq for RecursorVal
 
 
 
-def Ansi.resetLine : String :=
-  "\x1B[2K\r"
 
 mutual
 
@@ -135,13 +162,10 @@ to ensure we add declarations in the right order.
 The construct the `Declaration` from its stored `ConstantInfo`,
 and add it to the environment.
 -/
-partial def replayConstant (name : Name) (addDeclFn : Declaration → M Unit) : M Unit := do
+partial def replayConstant (name : Name) (addDeclFn : Declaration → M Unit) (printProgress? : Bool := false) : M Unit := do
   if ← isTodo name then
-    let numConstants := (← get).numConstants
-    let numFinished := numConstants - (← get).remaining.size
-    IO.print s!"{Ansi.resetLine}[{numFinished}/{numConstants}] ({(numFinished  * 100) / numConstants}%) constants typechecked"
-    let stdout ← IO.getStdout
-    stdout.flush
+    if printProgress? then
+      printProgress
     -- dbg_trace s!"Processing deps: {name}"
 
     let some ci := (← read).newConstants.find? name | unreachable!
@@ -228,7 +252,7 @@ def checkPostponedRecursors : M Unit := do
 variable (addDeclFn : Declaration → M Unit)
 
 /-- "Replay" some constants into an `Environment`, sending them to the kernel for checking. -/
-def replay (ctx : Context) (env : Environment) (decl : Option Name := none) : IO Environment := do
+def replay (ctx : Context) (env : Environment) (decl : Option Name := none) (printProgress : Bool := false) : IO Environment := do 
   let mut remaining : NameSet := ∅
   let mut numConstants : Nat := 0
   for (n, ci) in ctx.newConstants.toList do
@@ -243,10 +267,11 @@ def replay (ctx : Context) (env : Environment) (decl : Option Name := none) : IO
       | some d => replayConstant d addDeclFn
       | none =>
         for n in remaining do
-          replayConstant n addDeclFn
+          replayConstant n addDeclFn printProgress
       checkPostponedConstructors
       checkPostponedRecursors
-  IO.println ""
+  if s.printNewLine then
+    IO.println ""
   return s.env
 
 unsafe def replayFromImports (module : Name) (verbose := false) (compare := false) : IO Unit := do
@@ -269,7 +294,7 @@ unsafe def replayFromFresh (module : Name)
     (verbose := false) (compare := false) (decl : Option Name := none) : IO Unit := do
   Lean.withImportModules #[{module}] {} 0 fun env => do
     let ctx := { newConstants := env.constants.map₁, verbose, compare }
-    discard <| replay addDeclFn ctx ((← mkEmptyEnvironment).setMainModule module) decl 
+    discard <| replay addDeclFn ctx ((← mkEmptyEnvironment).setMainModule module) decl (printProgress := true)
 
 end Lean4Lean
 

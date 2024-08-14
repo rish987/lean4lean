@@ -10,10 +10,15 @@ namespace Lean
 
 abbrev InferCache := ExprMap Expr
 
+structure TypeChecker.Data where
+usedProofIrrelevance : Bool := false
+usedKLikeReduction : Bool := false
+
 structure TypeChecker.State where
   ngen : NameGenerator := { namePrefix := `_kernel_fresh, idx := 0 }
   inferTypeI : InferCache := {}
   inferTypeC : InferCache := {}
+  data : Data := {}
   whnfCoreCache : ExprMap Expr := {}
   whnfCache : ExprMap Expr := {}
   eqvManager : EquivManager := {}
@@ -35,6 +40,10 @@ namespace TypeChecker
 abbrev M := ReaderT Context <| StateT State <| Except KernelException
 
 def M.run (env : Environment) (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {})
+    (x : M α) : Except KernelException (α × State) :=
+  x { env, safety, lctx, opts } |>.run {}
+
+def M.run' (env : Environment) (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {})
     (x : M α) : Except KernelException α :=
   x { env, safety, lctx, opts } |>.run' {}
 
@@ -290,7 +299,9 @@ def reduceRecursor (e : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) :
     if let some r ← quotReduceRec e whnf then
       return r
   let whnf' e := if cheapRec then whnfCore e cheapRec cheapProj else whnf e
-  if let some r ← inductiveReduceRec env e whnf' inferType isDefEq (← readThe Context).opts.kLikeReduction then
+  if let some (r, usedKLikeReduction) ← inductiveReduceRec env e whnf' inferType isDefEq (← readThe Context).opts.kLikeReduction then
+    if usedKLikeReduction then
+      modify fun s => {s with data := {s.data with usedKLikeReduction := true}}
     return r
   return none
 
@@ -489,9 +500,9 @@ def isDefEqForall (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
   | t, s => isDefEq (t.instantiateRev subst) (s.instantiateRev subst)
 
 def quickIsDefEq (t s : Expr) (useHash := false) : RecM LBool := do
-  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 (eqvManager := m)) =>
+  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 (eqvManager := m)) =>
     let (b, m) := m.isEquiv useHash t s
-    (b, .mk a1 a2 a3 a4 a5 a6 (eqvManager := m))
+    (b, .mk a1 a2 a3 a4 a5 a6 a7 (eqvManager := m))
   then return .true
   match t, s with
   | .lam .., .lam .. => toLBoolM <| isDefEqLambda t s
@@ -549,8 +560,6 @@ def isDefEqProofIrrel (t s : Expr) : RecM LBool := do
   if !(← isProp tType) then return .undef
   let ret ← toLBoolM <| isDefEq tType (← inferType s)
   return ret
-  -- if ret == .true then
-  --   dbg_trace s!"WARNING: aborted proof irrelevance between `{t.dbgToString}` and `{s.dbgToString}`"
   -- pure .undef
   
 
@@ -680,7 +689,10 @@ def isDefEqCore' (t s : Expr) : RecM Bool := do
 
   if (← readThe Context).opts.proofIrrelevance then
     let r ← isDefEqProofIrrel tn sn
-    if r != .undef then return r == .true
+    if r != .undef then
+      if r == .true then
+        modify fun s => {s with data := {s.data with usedProofIrrelevance := true}}
+      return r == .true
 
   match ← lazyDeltaReduction tn sn with
   | .continue .. => unreachable!

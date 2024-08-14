@@ -39,7 +39,7 @@ instance : MonadLocalNameGenerator M where
   withFreshId f c := f c.ngen.curr { c with ngen := c.ngen.next }
 
 instance (priority := low) : MonadLift TypeChecker.M M where
-  monadLift x c := x.run c.env c.safety c.opts c.lctx
+  monadLift x c := x.run' c.env c.safety c.opts c.lctx
 
 instance (priority := low+1) : MonadWithReaderOf LocalContext M where
   withReader f x := withReader (fun c => { c with lctx := f c.lctx }) x
