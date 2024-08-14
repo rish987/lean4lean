@@ -67,6 +67,7 @@ structure Context where
 
 structure State where
   env : Environment
+  numConstants : Nat
   remaining : NameSet := {}
   pending : NameSet := {}
   postponedConstructors : NameSet := {}
@@ -120,6 +121,9 @@ deriving instance BEq for RecursorVal
 
 
 
+def Ansi.resetLine : String :=
+  "\x1B[2K\r"
+
 mutual
 
 /--
@@ -133,7 +137,13 @@ and add it to the environment.
 -/
 partial def replayConstant (name : Name) (addDeclFn : Declaration → M Unit) : M Unit := do
   if ← isTodo name then
+    let numConstants := (← get).numConstants
+    let numFinished := numConstants - (← get).remaining.size
+    IO.print s!"{Ansi.resetLine}[{numFinished}/{numConstants}] ({(numFinished  * 100) / numConstants}%) constants typechecked"
+    let stdout ← IO.getStdout
+    stdout.flush
     -- dbg_trace s!"Processing deps: {name}"
+
     let some ci := (← read).newConstants.find? name | unreachable!
     replayConstants ci.getUsedConstants addDeclFn
     -- Check that this name is still pending: a mutual block may have taken care of it.
@@ -220,12 +230,14 @@ variable (addDeclFn : Declaration → M Unit)
 /-- "Replay" some constants into an `Environment`, sending them to the kernel for checking. -/
 def replay (ctx : Context) (env : Environment) (decl : Option Name := none) : IO Environment := do
   let mut remaining : NameSet := ∅
+  let mut numConstants : Nat := 0
   for (n, ci) in ctx.newConstants.toList do
     -- We skip unsafe constants, and also partial constants.
     -- Later we may want to handle partial constants.
     if !ci.isUnsafe && !ci.isPartial then
       remaining := remaining.insert n
-  let (_, s) ← StateRefT'.run (s := { env, remaining }) do
+      numConstants := numConstants + 1
+  let (_, s) ← StateRefT'.run (s := { env, remaining, numConstants }) do
     ReaderT.run (r := ctx) do
       match decl with
       | some d => replayConstant d addDeclFn
@@ -234,6 +246,7 @@ def replay (ctx : Context) (env : Environment) (decl : Option Name := none) : IO
           replayConstant n addDeclFn
       checkPostponedConstructors
       checkPostponedRecursors
+  IO.println ""
   return s.env
 
 unsafe def replayFromImports (module : Name) (verbose := false) (compare := false) : IO Unit := do
