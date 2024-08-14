@@ -9,6 +9,7 @@ section
 
 structure ExtMethods (m : Type → Type u) where
   isDefEq : PExpr → PExpr → m (Bool × Option EExpr)
+  isDefEqPure : PExpr → PExpr → m Bool
   whnf  : PExpr → m (PExpr × Option EExpr)
   inferTypePure : PExpr → m PExpr
   appPrfIrrelHEq : PExpr → PExpr → EExpr → PExpr → PExpr → m EExpr
@@ -23,11 +24,11 @@ def getFirstCtor (dName : Name) : Option Name := do
   let some (.inductInfo info) := env.find? dName | none
   info.ctors.head?
 
-def mkNullaryCtor (type : PExpr) (nparams : Nat) : Option PExpr :=
+def mkNullaryCtor (type : PExpr) (nparams : Nat) : Option (PExpr × Name) :=
   type.toExpr.withApp fun d args => do
   let .const dName ls := d | none
   let name ← getFirstCtor env dName
-  return mkAppRange (.const name ls) 0 nparams args |>.toPExpr
+  return (mkAppRange (.const name ls) 0 nparams args |>.toPExpr, name)
 
 /--
 When `e` has the type of a K-like inductive, converts it into a constructor
@@ -48,9 +49,11 @@ def toCtorWhenK (rval : RecursorVal) (e : PExpr) : m (PExpr × Option EExpr) := 
     let appTypeArgs := appType.toExpr.getAppArgs
     for h : i in [rval.numParams:appTypeArgs.size] do
       if (appTypeArgs[i]'h.2).hasExprMVar then return (e, none)
-  let some newCtorApp := mkNullaryCtor env appType rval.numParams | return (e, none)
-  let (defEq, p?) ← meth.isDefEq e newCtorApp
-  if defEq && p?.isNone then return (e, none)
+  let some (newCtorApp, newCtorName) := mkNullaryCtor env appType rval.numParams | return (e, none)
+  if let (.const ctorName _) := e.toExpr.getAppFn then
+    if ctorName == newCtorName then
+      if let true ← meth.isDefEqPure e newCtorApp then
+        return (e, none)
   -- check that the indices of types of `e` and `newCtorApp` match
   let (defEq, p?) ← meth.isDefEq appType (← meth.inferTypePure newCtorApp)
   assert! p? == none
@@ -108,9 +111,9 @@ def inductiveReduceRec [Monad m] (env : Environment) (e : PExpr)
   let majorIdx := info.getMajorIdx
   let some major' := recArgs[majorIdx]? | return none
   let major := major'.toPExpr
-  let (majorK, majorEqmajorK?) ← if info.k then toCtorWhenK env meth info major else pure (major, none)
-  let (majorKWhnf, majorKEqmajorKWhnf?) ← meth.whnf majorK
-  let majorEqmajorKWhnf? ← meth.appHEqTrans? major majorK majorKWhnf majorEqmajorK? majorKEqmajorKWhnf?
+  let (majorWhnf, majorEqmajorWhnf?) ← meth.whnf major
+  let (majorKWhnf, majorWhnfEqmajorKWhnf?) ← if info.k then toCtorWhenK env meth info majorWhnf else pure (majorWhnf, none)
+  let majorEqmajorKWhnf? ← meth.appHEqTrans? major majorWhnf majorKWhnf majorEqmajorWhnf? majorWhnfEqmajorKWhnf?
   let (majorMaybeCtor, majorKWhnfEqMajorMaybeCtor?) ← match majorKWhnf.toExpr with
     | .lit l => pure (l.toConstructor.toPExpr, none)
     | _ => toCtorWhenStruct env meth info.getInduct majorKWhnf

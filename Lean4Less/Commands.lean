@@ -84,6 +84,12 @@ def checkL4L (n : Array Name) (env : Environment) : IO Environment := do
 elab "#trans_l4l " i:ident : command => do
   _ ← transL4L #[i.getId]
 
+elab "#check_only " i:ident : command => do
+  _ ← checkConstants (printErr := true) (← getEnv) (.insert default i.getId) @Lean4Lean.addDecl (opts := {})
+
+elab "#check_off " i:ident : command => do
+  _ ← checkConstants (printErr := true) (← getEnv) (.insert default i.getId) @Lean4Lean.addDecl (opts := {proofIrrelevance := false, kLikeReduction := false})
+
 elab "#check_l4l " i:ident : command => do
   let env ← transL4L #[i.getId]
   _ ← checkConstants (printErr := true) env (.insert default i.getId) @Lean4Lean.addDecl (opts := {proofIrrelevance := false, kLikeReduction := false})

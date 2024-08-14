@@ -1109,7 +1109,7 @@ def isDefEqForall' (t s : PExpr) : RecB := do
           if hUVData.isEmpty then
             UaEqVx? := .none
           else
-            UaEqVx? := .some $ (← getMaybeDepLemmaApp1 `L4L.forallHEq [u, v] #[A] #[hUV] Ua a).toEExpr hUVData
+            UaEqVx? := .some $ (← getMaybeDepLemmaApp2 `L4L.forallHEq [u, v] #[A] #[hUV] Ua Vx a x).toEExpr hUVData
 
       Ua := (← getLCtx).mkForall #[a] Ua |>.toPExpr
       Vx := (← getLCtx).mkForall #[x] Vx |>.toPExpr
@@ -1332,6 +1332,7 @@ def reduceRecursor (e : PExpr) (cheapRec cheapProj : Bool) : RecM (Option (PExpr
   let whnf' e := if cheapRec then whnfCore e cheapRec cheapProj else whnf e
   let recReduced? ← inductiveReduceRec {
       isDefEq := isDefEq
+      isDefEqPure := isDefEqPure
       whnf  := whnf'
       inferTypePure := fun x => do 
         inferTypePure x
@@ -1669,9 +1670,8 @@ def isDefEqCore' (t s : PExpr) : RecB := do
 
   let (tn, tEqtn?) ← whnfCore t (cheapProj := true)
   let (sn, sEqsn?) ← whnfCore s (cheapProj := true)
-  if sn.toExpr.hasLooseBVars then
-    dbg_trace s!"before: {s.toExpr}"
-    dbg_trace s!"after: {sn.toExpr}"
+  if s.toExpr == Expr.app (.const `Q []) (.const `q []) then
+    dbg_trace s!"DBG[7]: TypeChecker.lean:1671: tn={tn.toExpr}, {sn.toExpr}"
 
   let mktEqs? (t' s' : PExpr) (tEqt'? sEqs'? t'Eqs'? : Option EExpr) := do appHEqTrans? t s' s (← appHEqTrans? t t' s' tEqt'? t'Eqs'?) (← appHEqSymm? s s' sEqs'?)
 

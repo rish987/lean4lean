@@ -56,6 +56,8 @@ def patchDefinition (env : Environment) (v : DefinitionVal) :
 
       if !defEq then
         throw <| .declTypeMismatch env (.defnDecl v) valueType
+
+      dbg_trace s!"DBG[4]: Environment.lean:55: valueTypeEqtype?={valueType.toExpr}, {type.toExpr}, {valueTypeEqtype?.isSome}"
       let value  ← maybeCast valueTypeEqtype? lvl valueType type value'
       let v := {v with type, value}
       return (.defnInfo v)

@@ -157,12 +157,12 @@ Adds a `ConstantInfo.inductInfo` for each of `indTypes` to `env`.
 def declareInductiveTypes
     (stats : InductiveStats)
     (levelParams : List Name) (numParams : Nat) (indTypes : Array InductiveType)
-    (isUnsafe isNested : Bool) (env : Environment) : Environment :=
+    (isUnsafe : Bool) (numNested : Nat) (env : Environment) : Environment :=
   let all := indTypes.map (·.name) |>.toList
   let infos := indTypes.zipWith stats.nindices fun indType numIndices =>
     .inductInfo { indType with
       name := indType.name
-      levelParams, numParams, numIndices, all, isUnsafe, isNested
+      levelParams, numParams, numIndices, all, isUnsafe, numNested
       ctors := indType.ctors.map (·.name)
       isRec := isRec indTypes stats.indConsts
       isReflexive := isReflexive indTypes stats.indConsts }
@@ -516,12 +516,12 @@ If the inductive types declared in `types` are admissible, adds their types,
 constructors and recursors to the to the environment.
 -/
 def run (lparams : List Name) (nparams : Nat) (types : List InductiveType)
-    (isNested : Bool) : M Environment := do
+    (numNested : Nat) : M Environment := do
   let isUnsafe := (← read).safety != .safe
   let indTypes := types.toArray
   Environment.checkDuplicatedUnivParams lparams
   checkInductiveTypes lparams nparams indTypes fun stats => do
-  withEnv (declareInductiveTypes stats lparams nparams indTypes isUnsafe isNested) do
+  withEnv (declareInductiveTypes stats lparams nparams indTypes isUnsafe numNested) do
   checkConstructors indTypes lparams stats isUnsafe
   withEnv (declareConstructors stats lparams indTypes isUnsafe) do
   let elimLevel ← getElimLevel stats lparams indTypes
@@ -921,10 +921,10 @@ def Environment.addInductive (env : Environment) (lparams : List Name) (nparams 
     Except KernelException Environment := do
   let res ← ElimNestedInductive.run nparams types env
     |>.run' { lvls := lparams.map .param, newTypes := types.toArray }
-  let isNested := !res.aux2nested.isEmpty
-  let env' ← AddInductive.run lparams nparams res.types isNested
+  let numNested := res.aux2nested.size
+  let env' ← AddInductive.run lparams nparams res.types numNested
     { env, allowPrimitive, safety := if isUnsafe then .unsafe else .safe }
-  if !isNested then return env'
+  if numNested == 0 then return env'
   let allIndNames := types.map (·.name)
   let (recNames', recNameMap') := mkAuxRecNameMap env' types
   (·.2) <$> StateT.run (s := env) do
