@@ -9,6 +9,7 @@ import Lean4Lean.Declaration
 import Lean4Lean.Level
 import Lean4Lean.Util
 import Lean4Lean.Instantiate
+import Lean4Lean.TypeChecker
 
 namespace Lean4Less
 open Lean
@@ -27,6 +28,8 @@ structure TypeChecker.State where
 
 structure TypeChecker.Context where
   env : Environment
+  pure : Bool := false -- (for debugging purposes)
+  const : Name -- (for debugging purposes)
   lctx : LocalContext := {}
   /--
   Mapping from free variables to proofs of their equality,
@@ -43,9 +46,9 @@ abbrev MPE := M (PExpr × Option PExpr)
 abbrev MEE := M (PExpr × Option EExpr)
 abbrev MB := M (Bool × Option EExpr)
 
-def M.run (env : Environment) (safety : DefinitionSafety := .safe) (lctx : LocalContext := {})
+def M.run (env : Environment) (const : Name) (safety : DefinitionSafety := .safe) (lctx : LocalContext := {})
     (x : M α) : Except KernelException α :=
-  x { env, safety, lctx } |>.run' {}
+  x { env, safety, lctx, const } |>.run' {}
 
 instance : MonadEnv M where
   getEnv := return (← read).env
@@ -100,6 +103,9 @@ def whnfPure (e : PExpr) : RecM PExpr := fun m => m.whnfPure e
 
 @[inline] def withEqFVar [MonadWithReaderOf (HashMap (FVarId × FVarId) FVarId) m] (idt ids : FVarId) (eq : FVarId) (x : m α) : m α :=
   withReader (fun l => l.insert (idt, ids) eq) x
+
+@[inline] def withPure [MonadWithReaderOf Context m] (x : m α) : m α :=
+  withReader (fun l => {l with pure := true}) x
 
 /--
 Ensures that `e` is defeq to some `e' := .sort ..`, returning `e'`. If not,
@@ -275,12 +281,10 @@ def isDefEqCorePure (t s : PExpr) : RecM Bool := fun m => m.isDefEqCorePure t s
 @[inherit_doc isDefEqCore]
 def isDefEq (t s : PExpr) : RecB := do
   let r ← isDefEqCore t s
-  if r.1 then
-    modify fun st => { st with eqvManager := st.eqvManager.addEquiv t s }
   pure r
 
 def isDefEqPure (t s : PExpr) : RecM Bool := do
-  pure (← isDefEq t s).1
+  pure (← withPure $ isDefEq t s).1
 
 /--
 Infers the type of application `e`, assuming that `e` is already well-typed.
@@ -433,6 +437,8 @@ def getTypeLevel (e : PExpr) : RecM (Level × PExpr) := do
 
 @[inherit_doc inferType]
 def inferType' (e : Expr) : RecPE := do
+  -- if (← readThe Context).const == `eq_of_heq' then
+  --   dbg_trace s!"started e={e}"
   if e.isBVar then
     throw <| .other
       s!"patcher does not support loose bound variables, {""
@@ -440,6 +446,8 @@ def inferType' (e : Expr) : RecPE := do
   assert 5 $ !e.hasLooseBVars
   let state ← get
   if let some r := state.inferTypeC.find? e then
+    -- if (← readThe Context).const == `eq_of_heq' then
+    --   dbg_trace s!"finished e={e}"
     return r
   let (r, ep?) ← match e with
     | .lit l => pure (l.type.toPExpr, none)
@@ -466,6 +474,8 @@ def inferType' (e : Expr) : RecPE := do
       let fTypeLvl := fTypeSort'.toExpr.sortLevel!
       let (fType', pf'?) ← ensureForallCore fType f
       let f' ← maybeCast pf'? fTypeLvl fType fType' (f'?.getD f.toPExpr)
+      -- if (← readThe Context).const == `eq_of_heq' then if let .lam _ (.const `Ty _) _ _ := a then
+      --   dbg_trace s!"DBG[5]: {a}"
 
       let (aType, a'?) ← inferType' a
       let (aTypeLvl, _) ← getTypeLevel (a'?.getD a.toPExpr)
@@ -482,6 +492,8 @@ def inferType' (e : Expr) : RecPE := do
         throw <| .appTypeMismatch (← getEnv) (← getLCtx) e fType' aType
     | .letE .. => inferLet e
   modify fun s => { s with inferTypeC := s.inferTypeC.insert e (r, ep?) }
+  -- if (← readThe Context).const == `eq_of_heq' then
+  --   dbg_trace s!"finished e={e}"
   return (r, ep?)
 
 -- def _inferTypePure' (e : Expr) : RecM PExpr := do
@@ -513,7 +525,7 @@ def inferType' (e : Expr) : RecPE := do
 --   return r
 
 def inferTypePure' (e : PExpr) : RecM PExpr := do -- TODO make more efficient
-  let (type, e'?) ← inferType' e
+  let (type, e'?) ← withPure $ inferType' e
   assert 8 $ e'? == none
   pure type
 
@@ -1447,7 +1459,7 @@ private def _whnf' (e' : Expr) : RecEE := do
 def whnf' (e : PExpr) : RecEE := _whnf' e
 
 def whnfPure' (e : PExpr) : RecM PExpr := do
-  let (eN, p?) ← whnf' e
+  let (eN, p?) ← withPure $ whnf' e
   assert 11 $ p? == none
   pure eN
 
@@ -1507,7 +1519,8 @@ def lazyDeltaReductionStep (ltn lsn : PExpr) : RecM ReductionStatus := do
   let cont (nltn nlsn : PExpr) (pltnEqnltn? plsnEqnlsn? : Option EExpr) :=
     return ← match ← quickIsDefEq nltn nlsn with
     | (.undef, _) => pure $ .continue nltn nlsn pltnEqnltn? plsnEqnlsn?
-    | (.true, pnltnEqnlsn?) => do pure $ .bool .true (← appHEqTrans? ltn nltn lsn pltnEqnltn? <| ← appHEqTrans? nltn nlsn lsn pnltnEqnlsn? <| ← appHEqSymm? lsn nlsn plsnEqnlsn?)
+    | (.true, pnltnEqnlsn?) =>
+      do pure $ .bool .true (← appHEqTrans? ltn nltn lsn pltnEqnltn? <| ← appHEqTrans? nltn nlsn lsn pnltnEqnlsn? <| ← appHEqSymm? lsn nlsn plsnEqnlsn?)
     | (.false, _) => pure $ .bool false none
   let deltaCont_t := do
     pure () -- FIXME why is this needed to block `delta` below from being run immediately in the outer monad context?
@@ -1661,6 +1674,9 @@ def isDefEqUnitLike (t s : PExpr) : RecB := do
 
 @[inherit_doc isDefEqCore]
 def isDefEqCore' (t s : PExpr) : RecB := do
+  let leanMinusDefEq ← Lean.TypeChecker.M.run' (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := false, proofIrrelevance := false}) (← getLCtx) (Lean.TypeChecker.isDefEq t.toExpr s.toExpr)
+  if leanMinusDefEq then
+    return (true, none)
   let (r, pteqs?) ← quickIsDefEq t s (useHash := true)
   if r != .undef then return (r == .true, pteqs?)
 
@@ -1670,8 +1686,6 @@ def isDefEqCore' (t s : PExpr) : RecB := do
 
   let (tn, tEqtn?) ← whnfCore t (cheapProj := true)
   let (sn, sEqsn?) ← whnfCore s (cheapProj := true)
-  if s.toExpr == Expr.app (.const `Q []) (.const `q []) then
-    dbg_trace s!"DBG[7]: TypeChecker.lean:1671: tn={tn.toExpr}, {sn.toExpr}"
 
   let mktEqs? (t' s' : PExpr) (tEqt'? sEqs'? t'Eqs'? : Option EExpr) := do appHEqTrans? t s' s (← appHEqTrans? t t' s' tEqt'? t'Eqs'?) (← appHEqSymm? s s' sEqs'?)
 
@@ -1691,7 +1705,7 @@ def isDefEqCore' (t s : PExpr) : RecB := do
   match ← lazyDeltaReduction tn sn with
   | .continue ..
   | .notDelta => throw $ .other "unreachable 12"
-  | .bool b p? => return (b, p?)
+  | .bool b tnEqsn? => return (b, ← mktEqs? tn sn tEqtn? sEqsn? tnEqsn?)
   | .unknown tn' sn' tnEqtn'? snEqsn'? =>
 
   let tEqtn'? ← appHEqTrans? t tn tn' tEqtn? tnEqtn'?

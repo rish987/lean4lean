@@ -122,7 +122,7 @@ def checkPrimitiveInductive (env : Environment) (lparams : List Name) (nparams :
     let [⟨``String.mk,
       .forallE _ (.app (.const ``List [.zero]) (.const ``Char [])) (.const ``String []) _
     ⟩] := type.ctors | fail
-    M.run env (safety := .safe) (lctx := {}) do
+    M.run env (safety := .safe) (lctx := {}) (const := type.name) do
       -- We need the following definitions for `strLitToConstructor` to work:
       -- Nat : Type (this is primitive so checking for existence suffices)
       let nat := .const ``Nat []

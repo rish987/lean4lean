@@ -24,7 +24,7 @@ inductive K : Prop where
 --   (mk : motive 0 (K.mk a b)) {c : Nat}
 --   (t : K a b c) : motive c t
 
-def k : K := (fun k => k) K.mk
+axiom k : K 
 axiom BK : Bool → Type
 axiom hk : BK (@K.rec (fun _ => Bool) true k)
 
@@ -35,36 +35,53 @@ noncomputable def kLikeReduction : BK true := hk
 axiom A : Type
 axiom a : A
 axiom h : Eq A A
-axiom h' : ∀ n : Nat, Q q
-theorem aux : (α β : Sort u) → (a : α) → (b : β) → HEq a b → (h : Eq α β) → Eq (cast h a) b :=
-  fun _ _ _ _ h₁ =>
-    h₁.rec (fun _ => rfl)
+axiom R : BK true → P → Prop
+theorem aux (α β : Sort u) (a : α) (b : β) (h₁ : HEq a b) : (h : Eq α β) → Eq (cast h a) b :=
+  h₁.rec (fun _ => rfl)
 axiom aux' : (α β : Sort u) → (a : α) → (b : β) → HEq a b → (h : Eq α β) → Eq (cast h a) b
 
 def letFun' {α : Sort u} {β : α → Sort v} (v : α) (f : (x : α) → β x) : β v := f v
 
-theorem eq_of_heq' : ∀ {α : Sort u} {a a' : α}, @HEq α a α a' → @Eq α a a' :=
-   fun {α} {a a'} h =>
-     letFun' (fun α β a b h₁ =>
-       @HEq.rec α a (fun {B : Sort u} b _ => ∀ (h : @Eq (Sort u) α B), @Eq B (@cast α B h a) b)
-         (fun x => @rfl α (@cast α α x a)) β b h₁)
-     fun this => this α α a a' h (@rfl (Sort u) α)
-set_option pp.explicit true in
+-- axiom ax' : (@Eq.rec (Type 1) Type (fun (x : Type 1) (x_1 : @Eq (Type 1) Type x) => x) n Type axh)
+-- axiom axHEq : HEq axh (@Eq.refl (Type 1) Type)
+-- -- axiom ax (α : Sort u) (a : α) : BK (@K.rec (fun _ => Bool) true k)
+-- -- axiom ax' (α : Sort u) (a : α) : BK true → (a' : α) → cast (axh α α) a = a'
+-- axiom Ty : Type
+-- axiom ty : Ty
+-- 
+-- noncomputable def eq_of_heq' : cast axh n :=
+--   ax'
+-- -#check_l4l eq_of_heq
 
-#print eq_of_heq'
+axiom n : Type
+axiom n' : Type
+axiom axh : Type = Type
+axiom ax : cast axh n
+axiom ax' : n → Prop
+-- axiom ax (α : Sort u) (a : α) : BK (@K.rec (fun _ => Bool) true k)
+-- axiom ax' (α : Sort u) (a : α) : BK true → (a' : α) → cast (axh α α) a = a'
+axiom Ty : Type
+axiom ty : Ty
+noncomputable def eq_of_heq' : Prop :=
+  ax' ax 
+-- #check_l4l eq_of_heq'
+-- set_option pp.explicit true in
+-- #print eq_of_heq'
 
-noncomputable def ex : Q q :=
-  letFun' (α := Q p) Qq
-  fun this => this
+-- noncomputable def ex : Nat → Bool → Prop :=
+--   fun n b =>
+--      (fun v f => f v) (fun p =>
+--        R hk p)
+--      fun this => this p
 
 -- #print ex
 
 set_option pp.all true
 -- #check_off dif_pos
-#check_l4l ex
+-- #check_l4l ex
 -- #check_only Fin.mk_zero
 
-#check_l4l kLikeReduction
+-- #check_l4l kLikeReduction
 -- axiom T : Type → Type
 -- axiom t : T Prop
 --

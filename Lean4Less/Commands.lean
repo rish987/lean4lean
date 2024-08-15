@@ -14,7 +14,7 @@ def ppConst (env : Environment) (n : Name) : IO Unit := do
   let options := KVMap.set options `pp.explicit true
   let options := KVMap.set options `pp.funBinderTypes true
   let some info := env.find? n | unreachable!
-  IO.print s!"{info.name}: {← (PrettyPrinter.ppExprLegacy env default default options info.type)}"
+  IO.print s!"patched {info.name}: {← (PrettyPrinter.ppExprLegacy env default default options info.type)}"
 
   match info.value? with
   | .some v => IO.println s!"\n{← (PrettyPrinter.ppExprLegacy env default default options v)}"
@@ -30,6 +30,7 @@ def patchConsts : List Name := [
 `HEq,
 `HEq.symm,
 `HEq.refl,
+`HEq.trans,
 `Eq,
 `Eq.refl,
 
@@ -63,21 +64,33 @@ def patchConsts : List Name := [
 `L4L.appHEqBinNatFn,
 ]
 
-def transL4L' (n : Array Name) (env : Environment) : IO Environment := do
+def transL4L' (n : Array Name) (env : Environment) (pp := false) : IO Environment := do
   let mut newEnv := env
   for n in n do
-    let (_, env') ← checkConstants (printErr := true) newEnv (.insert default n) @Lean4Less.addDecl (initConsts := patchConsts)
+    let (_, env') ← checkConstants (printErr := true) newEnv (.insert default n) @Lean4Less.addDecl (initConsts := patchConsts) (op := "patching")
     newEnv := env'
-    ppConst newEnv n
+    if pp then
+      ppConst newEnv n
   pure newEnv
 
 def transL4L (n : Array Name) (env? : Option Environment := none) : Lean.Elab.Command.CommandElabM Environment := do
   let env ← env?.getDM getEnv
   transL4L' n env
 
-def checkL4L (n : Array Name) (env : Environment) : IO Environment := do
-  let env ← transL4L' n env
-  let nSet := n.foldl (init := default) fun acc n => acc.insert n
+def checkL4L (ns : Array Name) (env : Environment) : IO Environment := do
+  let env ← transL4L' ns env (pp := true)
+  let nSet := ns.foldl (init := default) fun acc n => acc.insert n
+
+  let env' ← transL4L' ns env
+  for n in ns do
+    let .some c  := env.find? n | unreachable!
+    let .some c' := env'.find? n | unreachable!
+
+    let diffTypes := c.toConstantVal.type != c'.toConstantVal.type
+    let diffVals := c.value? != c'.value?
+    if diffTypes || diffVals then
+      throw $ IO.userError $ s!"failed round-trip test: \n--- LHS\n {← ppConst env n} \n--- RHS\n {← ppConst env' n}"
+
   let (_, env) ← checkConstants (printErr := true) env nSet @Lean4Lean.addDecl (opts := {proofIrrelevance := false, kLikeReduction := false})
   pure env
 
@@ -91,8 +104,7 @@ elab "#check_off " i:ident : command => do
   _ ← checkConstants (printErr := true) (← getEnv) (.insert default i.getId) @Lean4Lean.addDecl (opts := {proofIrrelevance := false, kLikeReduction := false})
 
 elab "#check_l4l " i:ident : command => do
-  let env ← transL4L #[i.getId]
-  _ ← checkConstants (printErr := true) env (.insert default i.getId) @Lean4Lean.addDecl (opts := {proofIrrelevance := false, kLikeReduction := false})
+  _ ← checkL4L #[i.getId] (← getEnv)
 
 end Lean4Less
   -- match macroRes with

@@ -24,7 +24,7 @@ def checkConstantVal (env : Environment) (v : ConstantVal) (allowPrimitive := fa
 
 def patchAxiom (env : Environment) (v : AxiomVal) :
     Except KernelException ConstantInfo := do
-  let (type, _) ← (checkConstantVal env v.toConstantVal).run env
+  let (type, _) ← (checkConstantVal env v.toConstantVal).run env v.name
     (safety := if v.isUnsafe then .unsafe else .safe)
   let v := {v with type}
   return .axiomInfo v
@@ -34,10 +34,10 @@ def patchDefinition (env : Environment) (v : DefinitionVal) :
   if let .unsafe := v.safety then
     -- Meta definition can be recursive.
     -- So, we check the header, add, and then type check the body.
-    let (type, lvl) ← (checkConstantVal env v.toConstantVal).run env (safety := .unsafe)
+    let (type, lvl) ← (checkConstantVal env v.toConstantVal).run env v.name (safety := .unsafe)
     let env' := add env (.defnInfo {v with type})
     checkNoMVarNoFVar env' v.name v.value
-    M.run env' (safety := .unsafe) (lctx := {}) do
+    M.run env' v.name (safety := .unsafe) (lctx := {}) do
       let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
       let value' := value'?.getD v.value.toPExpr
       let (defEq, valueTypeEqtype?) ← isDefEq valueType type v.levelParams
@@ -47,7 +47,7 @@ def patchDefinition (env : Environment) (v : DefinitionVal) :
       let v := {v with type, value}
       return .defnInfo v
   else
-    M.run env (safety := .safe) (lctx := {}) do
+    M.run env v.name (safety := .safe) (lctx := {}) do
       let (type, lvl) ← checkConstantVal env v.toConstantVal (← checkPrimitiveDef env v)
       checkNoMVarNoFVar env v.name v.value
       let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
@@ -57,7 +57,6 @@ def patchDefinition (env : Environment) (v : DefinitionVal) :
       if !defEq then
         throw <| .declTypeMismatch env (.defnDecl v) valueType
 
-      dbg_trace s!"DBG[4]: Environment.lean:55: valueTypeEqtype?={valueType.toExpr}, {type.toExpr}, {valueTypeEqtype?.isSome}"
       let value  ← maybeCast valueTypeEqtype? lvl valueType type value'
       let v := {v with type, value}
       return (.defnInfo v)
@@ -65,7 +64,7 @@ def patchDefinition (env : Environment) (v : DefinitionVal) :
 def patchTheorem (env : Environment) (v : TheoremVal) :
     Except KernelException ConstantInfo := do
   -- TODO(Leo): we must add support for handling tasks here
-  let (type, value) ← M.run env (safety := .safe) (lctx := {}) do
+  let (type, value) ← M.run env v.name (safety := .safe) (lctx := {}) do
     let (type, lvl) ← checkConstantVal env v.toConstantVal
     checkNoMVarNoFVar env v.name v.value
     let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
@@ -79,7 +78,7 @@ def patchTheorem (env : Environment) (v : TheoremVal) :
 
 def patchOpaque (env : Environment) (v : OpaqueVal) :
     Except KernelException ConstantInfo := do
-  let (type, value) ← M.run env (safety := .safe) (lctx := {}) do
+  let (type, value) ← M.run env v.name (safety := .safe) (lctx := {}) do
     let (type, lvl) ← checkConstantVal env v.toConstantVal
     let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
     let value' := value'?.getD v.value.toPExpr
@@ -95,7 +94,7 @@ def patchMutual (env : Environment) (vs : List DefinitionVal) :
   let v₀ :: _ := vs | throw <| .other "invalid empty mutual definition"
   if let .safe := v₀.safety then
     throw <| .other "invalid mutual definition, declaration is not tagged as unsafe/partial"
-  let (types, lvls) ← M.run env (safety := v₀.safety) (lctx := {}) do
+  let (types, lvls) ← M.run env `mutual (safety := v₀.safety) (lctx := {}) do
     let mut types := []
     let mut lvls := []
     for v in vs do
@@ -112,7 +111,7 @@ def patchMutual (env : Environment) (vs : List DefinitionVal) :
     let v' := {v with type}
     env' := add env' (.defnInfo v')
     vs' := vs'.append [v']
-  M.run env' (safety := v₀.safety) (lctx := {}) do
+  M.run env' `mutual (safety := v₀.safety) (lctx := {}) do
     let mut newvs' := #[]
     for ((v', type), lvl) in vs'.zip types |>.zip lvls do
       checkNoMVarNoFVar env' v'.name v'.value

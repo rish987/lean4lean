@@ -30,6 +30,7 @@ structure InductiveStats where
 
 structure Context where
   env : Environment
+  const : Name
   lctx : LocalContext := {}
   ngen : NameGenerator := { namePrefix := `_ind_fresh }
   safety : DefinitionSafety
@@ -41,7 +42,7 @@ instance : MonadLocalNameGenerator M where
   withFreshId f c := f c.ngen.curr { c with ngen := c.ngen.next }
 
 instance (priority := low) : MonadLift TypeChecker.M M where
-  monadLift x c := x.run c.env c.safety c.lctx
+  monadLift x c := x.run c.env c.const c.safety c.lctx
 
 instance (priority := low+1) : MonadWithReaderOf LocalContext M where
   withReader f x := withReader (fun c => { c with lctx := f c.lctx }) x
@@ -923,7 +924,7 @@ def Environment.addInductive (env : Environment) (lparams : List Name) (nparams 
     |>.run' { lvls := lparams.map .param, newTypes := types.toArray }
   let numNested := res.aux2nested.size
   let env' ← AddInductive.run lparams nparams res.types numNested
-    { env, allowPrimitive, safety := if isUnsafe then .unsafe else .safe }
+    { env, allowPrimitive, safety := if isUnsafe then .unsafe else .safe, const := `inductive }
   if numNested == 0 then return env'
   let allIndNames := types.map (·.name)
   let (recNames', recNameMap') := mkAuxRecNameMap env' types
