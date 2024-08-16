@@ -672,8 +672,8 @@ def appHEqTrans? (t s r : PExpr) (theqs? sheqr? : Option EExpr) : RecM (Option E
   | none, .some sheqr => return sheqr
   | .some theqs, none => return theqs
 
-def mkRefl (lvl : Level) (T : PExpr) (t : PExpr) : RecM EExpr := do
-  pure $ Lean.mkAppN (← getConst `Eq.refl [lvl]) #[T, t] |>.toEExprD
+-- def mkRefl (lvl : Level) (T : PExpr) (t : PExpr) : RecM EExpr := do
+--   pure $ Lean.mkAppN (← getConst `Eq.refl [lvl]) #[T, t] |>.toEExprD
 
 def mkHRefl (lvl : Level) (T : PExpr) (t : PExpr) : RecM EExpr := do
   pure $ Lean.mkAppN (← getConst `HEq.refl [lvl]) #[T, t] |>.toEExprD
@@ -967,8 +967,8 @@ def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : P
     let p? ← if tDom != sDom then
       let (defEq, p?) ← isDefEq tDom sDom
       if !defEq then return (false, none)
-      pure (p?)
-    else pure (none)
+      pure p?
+    else pure none
     let sort ← inferTypePure tDom
     let .sort lvl := (← ensureSortCorePure sort tDom).toExpr | throw $ .other "unreachable 5"
     let idt := ⟨← mkFreshId⟩
@@ -1087,17 +1087,22 @@ def isDefEqForall' (t s : PExpr) : RecB := do
     let mut Ua := Ua
     let mut Vx := Vx
 
+    let mut idx := 0
     for (a, d?) in as.zip ds do
       let x := if let some (b, _, _) := d? then b else a
 
-      if let some UaEqVx := UaEqVx? then
-        let (_, UaType) ← getTypeLevel Ua
+      idx := idx + 1
+
+      if d?.isSome || UaEqVx?.isSome then
+        let (UaTypeLvl, UaType) ← getTypeLevel Ua
         let UaType ← whnfPure UaType
         let UaLvl := UaType.toExpr.sortLevel!
 
         let (ALvl, A) ← getTypeLevel a
         let u := ALvl
         let v := UaLvl
+
+        let UaEqVx := UaEqVx?.getD $ ← mkHRefl UaTypeLvl UaType Ua
 
         if let .some (b, idaEqb, hAB) := d? then
           let (hUV, hUVData) ← gethUV2 Ua Vx a x UaEqVx idaEqb

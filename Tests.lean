@@ -74,9 +74,17 @@ noncomputable def eq_of_heq' : Prop :=
 axiom L : (p : P) → ((q : Q p) → Q p) → Type
 axiom l : L q fun qq : Q q => qq
 
+axiom M1 : {P : Prop} → P → Type
+axiom M2 : {P Q : Prop} → P → Q → Type
+
 axiom L' : (P Q : Prop) → ((p : P) → (q : Q) → Type) → Type
 
 noncomputable def lamTest : L p fun qp : Q p => qp := l
+
+axiom l1 : L' (Q q) (Q q) fun _qq qq' : Q q => M1 qq'
+axiom l2 : L' (Q q) (Q q) fun qq qq' : Q q => M2 qq qq'
+noncomputable def lamTest1 : L' (Q p) (Q q) fun _qp qq => M1 qq := l1
+noncomputable def lamTest2 : L' (Q p) (Q q) fun qp qq => M2 qp qq := l2
 
 set_option pp.all true
 -- #print if_pos.match_1
