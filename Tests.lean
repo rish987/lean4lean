@@ -68,16 +68,14 @@ noncomputable def eq_of_heq' : Prop :=
 -- set_option pp.explicit true in
 -- #print eq_of_heq'
 
--- noncomputable def ex : Nat → Bool → Prop :=
---   fun n b =>
---      (fun v f => f v) (fun p =>
---        R hk p)
---      fun this => this p
+-- def ex : ∀ x : P, (@dite Prop P (.isTrue x) (fun p => Q p) (fun p => True)) := fun x => Qq
 
 -- #print ex
 
-set_option pp.all true
--- #check_off dif_pos
+set_option pp.explicit true
+#print if_pos.match_1
+-- #check_l4l dif_pos'
+-- #check_l4l ex
 -- #check_l4l ex
 -- #check_only Fin.mk_zero
 

@@ -14,11 +14,18 @@ def ppConst (env : Environment) (n : Name) : IO Unit := do
   let options := KVMap.set options `pp.explicit true
   let options := KVMap.set options `pp.funBinderTypes true
   let some info := env.find? n | unreachable!
-  IO.print s!"patched {info.name}: {← (PrettyPrinter.ppExprLegacy env default default options info.type)}"
+  try
+    IO.print s!"patched {info.name}: {← (PrettyPrinter.ppExprLegacy env default default options info.type)}"
 
-  match info.value? with
-  | .some v => IO.println s!"\n{← (PrettyPrinter.ppExprLegacy env default default options v)}"
-  | _ => IO.println ""
+    match info.value? with
+    | .some v => IO.println s!"\n{← (PrettyPrinter.ppExprLegacy env default default options v)}"
+    | _ => IO.println ""
+  catch
+  | _ =>
+    IO.print s!"patched {info.name}: {info.type}"
+    match info.value? with
+    | .some v => IO.println s!"\n{v}"
+    | _ => IO.println ""
 
 /--
 The set of all constants used to patch terms, in linearised order based on

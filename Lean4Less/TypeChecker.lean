@@ -1132,14 +1132,14 @@ def isDefEqForall (t s : PExpr) : RecB := do
   let (true, p?) ← isDefEqForall' t s | return (false, none)
   return (true, p?)
 
-def isDefEqFVar (idt ids : FVarId) : RecB := do
+def isDefEqFVar (idt ids : FVarId) : RecLB := do
   if let some id := (← readThe Context).eqFVars.find? (idt, ids) then
     let p := ((Expr.fvar id).toEExpr {usedFVarEqs := .insert default id.name})
-    return (true, some p)
+    return (.true, some p)
   else if let some id := (← readThe Context).eqFVars.find? (ids, idt) then
     let p := ((Expr.fvar id).toEExpr {usedFVarEqs := .insert default id.name})
-    return (true, ← appHEqSymm? (Expr.fvar idt).toPExpr (Expr.fvar ids).toPExpr p)
-  return (false, none)
+    return (.true, ← appHEqSymm? (Expr.fvar idt).toPExpr (Expr.fvar ids).toPExpr p)
+  return (.undef, none)
 
 /--
 If `t` and `s` have matching head constructors and are not projections or
@@ -1154,7 +1154,11 @@ def quickIsDefEq (t s : PExpr) (useHash := false) : RecLB := do
   then return (.true, none)
   let res : Option (Bool × PExpr) ← match t.toExpr, s.toExpr with
   | .lam .., .lam .. => pure $ some $ ← isDefEqLambda t s
-  | .fvar idt, .fvar ids => pure $ some $ ← isDefEqFVar idt ids
+  | .fvar idt, .fvar ids =>
+    match ← isDefEqFVar idt ids with
+    | (.undef, _) => pure none
+    | (.true, p?) => pure (true, p?)
+    | (.false, p?) => pure (false, p?)
   | .forallE .., .forallE .. => pure $ some $ ← isDefEqForall t s
   | .sort a1, .sort a2 => pure $ some $ ((a1.isEquiv a2), none)
   | .mdata _ a1, .mdata _ a2 => pure $ some $ ← isDefEq a1.toPExpr a2.toPExpr
@@ -1705,7 +1709,8 @@ def isDefEqCore' (t s : PExpr) : RecB := do
   match ← lazyDeltaReduction tn sn with
   | .continue ..
   | .notDelta => throw $ .other "unreachable 12"
-  | .bool b tnEqsn? => return (b, ← mktEqs? tn sn tEqtn? sEqsn? tnEqsn?)
+  | .bool b tnEqsn? =>
+    return (b, ← mktEqs? tn sn tEqtn? sEqsn? tnEqsn?)
   | .unknown tn' sn' tnEqtn'? snEqsn'? =>
 
   let tEqtn'? ← appHEqTrans? t tn tn' tEqtn? tnEqtn'?
@@ -1736,8 +1741,10 @@ def isDefEqCore' (t s : PExpr) : RecB := do
 
   -- tn' and sn' are both in WHNF
   match ← isDefEqApp tn' sn' with
-  | (true, tn'Eqsn'?) => return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)
-  | _ => pure ()
+  | (true, tn'Eqsn'?) =>
+    return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)
+  | _ =>
+    pure ()
   match ← tryEtaExpansion tn' sn' with
   | (true, tn'Eqsn'?) => return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)
   | _ => pure ()

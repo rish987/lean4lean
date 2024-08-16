@@ -68,6 +68,19 @@ def toEExprD (e : Expr) : EExpr := EExpr.mk e default
 
 end Expr
 
+instance : ToString PExpr where
+toString e := toString $ e.toExpr
+
+instance : ToString EExpr where
+toString e := toString $ e.toExpr
+
+instance : ToString (Option PExpr) where
+toString e? := toString $ e?.map (·.toExpr)
+
+instance : ToString (Option EExpr) where
+toString e? := toString $ e?.map (·.toExpr)
+
+
 def PExpr.instantiateRev (e : PExpr) (subst : Array PExpr) : PExpr :=
   e.toExpr.instantiateRev (subst.map (·.toExpr)) |>.toPExpr
 
