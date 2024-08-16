@@ -65,8 +65,13 @@ structure Context where
   verbose := false
   compare := false
 
+structure Data where
+prfIrrelUses := 0
+kLikeRedUses := 0
+
 structure State where
   env : Environment
+  data : Data := {}
   printNewLine := false
   numConstants : Nat
   remaining : NameSet := {}
@@ -123,9 +128,11 @@ def addDecl (d : Declaration) : M Unit := do
   match (← get).env.addDecl' d (← read).opts with
   | .ok (env, data) =>
     if data.usedKLikeReduction then
-      println s!"{d.name} used K-like reduction"
+      -- println s!"{d.name} used K-like reduction"
+      modify fun s => {s with data := {s.data with kLikeRedUses := s.data.kLikeRedUses + 1}}
     if data.usedProofIrrelevance then
-      println s!"{d.name} used proof irrelevance"
+      -- println s!"{d.name} used proof irrelevance"
+      modify fun s => {s with data := {s.data with prfIrrelUses := s.data.prfIrrelUses + 1}}
     let t2 ← IO.monoMsNow
     if t2 - t1 > 1000 then
       if (← read).compare then
@@ -252,7 +259,7 @@ def checkPostponedRecursors : M Unit := do
 variable (addDeclFn : Declaration → M Unit)
 
 /-- "Replay" some constants into an `Environment`, sending them to the kernel for checking. -/
-def replay (ctx : Context) (env : Environment) (decl : Option Name := none) (printProgress : Bool := false) : IO Environment := do 
+def replay (ctx : Context) (env : Environment) (decl : Option Name := none) (printProgress : Bool := false) (op : String := "typecheck") : IO Environment := do 
   let mut remaining : NameSet := ∅
   let mut numConstants : Nat := 0
   for (n, ci) in ctx.newConstants.toList do
@@ -267,11 +274,20 @@ def replay (ctx : Context) (env : Environment) (decl : Option Name := none) (pri
       | some d => replayConstant d addDeclFn
       | none =>
         for n in remaining do
-          replayConstant n addDeclFn printProgress
+          try
+            replayConstant n addDeclFn printProgress
+          catch
+          | e => 
+            IO.eprintln s!"Error {op}ing constant `{n}`: {e.toString}"
+            throw e
       checkPostponedConstructors
       checkPostponedRecursors
   if s.printNewLine then
     IO.println ""
+  if printProgress then
+    IO.println s!"{numConstants} total constants typechecked"
+    IO.println s!"-- {s.data.prfIrrelUses} used proof irrelevance"
+    IO.println s!"-- {s.data.kLikeRedUses} used k-like reduction"
   return s.env
 
 unsafe def replayFromImports (module : Name) (verbose := false) (compare := false) : IO Unit := do

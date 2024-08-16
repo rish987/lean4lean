@@ -6,7 +6,7 @@ open Lean
 
 namespace Lean4Lean
 
-def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn : Declaration → M Unit) (initConsts : List Name := []) (printErr := false) (opts : TypeCheckerOpts := {}) (op : String := "typechecking"): IO (Lean.NameSet × Environment) := do
+def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn : Declaration → M Unit) (initConsts : List Name := []) (printErr := false) (opts : TypeCheckerOpts := {}) (op : String := "typecheck"): IO (Lean.NameSet × Environment) := do
   let mut onlyConstsToTrans : Lean.NameSet := default
 
   -- constants that should be skipped on account of already having been typechecked
@@ -34,7 +34,7 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn :
     catch
     | e =>
       if printErr then
-        dbg_trace s!"Error {op} constant `{const}`: {e.toString}"
+        dbg_trace s!"Error {op}ing constant `{const}`: {e.toString}"
       errConsts := errConsts.insert const
   pure (onlyConstsToTrans, modEnv)
 
