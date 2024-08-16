@@ -74,7 +74,7 @@ def patchConsts : List Name := [
 def transL4L' (n : Array Name) (env : Environment) (pp := false) : IO Environment := do
   let mut newEnv := env
   for n in n do
-    let (_, env') ← checkConstants (printErr := true) newEnv (.insert default n) @Lean4Less.addDecl (initConsts := patchConsts) (op := "patching")
+    let (_, env') ← checkConstants (printErr := true) newEnv (.insert default n) @Lean4Less.addDecl (initConsts := patchConsts) (op := "patch")
     newEnv := env'
     if pp then
       ppConst newEnv n

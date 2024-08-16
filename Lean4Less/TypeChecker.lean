@@ -157,7 +157,7 @@ def inferFVar (tc : Context) (name : FVarId) : Except KernelException PExpr := d
 /--
 Infers the type of `.const e ls`.
 -/
-def inferConstant (tc : Context) (name : Name) (ls : List Level) (inferOnly : Bool) :
+def inferConstant (tc : Context) (name : Name) (ls : List Level) :
     Except KernelException PExpr := do
   let e := Expr.const name ls
   -- should be okay as the environment should only contain patched constants
@@ -166,15 +166,14 @@ def inferConstant (tc : Context) (name : Name) (ls : List Level) (inferOnly : Bo
   if ps.length != ls.length then
     throw <| .other s!"incorrect number of universe levels parameters for '{e
       }', #{ps.length} expected, #{ls.length} provided"
-  if !inferOnly then
-    if info.isUnsafe && tc.safety != .unsafe then
-      throw <| .other s!"invalid declaration, it uses unsafe declaration '{e}'"
-    if let .defnInfo v := info then
-      if v.safety == .partial && tc.safety == .safe then
-        throw <| .other
-          s!"invalid declaration, safe declaration must not contain partial declaration '{e}'"
-    for l in ls do
-      checkLevel tc l
+  if info.isUnsafe && tc.safety != .unsafe then
+    throw <| .other s!"invalid declaration, it uses unsafe declaration '{e}'"
+  if let .defnInfo v := info then
+    if v.safety == .partial && tc.safety == .safe then
+      throw <| .other
+        s!"invalid declaration, safe declaration must not contain partial declaration '{e}'"
+  for l in ls do
+    checkLevel tc l
   return info.instantiateTypeLevelParams ls |>.toPExpr
 
 /--
@@ -462,7 +461,7 @@ def inferType' (e : Expr) : RecPE := do
     | .sort l =>
       checkLevel (← readThe Context) l
       pure <| (Expr.sort (.succ l) |>.toPExpr, none)
-    | .const c ls => pure (← inferConstant (← readThe Context) c ls false, none)
+    | .const c ls => pure (← inferConstant (← readThe Context) c ls, none)
     | .lam .. => inferLambda e
     | .forallE .. => inferForall e
     | .app f a =>
@@ -836,12 +835,13 @@ def getMaybeDepLemmaApp2 (n : Name) (us : List Level) (args1 args2 : Array Expr)
 
 def isDefEqBinderForApp' (as bs : Array (Array PExpr)) (ds? : Array (Option (FVarId × EExpr))) (aVals bVals : Array PExpr) (U' V' : PExpr) (f : Array AppHEqArgs → RecM T)
 : RecM T := do
-  let rec loop idx datas : RecM T := do
+  let rec loop idx datas aVars bVars : RecM T := do
     let as' := as[idx]!
     let bs' := bs[idx]!
     let a := as'[0]!
     let b := bs'[0]!
     let d? := ds?[idx]!
+    -- let A := (← inferTypePure a).toExpr.replaceFVars aVars (aVals[:idx].toArray.map (·.toExpr)) |>.toPExpr
     let A ← inferTypePure a
 
     let lctx ← getLCtx
@@ -862,6 +862,7 @@ def isDefEqBinderForApp' (as bs : Array (Array PExpr)) (ds? : Array (Option (FVa
     assert 23 defEq
 
     let extra ← if let .some (idaEqb, hAB) := d? then
+      -- let B := (← inferTypePure b).toExpr.replaceFVars bVars (bVals[:idx].toArray.map (·.toExpr)) |>.toPExpr
       let B ← inferTypePure b
 
       if let .some UaEqVb := UaEqVb? then 
@@ -885,12 +886,12 @@ def isDefEqBinderForApp' (as bs : Array (Array PExpr)) (ds? : Array (Option (FVa
 
     let datas := datas.push {A, a, Ua, u, v, extra}
     if _h : idx < as.size - 1 then
-      loop (idx + 1) datas
+      loop (idx + 1) datas (aVars.push a) (bVars.push b)
     else
       f datas
 
   termination_by (as.size - 1) - idx
-  loop 0 #[]
+  loop 0 #[] #[] #[]
 
 def isDefEqBinderForApp (binDatas : Array (BinderData × BinderData)) (U' V' : PExpr) (aVals bVals : Array PExpr) (f : Array AppHEqArgs → RecM T) : RecM T := do
   let rec loop idx as bs ds? : RecM T := do
@@ -1034,28 +1035,22 @@ def isDefEqLambda (t s : PExpr) : RecB := do
         let (UaLvl, Ua) ← getTypeLevel fa
         let v := UaLvl
         let Vx ← inferTypePure gx
-        let faEqgb ← faEqgx?.getDM $ mkHRefl UaLvl Ua fa
+        let faEqgx ← faEqgx?.getDM $ mkHRefl UaLvl Ua fa
         if let some (b, idaEqb, hAB) := d? then
           let B ← inferTypePure b
 
-          let hfgData := {faEqgb.data with usedFVarEqs := faEqgb.data.usedFVarEqs.erase idaEqb.name}
+          let hfgData := {faEqgx.data with usedFVarEqs := faEqgx.data.usedFVarEqs.erase idaEqb.name}
           let data := hAB.data.merge hfgData
-          if data.isEmpty then
-            faEqgx? := .none
+          let hfg := (← getLCtx).mkLambda #[a, b, .fvar idaEqb] faEqgx
+          faEqgx? := .some $ (← getMaybeDepLemmaApp2 `L4L.lambdaHEqABUV [u, v] #[A, B] #[f, g, hAB, hfg] Ua Vx a x).toEExpr data
+        else
+          let data := faEqgx.data
+          let hfg := (← getLCtx).mkLambda #[a] faEqgx
+          let (_, UaEqVx?) ← isDefEq Ua Vx
+          if UaEqVx?.isSome then
+            faEqgx? := .some $ (← getMaybeDepLemmaApp2 `L4L.lambdaHEqUV [u, v] #[A] #[f, g, hfg] Ua Vx a x) |>.toEExpr data
           else
-            let hfg := (← getLCtx).mkLambda #[a, b, .fvar idaEqb] faEqgb
-            faEqgx? := .some $ (← getMaybeDepLemmaApp2 `L4L.lambdaHEqABUV [u, v] #[A, B] #[f, g, hAB, hfg] Ua Vx a x).toEExpr data
-
-          let data := faEqgb.data
-          if data.isEmpty then
-            faEqgx? := .none -- (should probably never happen)
-          else
-            let hfg := (← getLCtx).mkLambda #[a] faEqgb
-            let (_, UaEqVa?) ← isDefEq Ua Vx
-            if UaEqVa?.isSome then
-              faEqgx? := .some $ (← getMaybeDepLemmaApp2 `L4L.lambdaHEqUV [u, v] #[A] #[f, g, hfg] Ua Vx a x) |>.toEExpr data
-            else
-              faEqgx? := .some $ (← getMaybeDepLemmaApp1 `L4L.lambdaHEq [u, v] #[A] #[f, g, hfg] Ua a) |>.toEExpr data
+            faEqgx? := .some $ (← getMaybeDepLemmaApp1 `L4L.lambdaHEq [u, v] #[A] #[f, g, hfg] Ua a) |>.toEExpr data
 
       fa := f
       gx := g
@@ -1817,7 +1812,7 @@ def checkPure (e : Expr) (lps : List Name) : M PExpr :=
   withReader ({ · with lparams := lps }) (inferTypePure e.toPExpr).run
 
 @[inherit_doc whnf']
-def whnf (e : PExpr) : M PExpr := (Inner.whnfPure e).run
+def whnf (e : PExpr) (lps : List Name) : M PExpr := withReader ({ · with lparams := lps }) $ (Inner.whnfPure e).run
 
 /--
 Infers the type of expression `e`. Note that this uses the optimization
@@ -1825,12 +1820,14 @@ Infers the type of expression `e`. Note that this uses the optimization
 inference on terms that are known to be well-typed. To typecheck terms for the
 first time, use `check`.
 -/
-def inferType (e : PExpr) : M PExpr := (Inner.inferTypePure e).run
+def inferType (e : PExpr) (lps : List Name) : M PExpr := withReader ({ · with lparams := lps }) $ (Inner.inferTypePure e).run
 
 @[inherit_doc isDefEqCore]
 def isDefEq (t s : PExpr) (lps : List Name) : MB :=
   withReader ({ · with lparams := lps }) (Inner.isDefEq t s).run
-def isDefEqPure (t s : PExpr) : M Bool := (Inner.isDefEqPure t s).run
+
+def isDefEqPure (t s : PExpr) (lps : List Name) : M Bool :=
+  withReader ({ · with lparams := lps }) (Inner.isDefEqPure t s).run
 
 @[inherit_doc ensureSortCore]
 def ensureSort (t : PExpr) (lps : List Name) (s := t) : MEE := 
@@ -1838,16 +1835,16 @@ def ensureSort (t : PExpr) (lps : List Name) (s := t) : MEE :=
     ensureSortCore t s
 
 @[inherit_doc ensureSortCore]
-def ensureSortPure (t : PExpr) (s := t) : M PExpr := RecM.run do 
+def ensureSortPure (t : PExpr) (lps : List Name) (s := t) : M PExpr := withReader ({ · with lparams := lps }) $ RecM.run do 
   let (s, p?) ← (ensureSortCore t s)
   assert 15 $ p? == none
   pure s
 
 @[inherit_doc ensureForallCore]
-def ensureForall (t : PExpr) (s := t) : MEE := (ensureForallCore t s).run
+def ensureForall (t : PExpr) (lps : List Name) (s := t) : MEE := withReader ({ · with lparams := lps }) $ (ensureForallCore t s).run
 
-def maybeCast (p? : Option EExpr) (lvl : Level) (typLhs typRhs e : PExpr) : M PExpr := RecM.run do
-  Inner.maybeCast p? lvl typLhs typRhs e
+def maybeCast (p? : Option EExpr) (lvl : Level) (typLhs typRhs e : PExpr) (lps : List Name) : M PExpr := 
+  withReader ({ · with lparams := lps }) (Inner.maybeCast p? lvl typLhs typRhs e).run
 
 -- def test' : MetaM String := do
 --   dbg_trace s!"test"
@@ -1864,9 +1861,10 @@ def maybeCast (p? : Option EExpr) (lvl : Level) (typLhs typRhs e : PExpr) : M PE
 Ensures that `e` is defeq to some `e' := .sort (_ + 1)`, returning `e'`. If not,
 throws an error with `s` (the expression required be a type).
 -/
-def ensureType (e : PExpr) : MEE := RecM.run $
-  do ensureSortCore (← inferType e) e -- FIXME transport e using proof from ensureSort?
-def ensureTypePure (e : PExpr) : M PExpr := do ensureSortPure (← inferType e) e -- FIXME transport e using proof from ensureSort?
+def ensureType (e : PExpr) (lps : List Name) : MEE := withReader ({ · with lparams := lps }) $ RecM.run $
+  do ensureSortCore (← inferType e lps) e -- FIXME transport e using proof from ensureSort?
+
+def ensureTypePure (e : PExpr) (lps : List Name) : M PExpr := do ensureSortPure (← inferType e lps) lps e -- FIXME transport e using proof from ensureSort?
 
 -- def etaExpand (e : Expr) : M Expr :=
 --   let rec loop fvars

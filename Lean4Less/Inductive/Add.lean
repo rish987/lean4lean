@@ -30,6 +30,7 @@ structure InductiveStats where
 
 structure Context where
   env : Environment
+  lparams : List Name
   const : Name
   lctx : LocalContext := {}
   ngen : NameGenerator := { namePrefix := `_ind_fresh }
@@ -37,6 +38,9 @@ structure Context where
   allowPrimitive : Bool
 
 abbrev M := ReaderT Context <| Except KernelException
+
+def lparams : M (List Name) := do
+  pure (← read).lparams
 
 instance : MonadLocalNameGenerator M where
   withFreshId f c := f c.ngen.curr { c with ngen := c.ngen.next }
@@ -65,7 +69,7 @@ information about these types in an `InductiveStats` that is passed to the
 callback `k`.
 -/
 def checkInductiveTypes
-    (lparams : List Name) (nparams : Nat) (indTypes : Array InductiveType)
+    (nparams : Nat) (indTypes : Array InductiveType)
     (k : InductiveStats → M α) : M α := do
   let rec loopInd dIdx (stats : InductiveStats) : M α := do
     if _h : dIdx < indTypes.size then
@@ -75,7 +79,7 @@ def checkInductiveTypes
       checkName indType.name
       checkName (mkRecName indType.name)
       env.checkNoMVarNoFVar indType.name type
-      _ ← check type lparams
+      _ ← check type (← lparams)
       -- checks that the parameters are valid, counts the number of indices,
       -- and gets the sort that this inductive inhabits
       let rec loop stats type i nindices fuel k : M α := match fuel with
@@ -87,24 +91,24 @@ def checkInductiveTypes
               withLocalDecl name dom.consumeTypeAnnotations bi fun param => do
                 let stats := { stats with params := stats.params.push param.toPExpr }
                 let type := body.instantiate1 param |>.toPExpr
-                loop stats (← whnf type) (i + 1) nindices fuel k
+                loop stats (← whnf type (← lparams)) (i + 1) nindices fuel k
             else
               let param := stats.params[i]!
-              let defEq ← isDefEqPure dom.toPExpr (← getType param.toPExpr)
+              let defEq ← isDefEqPure dom.toPExpr (← getType param.toPExpr) (← lparams)
               unless defEq do
                 throw <| .other "parameters of all inductive datatypes must match"
               let type := body.instantiate1 param |>.toPExpr
-              loop stats (← whnf type) (i + 1) nindices fuel k
+              loop stats (← whnf type (← lparams)) (i + 1) nindices fuel k
           else
             withLocalDecl name dom.consumeTypeAnnotations bi fun arg => do
               let type := body.instantiate1 arg |>.toPExpr
-              loop stats (← whnf type) i (nindices + 1) fuel k
+              loop stats (← whnf type (← lparams)) i (nindices + 1) fuel k
         else
           if i != nparams then
             throw <| .other "number of parameters mismatch in inductive datatype declaration"
-          k (← whnf type) stats nindices
-      loop stats (← whnf type) 0 0 1000 fun type stats nindices => do
-        let type ← ensureSortPure type
+          k (← whnf type (← lparams)) stats nindices
+      loop stats (← whnf type (← lparams)) 0 0 1000 fun type stats nindices => do
+        let type ← ensureSortPure type (← lparams)
         let mut stats := stats
         let resultLevel := Expr.sortLevel! type
         if stats.indConsts.isEmpty then
@@ -118,13 +122,13 @@ def checkInductiveTypes
         loopInd (dIdx + 1) stats
     else
       k <|
-        assert! stats.levels.length == lparams.length
+        assert! stats.levels.length == (← lparams).length
         assert! stats.nindices.size == indTypes.size
         assert! stats.indConsts.size == indTypes.size
         assert! stats.params.size == nparams
         stats
   termination_by indTypes.size - dIdx
-  loopInd 0 { (default : InductiveStats) with levels := lparams.map .param }
+  loopInd 0 { (default : InductiveStats) with levels := (← lparams).map .param }
 
 def hasIndOcc (indConsts : Array Expr) (t : Expr) : Bool :=
   (t.find? fun
@@ -189,7 +193,7 @@ def isRecArg (stats : InductiveStats) (t : Expr) : M (Option Nat) := loop t 1000
   loop t
   | 0 => throw .deepRecursion
   | fuel+1 => do
-    let t ← whnf t.toPExpr
+    let t ← whnf t.toPExpr (← lparams)
     let .forallE name dom body bi := t.toExpr | return isValidIndApp? stats t
     withLocalDecl name dom.consumeTypeAnnotations bi fun arg => do
     loop (body.instantiate1 arg) fuel
@@ -199,7 +203,7 @@ def checkPositivity (stats : InductiveStats) (t : Expr) (ctor : Name) (idx : Nat
   loop t
   | 0 => throw .deepRecursion
   | fuel+1 => do
-    let t ← whnf t.toPExpr
+    let t ← whnf t.toPExpr (← lparams)
     if !hasIndOcc stats.indConsts t then return
     if let .forallE name dom body bi := t.toExpr then
       if hasIndOcc stats.indConsts dom then
@@ -217,7 +221,7 @@ admissible for their inductive types `mkAppN stats.indConsts[i] stats.params`,
 requiring that they are well-typed and respect positivity and output type
 constraints.
 -/
-def checkConstructors (indTypes : Array InductiveType) (lparams : List Name)
+def checkConstructors (indTypes : Array InductiveType)
     (stats : InductiveStats) (isUnsafe : Bool) : M Unit := do
   let env ← getEnv
   for h : idx in [:indTypes.size] do
@@ -231,19 +235,19 @@ def checkConstructors (indTypes : Array InductiveType) (lparams : List Name)
       let t := ctor.type
       checkName n
       env.checkNoMVarNoFVar n t
-      _ ← check t lparams
+      _ ← check t (← lparams)
       let rec loop t i
       | 0 => throw .deepRecursion
       | fuel+1 => do
         if let .forallE name dom body bi := t then
           if let some param := stats.params[i]? then
-            unless ← isDefEqPure dom.toPExpr (← getType param.toPExpr) do
+            unless ← isDefEqPure dom.toPExpr (← getType param.toPExpr) (← lparams) do
               throw <| .other
                 s!"arg #{i + 1} of '{n}' does not match inductive datatype parameters"
             -- instantiate params with those from the inductive type signature
             loop (body.instantiate1 param) (i + 1) fuel
           else
-            let s ← ensureTypePure dom.toPExpr
+            let s ← ensureTypePure dom.toPExpr (← lparams)
             unless stats.resultLevel.isZero || stats.resultLevel.geq' s.toExpr.sortLevel! do
               throw <| .other s!"universe level of type_of(arg #{i + 1
                 }) of '{n}' is too big for the corresponding inductive datatype"
@@ -300,7 +304,7 @@ def isLargeEliminator (stats : InductiveStats) (indTypes : Array InductiveType) 
         withLocalDecl name dom.consumeTypeAnnotations bi fun arg => do
           let mut toCheck := toCheck
           if i ≥ stats.params.size then
-            if !(← ensureTypePure dom.toPExpr).toExpr.sortLevel!.isZero then
+            if !(← ensureTypePure dom.toPExpr (← lparams)).toExpr.sortLevel!.isZero then
               toCheck := toCheck.push arg
           loop (body.instantiate1 arg) (i + 1) toCheck fuel
       else
@@ -316,11 +320,11 @@ This is a fresh universe level parameter if the recursors of `indTypes` are
 large-eliminating, and level zero (output type `Prop`) otherwise.
 -/
 partial -- TODO: remove
-def getElimLevel (stats : InductiveStats) (lparams : List Name) (indTypes : Array InductiveType) :
+def getElimLevel (stats : InductiveStats) (indTypes : Array InductiveType) :
     M Level := do
   unless ← isLargeEliminator stats indTypes do return .zero
   let rec loop u i := do
-    unless lparams.contains u do return .param u
+    unless (← lparams).contains u do return .param u
     loop ((`u).appendIndexAfter i) (i + 1)
   loop `u 1
 
@@ -350,17 +354,17 @@ def loopArgs1 (stats : InductiveStats) (type : Expr) (i : Nat) (indices : Array 
   | fuel+1 => do
     if let .forallE name dom body bi := type then
       if i < stats.params.size then
-        loopArgs1 stats (← whnf <| (body.instantiate1 stats.params[i]!).toPExpr) (i + 1) indices fuel k
+        loopArgs1 stats (← whnf (body.instantiate1 stats.params[i]!).toPExpr (← lparams)) (i + 1) indices fuel k
       else
         withLocalDecl name dom.consumeTypeAnnotations bi fun arg => do
-        loopArgs1 stats (← whnf <| (body.instantiate1 arg).toPExpr) i (indices.push arg) fuel k
+        loopArgs1 stats (← whnf (body.instantiate1 arg).toPExpr (← lparams)) i (indices.push arg) fuel k
     else
       k indices
 
 variable (stats : InductiveStats) (indTypes : Array InductiveType) (elimLevel : Level) in
 def loopInd1 (dIdx : Nat) (recInfos : Array RecInfo) (k : Array RecInfo → M α) : M α := do
   if _h : dIdx < indTypes.size then
-    loopArgs1 stats (← whnf indTypes[dIdx].type.toPExpr) 0 #[] 1000 fun indices =>
+    loopArgs1 stats (← whnf indTypes[dIdx].type.toPExpr (← lparams)) 0 #[] 1000 fun indices =>
     let tTy := mkAppN (mkAppN stats.indConsts[dIdx]! stats.params) indices
     withLocalDecl `t tTy.consumeTypeAnnotations .default fun major => do
     let lctx ← getLCtx
@@ -395,14 +399,14 @@ where
     else k t bu u
 
 def loopUArgs (ui : Expr) (k : Expr → Array Expr → M α) : M α := do
-  loop (← whnf (← inferType ui.toPExpr)) #[] 1000
+  loop (← whnf (← inferType ui.toPExpr (← lparams)) (← lparams)) #[] 1000
 where
   loop uiTy xs
   | 0 => throw .deepRecursion
   | fuel+1 => do
     if let .forallE name dom body bi := uiTy.toExpr then
       withLocalDecl name dom.consumeTypeAnnotations bi fun arg => do
-      loop (← whnf <| (body.instantiate1 arg).toPExpr) (xs.push arg) fuel
+      loop (← whnf (body.instantiate1 arg).toPExpr (← lparams)) (xs.push arg) fuel
     else
       k uiTy xs
 
@@ -521,11 +525,11 @@ def run (lparams : List Name) (nparams : Nat) (types : List InductiveType)
   let isUnsafe := (← read).safety != .safe
   let indTypes := types.toArray
   Environment.checkDuplicatedUnivParams lparams
-  checkInductiveTypes lparams nparams indTypes fun stats => do
+  checkInductiveTypes nparams indTypes fun stats => do
   withEnv (declareInductiveTypes stats lparams nparams indTypes isUnsafe numNested) do
-  checkConstructors indTypes lparams stats isUnsafe
+  checkConstructors indTypes stats isUnsafe
   withEnv (declareConstructors stats lparams indTypes isUnsafe) do
-  let elimLevel ← getElimLevel stats lparams indTypes
+  let elimLevel ← getElimLevel stats indTypes
   mkRecInfos stats indTypes elimLevel fun recInfos => do
   let motives := recInfos.map (·.motive)
   let minors := recInfos.concatMap (·.minors)
@@ -924,7 +928,7 @@ def Environment.addInductive (env : Environment) (lparams : List Name) (nparams 
     |>.run' { lvls := lparams.map .param, newTypes := types.toArray }
   let numNested := res.aux2nested.size
   let env' ← AddInductive.run lparams nparams res.types numNested
-    { env, allowPrimitive, safety := if isUnsafe then .unsafe else .safe, const := `inductive }
+    { env, allowPrimitive, safety := if isUnsafe then .unsafe else .safe, const := `inductive, lparams}
   if numNested == 0 then return env'
   let allIndNames := types.map (·.name)
   let (recNames', recNameMap') := mkAuxRecNameMap env' types

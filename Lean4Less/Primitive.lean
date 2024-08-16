@@ -6,7 +6,6 @@ open Lean4Less.TypeChecker
 
 open private add from Lean.Environment
 
-private def defEq (a b : Expr) := TypeChecker.isDefEqPure a.toPExpr b.toPExpr
 private def arrow := Expr.arrow
 
 def checkPrimitiveDef (env : Environment) (v : DefinitionVal) : M Bool := do
@@ -21,7 +20,8 @@ def checkPrimitiveDef (env : Environment) (v : DefinitionVal) : M Bool := do
   let add := mkApp2 (.const ``Nat.add [])
   let mul := mkApp2 (.const ``Nat.mul [])
   let mod := mkApp2 (.const ``Nat.mod [])
-  let defeq1 (a b : Expr) := TypeChecker.isDefEqPure (arrow nat a).toPExpr (arrow nat b).toPExpr
+  let defEq (a b : Expr) := TypeChecker.isDefEqPure a.toPExpr b.toPExpr v.levelParams
+  let defeq1 (a b : Expr) := TypeChecker.isDefEqPure (arrow nat a).toPExpr (arrow nat b).toPExpr v.levelParams
   let defeq2 (a b : Expr) := defeq1 (arrow nat a).toPExpr (arrow nat b).toPExpr
   let x := .bvar 0
   let y := .bvar 1
@@ -29,7 +29,7 @@ def checkPrimitiveDef (env : Environment) (v : DefinitionVal) : M Bool := do
   | ``Nat.add =>
     unless env.contains ``Nat && v.levelParams.isEmpty do fail
     -- add : Nat → Nat → Nat
-    unless ← TypeChecker.isDefEqPure v.type.toPExpr (arrow nat (arrow nat nat)).toPExpr do fail
+    unless ← TypeChecker.isDefEqPure v.type.toPExpr (arrow nat (arrow nat nat)).toPExpr v.levelParams do fail
     let add := mkApp2 v.value
     -- add x 0 ≡ x
     unless ← defeq1 (add x zero) x do fail
@@ -107,6 +107,7 @@ def checkPrimitiveInductive (env : Environment) (lparams : List Name) (nparams :
     (types : List InductiveType) (isUnsafe : Bool) : Except KernelException Bool := do
   unless !isUnsafe && lparams.isEmpty && nparams == 0 do return false
   let [type] := types | return false
+  let defEq (a b : Expr) := TypeChecker.isDefEqPure a.toPExpr b.toPExpr lparams
   unless type.type == .sort (.succ .zero) do return false
   let fail {α} : Except KernelException α :=
     throw <| .other s!"invalid form for primitive inductive {type.name}"
@@ -129,10 +130,10 @@ def checkPrimitiveInductive (env : Environment) (lparams : List Name) (nparams :
       unless env.contains ``Nat do fail
       -- Char : Type
       let char := .const ``Char []
-      _ ← TypeChecker.ensureType char.toPExpr
+      _ ← TypeChecker.ensureType char.toPExpr lparams
       -- List Char : Type
       let listchar := mkApp (.const ``List [.zero]) char
-      _ ← TypeChecker.ensureType listchar.toPExpr
+      _ ← TypeChecker.ensureType listchar.toPExpr lparams
       -- @List.nil.{0} Char : List Char
       let listNil := .app (.const ``List.nil [.zero]) char
       unless ← defEq (← TypeChecker.checkPure listNil []) listchar do fail

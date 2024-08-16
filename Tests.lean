@@ -15,7 +15,7 @@ axiom T : (p : P) → Q p → Prop
 axiom t : T p Qp
 
 -- with proof irrelevance, `t` would suffice
-def nestedPrfIrrel : T q Qq := t
+def nestedPrfIrrelTest : T q Qq := t
 
 inductive K : Prop where
   | mk : K
@@ -71,13 +71,20 @@ noncomputable def eq_of_heq' : Prop :=
 -- def ex : ∀ x : P, (@dite Prop P (.isTrue x) (fun p => Q p) (fun p => True)) := fun x => Qq
 
 -- #print ex
+axiom L : (p : P) → ((q : Q p) → Q p) → Type
+axiom l : L q fun qq : Q q => qq
 
-set_option pp.explicit true
-#print if_pos.match_1
--- #check_l4l dif_pos'
+axiom L' : (P Q : Prop) → ((p : P) → (q : Q) → Type) → Type
+
+noncomputable def lamTest : L p fun qp : Q p => qp := l
+
+set_option pp.all true
+-- #print if_pos.match_1
+#check_only lamTest
 -- #check_l4l ex
 -- #check_l4l ex
--- #check_only Fin.mk_zero
+-- #print Fin.mk_zero
+-- #check_l4l Fin.mk_zero
 
 -- #check_l4l kLikeReduction
 -- axiom T : Type → Type
