@@ -1,6 +1,6 @@
 import Lean4Less.Quot
 import Lean4Less.Inductive.Reduce
-import Lean4Less.PExpr
+import Lean4Less.EExpr
 
 import Lean4Lean.Environment
 import Lean4Lean.ForEachExprV
@@ -668,7 +668,7 @@ def appHEqTrans? (t s r : PExpr) (theqs? sheqr? : Option EExpr) : RecM (Option E
     let (lvl, tType) ← getTypeLevel t
     let sType ← inferTypePure s
     let rType ← inferTypePure r
-    return Lean.mkAppN (← getConst `HEq.trans [lvl]) #[tType, sType, rType, t, s, r, theqs.toExpr, sheqr.toExpr] |>.toEExpr
+    return Lean.mkAppN (← getConst `HEq.trans [lvl]) #[tType, sType, rType, t, s, r, theqs, sheqr] |>.toEExpr
   | none, .some sheqr => return sheqr
   | .some theqs, none => return theqs
 
@@ -758,35 +758,8 @@ dom : PExpr
 info : BinderInfo
 deriving Inhabited
 
-structure AppHEqArgsAB where
-B : PExpr
-hAB : EExpr
-deriving Inhabited
-
-structure AppHEqArgsUV where
-b : PExpr
-Vb : PExpr
-hUV : PExpr
-deriving Inhabited
-
-inductive AppHEqArgsExtra where
-| none : AppHEqArgsExtra
-| UV : AppHEqArgsUV → AppHEqArgsExtra
-| AB : AppHEqArgsAB → AppHEqArgsExtra
-| ABUV : AppHEqArgsAB → AppHEqArgsUV → AppHEqArgsExtra
-deriving Inhabited
-
-structure AppHEqArgs where
-a  : PExpr
-Ua : PExpr
-A  : PExpr
-u  : Level
-v  : Level
-extra : AppHEqArgsExtra
-deriving Inhabited
-
-def getMaybeDepLemmaApp (n : Name) (us : List Level) (args1 args2 : Array Expr) (Uas as : Array Expr) : RecM Expr := do
-  let (Us, n') ← do
+def getMaybeDepLemmaApp (Uas as : Array Expr) : RecM (Array Expr × Bool) := do
+  let (Us, isDep) ← do
     let mut hasFVar := false
 
     for (Ua, a) in Uas.zip as do
@@ -801,14 +774,8 @@ def getMaybeDepLemmaApp (n : Name) (us : List Level) (args1 args2 : Array Expr) 
       else
         Us := Us.push Ua
 
-    let n' :=
-      if hasFVar then
-        n.toString ++ "'" |>.toName
-      else 
-        n
-
-    pure (Us, n')
-  return Lean.mkAppN (.const n' us) (args1 ++ Us ++ args2)
+    pure (Us, hasFVar)
+  return (Us, isDep)
 
 def gethUV1 (Ua Vb a b : Expr) (UaEqVa : EExpr) : RecM PExpr := do
   let hUV ← if Ua.containsFVar a.fvarId! || Vb.containsFVar b.fvarId! then
@@ -824,13 +791,15 @@ def gethUV2 (Ua Vb a b : Expr) (UaEqVb : EExpr) (idaEqb : FVarId) : RecM PExpr :
       pure $ UaEqVb.toPExpr
   pure hUV
 
-def getMaybeDepLemmaApp1 (n : Name) (us : List Level) (args1 args2 : Array Expr) (Ua a : Expr) : RecM Expr := do
-  getMaybeDepLemmaApp n us args1 args2 #[Ua] #[a]
+def getMaybeDepLemmaApp1 (Ua a : Expr) : RecM (PExpr × Bool) := do
+  let (#[U], dep) ← getMaybeDepLemmaApp #[Ua] #[a] | unreachable!
+  pure (U.toPExpr, dep)
 
-def getMaybeDepLemmaApp2 (n : Name) (us : List Level) (args1 args2 : Array Expr) (Ua Vb a b : Expr) : RecM Expr := do
-  getMaybeDepLemmaApp n us args1 args2 #[Ua, Vb] #[a, b]
+def getMaybeDepLemmaApp2 (Ua Vb a b : Expr) : RecM ((PExpr × PExpr) × Bool) := do
+  let (#[U, V], dep) ← getMaybeDepLemmaApp #[Ua, Vb] #[a, b] | unreachable!
+  pure ((U.toPExpr, V.toPExpr), dep)
 
-def isDefEqBinderForApp' (as bs : Array (Array PExpr)) (ds? : Array (Option (FVarId × EExpr))) (aVals bVals : Array PExpr) (U' V' : PExpr) (f : Array AppHEqArgs → RecM T)
+def isDefEqBinderForApp' (as bs : Array (Array PExpr)) (ds? : Array (Option (FVarId × EExpr))) (aVals bVals : Array PExpr) (aValsEqbVals? : Array (Option EExpr)) (tfEqsf? : (Option EExpr)) (U' V' : PExpr) (f : Array (AppData EExpr) → RecM T)
 : RecM T := do
   let rec loop idx datas aVars bVars : RecM T := do
     let as' := as[idx]!
@@ -890,7 +859,7 @@ def isDefEqBinderForApp' (as bs : Array (Array PExpr)) (ds? : Array (Option (FVa
   termination_by (as.size - 1) - idx
   loop 0 #[] #[] #[]
 
-def isDefEqBinderForApp (binDatas : Array (BinderData × BinderData)) (U' V' : PExpr) (aVals bVals : Array PExpr) (f : Array AppHEqArgs → RecM T) : RecM T := do
+def isDefEqBinderForApp (binDatas : Array (BinderData × BinderData)) (U' V' : PExpr) (aVals bVals : Array PExpr) (aValsEqbVals? : Array (Option EExpr)) (tfEqsf? : (Option EExpr)) (f : Array (AppData EExpr) → RecM T) : RecM T := do
   let rec loop idx as bs ds? : RecM T := do
     let ({name := aName, dom := aDom, info := aBi},
       {name := bName, dom := bDom, info := bBi}) := binDatas.get! idx
@@ -935,7 +904,7 @@ def isDefEqBinderForApp (binDatas : Array (BinderData × BinderData)) (U' V' : P
           if _h : idx < binDatas.size - 1 then
             loop (idx + 1) as bs ds?
           else
-            isDefEqBinderForApp' as bs ds? aVals bVals U' V' f
+            isDefEqBinderForApp' as bs ds? aVals bVals aValsEqbVals? tfEqsf? U' V' f
 
       if let some AEqB := AEqB? then 
         let idb := ⟨← mkFreshId⟩
@@ -1025,7 +994,6 @@ def isDefEqLambda (t s : PExpr) : RecB := do
       -- gx was abstracted over a if A defeq B (instead of over a fresh (b : B))
       let x := if let some (b, _, _) := d? then b else a
       let g := (← getLCtx).mkLambda #[x] gx |>.toPExpr
-
       if d?.isSome || faEqgx?.isSome then
         let (ALvl, A) ← getTypeLevel a
         let u := ALvl
@@ -1033,24 +1001,29 @@ def isDefEqLambda (t s : PExpr) : RecB := do
         let v := UaLvl
         let Vx ← inferTypePure gx
         let faEqgx ← faEqgx?.getDM $ mkHRefl UaLvl Ua fa
-        if let some (b, idaEqb, hAB) := d? then
+        let ((U, V), dep) ← getMaybeDepLemmaApp2 Ua Vx a x
+        let extra ← if let some (b, idaEqb, hAB) := d? then
           let B ← inferTypePure b
 
-          let hfg := (← getLCtx).mkLambda #[a, b, .fvar idaEqb] faEqgx
-          faEqgx? := .some $ (← getMaybeDepLemmaApp2 `L4L.lambdaHEqABUV [u, v] #[A, B] #[f, g, hAB, hfg] Ua Vx a x).toEExpr
+          -- let hfg := (← getLCtx).mkLambda #[a, b, .fvar idaEqb] faEqgx |>.toPExpr
+          pure $ .ABUV {B, b, hAB} {V}
+          -- faEqgx? := .some $ (← getMaybeDepLemmaApp2 `L4L.lambdaHEqABUV [u, v] #[A, B] #[f, g, hAB, hfg] Ua Vx a x).toEExpr
         else
-          let hfg := (← getLCtx).mkLambda #[a] faEqgx
+          -- let hfg := (← getLCtx).mkLambda #[a] faEqgx |>.toPExpr
           let (_, UaEqVx?) ← isDefEq Ua Vx
           if UaEqVx?.isSome then
-            faEqgx? := .some $ (← getMaybeDepLemmaApp2 `L4L.lambdaHEqUV [u, v] #[A] #[f, g, hfg] Ua Vx a x) |>.toEExpr
+            pure $ .UV {V}
+            -- faEqgx? := .some $ (← getMaybeDepLemmaApp2 `L4L.lambdaHEqUV [u, v] #[A] #[f, g, hfg] Ua Vx a x) |>.toEExpr
           else
-            faEqgx? := .some $ (← getMaybeDepLemmaApp1 `L4L.lambdaHEq [u, v] #[A] #[f, g, hfg] Ua a) |>.toEExpr
+            pure $ .none
+            -- faEqgx? := .some $ (← getMaybeDepLemmaApp1 `L4L.lambdaHEq [u, v] #[A] #[f, g, hfg] Ua a) |>.toEExpr
+        faEqgx? := .some $ .lam {u, v, A, a, U, f, g, faEqgx, extra, dep, lctx := ← getLCtx}
 
       fa := f
       gx := g
     pure faEqgx?
 
-def withAppDatas (t s : PExpr) (tArgs sArgs : Array PExpr) (f : Array AppHEqArgs → RecM T) : RecM T := do
+def withAppDatas (t s : PExpr) (tArgs sArgs : Array PExpr) (tasEqsas? : Array (Option EExpr)) (tfEqsf? : (Option EExpr)) (f : Array (AppData EExpr) → RecM T) : RecM T := do
   let rec getData t s := do
     match t, s with
     | .forallE tName tDom tBody tBi, .forallE sName sDom sBody sBi =>
@@ -1059,7 +1032,7 @@ def withAppDatas (t s : PExpr) (tArgs sArgs : Array PExpr) (f : Array AppHEqArgs
     | tBody, sBody =>
       pure (#[], tBody.toPExpr, sBody.toPExpr)
   let (datas, tBody, sBody) ← getData t.toExpr s.toExpr
-  isDefEqBinderForApp datas tBody sBody tArgs sArgs f
+  isDefEqBinderForApp datas tBody sBody tArgs sArgs tasEqsas? tfEqsf? f
 
 /--
 If `t` and `s` are for-all expressions, checks that their domains are defeq and
@@ -1097,17 +1070,21 @@ def isDefEqForall' (t s : PExpr) : RecB := do
         let v := UaLvl
 
         let UaEqVx := UaEqVx?.getD $ ← mkHRefl UaTypeLvl UaType Ua
+        let ((U, V), dep) ← getMaybeDepLemmaApp2 Ua Vx a x
 
-        if let .some (b, idaEqb, hAB) := d? then
-          let hUV ← gethUV2 Ua Vx a x UaEqVx idaEqb
+        let extra ← if let .some (b, idaEqb, hAB) := d? then
+          -- let hUV ← gethUV2 Ua Vx a x UaEqVx idaEqb
 
           let B ← inferTypePure b
-
-          UaEqVx? := .some $ (← getMaybeDepLemmaApp2 `L4L.forallHEqAB [u, v] #[A, B] #[hAB, hUV] Ua Vx a x) |>.toEExpr
+          pure $ .AB {B, b, idaEqb, hAB,}
+          -- UaEqVx? := .some $ (← getMaybeDepLemmaApp2 `L4L.forallHEqAB [u, v] #[A, B] #[hAB, hUV] Ua Vx a x) |>.toEExpr
         else
-          let hUV ← gethUV1 Ua Vx a x UaEqVx
+          -- let hUV ← gethUV1 Ua Vx a x UaEqVx
+          pure .none
 
-          UaEqVx? := .some $ (← getMaybeDepLemmaApp2 `L4L.forallHEq [u, v] #[A] #[hUV] Ua Vx a x).toEExpr
+        UaEqVx? := .some $ .forallE {u, v, A, a, U, V, UaEqVx, extra, dep, lctx := ← getLCtx}
+
+          -- UaEqVx? := .some $ (← getMaybeDepLemmaApp2 `L4L.forallHEq [u, v] #[A] #[hUV] Ua Vx a x).toEExpr
 
       Ua := (← getLCtx).mkForall #[a] Ua |>.toPExpr
       Vx := (← getLCtx).mkForall #[x] Vx |>.toPExpr
@@ -1221,7 +1198,7 @@ def isDefEqApp (t s : PExpr) (tfEqsf? : Option (Option EExpr) := none) (targsEqs
   (tfT, sfT) ← alignForall tfT sfT tArgs.size
 
   -- TODO(perf) restrict data collection to the case of `taEqsa?.isSome || ret?.isSome`
-  withAppDatas tfT sfT tArgs sArgs fun datas => do
+  withAppDatas tfT sfT tArgs sArgs taEqsas ret? fun datas => do
     let mut tf := tf
     let mut sf := sf
     let mut ret? := ret?
@@ -1238,10 +1215,11 @@ def isDefEqApp (t s : PExpr) (tfEqsf? : Option (Option EExpr) := none) (targsEqs
       if taEqsa?.isSome || ret?.isSome then
         ret? := .some $ ← match extra with
         | .none => do
+          let (U, dep) ← getMaybeDepLemmaApp1 Ua a
           if let some taEqsa := taEqsa? then
             if let some ret := ret? then
-              pure $ (← getMaybeDepLemmaApp1 `L4L.appHEq [u, v]
-                #[A] #[tf, sf, ta, sa, ret, taEqsa] Ua a).toEExpr
+              let n := if dep then `L4L.appHEq else `L4L.appHEq'
+              pure $ (Lean.mkAppN (.const n [u, v]) #[A, U, tf, sf, ta, sa, ret, taEqsa]).toEExpr
             else
               pure $ (← getMaybeDepLemmaApp1 `L4L.appArgHEq [u, v]
                 #[A] #[tf, ta, sa, taEqsa] Ua a).toEExpr

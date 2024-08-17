@@ -1,6 +1,6 @@
 import Lean.Structure
 import Lean4Lean.Expr
-import Lean4Less.PExpr
+import Lean4Less.EExpr
 
 namespace Lean4Less
 open Lean
