@@ -7,6 +7,21 @@ axiom P : Prop
 axiom Q : P → Prop
 axiom p : P
 axiom q : P
+
+axiom X : (p : P) → Q p → Q p
+
+def forallEx : Q q → Q q := fun (qp : Q p) => X p qp 
+
+def forallEx' : Q q → Q q :=
+@L4L.castHEq (Q p → Q p) (Q q → Q q)
+  (@L4L.forallHEqAB (Q p) (Q q) (Q p) (Q q) (@L4L.appArgHEq P Prop Q p q (L4L.prfIrrel P p q))
+    (@L4L.appArgHEq P Prop Q p q (L4L.prfIrrel P p q)))
+  fun (qp : Q p) => X p qp
+def forallEx'' : Q q → Q q :=
+  fun (qq : Q q) => @L4L.castHEq (Q p) (Q q) (@L4L.appArgHEq P Prop Q p q (L4L.prfIrrel P p q))
+                      (X p (@L4L.castHEq (Q q) (Q p) (@L4L.appArgHEq P Prop Q q p (L4L.prfIrrel P q p)) qq)) 
+#check_off forallEx''
+
 axiom Qp : Q p
 axiom Qq : Q q
 
