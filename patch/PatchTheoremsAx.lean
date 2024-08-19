@@ -12,6 +12,8 @@ axiom prfIrrelHEq (P Q : Prop) (heq : HEq P Q) (p : P) (q : Q) : HEq p q
 
 axiom castHEq {α β : Sort u} (h : HEq α β) (a : α) : β
 
+axiom castOrigHEq {α β : Sort u} : (h : HEq α β) → (a : α) → HEq (castHEq h a) a
+
 axiom forallHEq {A : Sort u} {U V : Sort v}
   (hUV : HEq U V)
   : HEq ((a : A) → U) ((b : A) → V)

@@ -120,6 +120,7 @@ def ensureSortCore (e : PExpr) (s : Expr) : RecEE := do
 
 def assert (n : Nat) (b : Bool) : RecM Unit := do if not b then throw $ .other s!"assert fail {n}"
 
+@[inherit_doc ensureSortCore]
 def ensureSortCorePure (e : PExpr) (s : Expr) : RecM PExpr := do
   let (s, p?) ← (ensureSortCore e s)
   assert 1 $ p? == none
@@ -136,6 +137,7 @@ def ensureForallCore (e : PExpr) (s : Expr) : RecEE := do
   if e.toExpr.isForall then return (e, p?)
   throw <| .funExpected (← getEnv) default s
 
+@[inherit_doc ensureForallCore]
 def ensureForallPure (e : PExpr) (s : Expr) : RecM PExpr := do
   if Expr.isForall e then return e
   let e ← whnfPure e
@@ -188,9 +190,68 @@ def inferTypePure (e : PExpr) : RecM PExpr := fun m => m.inferTypePure e
 
 def getConst (n : Name) (lvls : List Level) : RecM Expr := do
   pure $ .const n lvls
+/--
+Gets the universe level of the sort that the type of `e` inhabits.
+-/
+def getTypeLevel (e : PExpr) : RecM (Level × PExpr) := do
+  let eType ← inferTypePure e
+  let eTypeSort ← inferTypePure eType
+  let (eTypeSort', es?) ← ensureSortCore eTypeSort eType
+  assert 4 $ es? == none
+  pure (eTypeSort'.toExpr.sortLevel!, eType)
 
-def maybeCast (p? : Option EExpr) (lvl : Level) (typLhs typRhs e : PExpr) : RecM PExpr := do
-  pure $ (← p?.mapM (fun (p : EExpr) => do pure (Lean.mkAppN (← getConst `L4L.castHEq [lvl]) #[typLhs, typRhs, p.toExpr, e]).toPExpr)).getD e
+def appHEqSymm (t s : PExpr) (theqs : EExpr) : RecM EExpr := do
+  let (lvl, tType) ← getTypeLevel t
+  let sType ← inferTypePure s
+  pure $ Lean.mkAppN (← getConst `HEq.symm [lvl]) #[tType, sType, t, s, theqs.toExpr] |>.toEExpr
+
+def appHEqSymm? (t s : PExpr) (theqs? : Option EExpr) : RecM (Option EExpr) := do
+  let some theqs := theqs? | return none
+  appHEqSymm t s theqs
+
+def smartCast (e tl tr : PExpr) (p : EExpr) : RecM PExpr := do
+  let mkCast' n tl tr p e (prfVars prfVals : Array Expr) := do
+    let sort ← inferTypePure tr.toPExpr
+    let sort' ← ensureSortCorePure sort tl.toPExpr
+    let p := p.toExpr.replaceFVars prfVars prfVals
+    let lvl := sort'.toExpr.sortLevel!
+    pure $ Lean.mkAppN (← getConst n [lvl]) #[tl, tr, p, e]
+
+  let mkCast tl tr p e (prfVars prfVals : Array Expr) := do
+    mkCast' `L4L.castHEq tl tr p e prfVars prfVals
+
+  let rec loop e tl tr (lamVars prfVars prfVals : Array Expr) p : RecM Expr := do
+    match e, tl, tr, p with
+    | .lam n _ b bi, .forallE _ _ tbl .., .forallE _ tdr tbr .., .forallE forallData =>
+      let {A, a, UaEqVx, extra, ..} := forallData
+      let id := ⟨← mkFreshId⟩
+      withLCtx ((← getLCtx).mkLocalDecl id n tdr bi) do
+        let v := .fvar id
+
+        let (newPrfVars, newPrfVals, vCast) ←
+          match extra with
+          | .AB {B, b, idaEqb, hAB} =>
+            let hBA ← appHEqSymm A B hAB
+            let vCast ← mkCast B.toExpr A.toExpr hBA v prfVars prfVals
+            let vCastEqv ← mkCast' `L4L.castOrigHEq B.toExpr A.toExpr hBA v prfVars prfVals
+            pure (#[a.toExpr, b.toExpr, Expr.fvar idaEqb], #[vCast, v, vCastEqv], vCast)
+          | _ => 
+            pure (#[a.toExpr], #[v], v)
+        let prfVars := prfVars ++ newPrfVars
+        let prfVals := prfVals ++ newPrfVals
+
+        let lamVars := lamVars.push v
+        let b := b.instantiate1 vCast
+        let tbl := tbl.instantiate1 vCast
+        let tbr := tbr.instantiate1 v
+        loop b tbl tbr lamVars prfVars prfVals UaEqVx
+    | _, _, _, _ =>
+      let cast ← mkCast tl tr p e prfVars prfVals
+      pure $ (← getLCtx).mkLambda lamVars cast
+  pure (← loop e.toExpr tl.toExpr tr.toExpr #[] #[] #[] p).toPExpr
+
+def maybeCast (p? : Option EExpr) (typLhs typRhs e : PExpr) : RecM PExpr := do
+  pure $ (← p?.mapM (fun (p : EExpr) => do smartCast e typLhs typRhs p)).getD e
 
 /--
 Infers the type of lambda expression `e`.
@@ -201,8 +262,7 @@ def inferLambda (e : Expr) : RecPE := loop #[] false e where
     let d := dom.instantiateRev fvars
     let (typ, d'?) ← inferType d
     let (typ', p?) ← ensureSortCore typ d
-    let lvl := typ'.toExpr.sortLevel!
-    let d' ← maybeCast p? lvl.succ typ typ' (d'?.getD d.toPExpr)
+    let d' ← maybeCast p? typ typ' (d'?.getD d.toPExpr)
 
     let id := ⟨← mkFreshId⟩
     withLCtx ((← getLCtx).mkLocalDecl id name d' bi) do
@@ -216,8 +276,7 @@ def inferLambda (e : Expr) : RecPE := loop #[] false e where
     let (rSort, r'?) ← inferType r
     let (rSort', p?) ← ensureSortCore rSort r -- TODO need to test this
     assert 2 $ r'? == none
-    let lvl := rSort'.toExpr.sortLevel!
-    let r' ← maybeCast p? lvl.succ rSort rSort' r
+    let r' ← maybeCast p? rSort rSort' r
 
     let patch ←
       if domPatched || e'?.isSome then do
@@ -239,7 +298,7 @@ def inferForall (e : Expr) : RecPE := loop #[] #[] false e where
     let (t, d'?) ← inferType d
     let (t', p?) ← ensureSortCore t d
     let lvl := t'.toExpr.sortLevel!
-    let d' ← maybeCast p? lvl.succ t t' (d'?.getD d.toPExpr)
+    let d' ← maybeCast p? t t' (d'?.getD d.toPExpr)
 
     let us := us.push lvl
     let id := ⟨← mkFreshId⟩
@@ -251,7 +310,7 @@ def inferForall (e : Expr) : RecPE := loop #[] #[] false e where
     let (r, e'?) ← inferType e
     let (r', p?) ← ensureSortCore r e
     let lvl := r'.toExpr.sortLevel!
-    let e' ← maybeCast p? lvl.succ r r' (e'?.getD e.toPExpr)
+    let e' ← maybeCast p? r r' (e'?.getD e.toPExpr)
 
     let patch? ←
       if domPatched || e'?.isSome || p?.isSome then do
@@ -327,14 +386,13 @@ def inferLet (e : Expr) : RecPE := loop #[] #[] false e where
     let type := type.instantiateRev fvars
     let (typeType, type'?) ← inferType type 
     let (typeType', pType?) ← ensureSortCore typeType type
-    let lvl := typeType'.toExpr.sortLevel!
-    let type' ← maybeCast pType? lvl.succ typeType typeType' (type'?.getD type.toPExpr)
+    let type' ← maybeCast pType? typeType typeType' (type'?.getD type.toPExpr)
     let val := val.instantiateRev fvars
     let (valType, val'?) ← inferType val 
     let (defEq, pVal?) ← isDefEq valType type' -- FIXME order?
     if !defEq then
       throw <| .letTypeMismatch (← getEnv) (← getLCtx) name valType type'
-    let val' ← maybeCast pVal? lvl valType type' (val'?.getD val.toPExpr)
+    let val' ← maybeCast pVal? valType type' (val'?.getD val.toPExpr)
     let id := ⟨← mkFreshId⟩
     withLCtx ((← getLCtx).mkLetDecl id name type' val') do
       let fvars := fvars.push (.fvar id)
@@ -424,16 +482,6 @@ def inferProj (typeName : Name) (idx : Nat) (struct : PExpr) (patched : Bool) (s
 
 -- def inferProjPure (typeName : Name) (idx : Nat) (struct : Expr) (structType : Expr) (structp? : Option Expr) : RecM PExpr := sorry
 
-/--
-Gets the universe level of the sort that the type of `e` inhabits.
--/
-def getTypeLevel (e : PExpr) : RecM (Level × PExpr) := do
-  let eType ← inferTypePure e
-  let eTypeSort ← inferTypePure eType
-  let (eTypeSort', es?) ← ensureSortCore eTypeSort eType
-  assert 4 $ es? == none
-  pure (eTypeSort'.toExpr.sortLevel!, eType)
-
 @[inherit_doc inferType]
 def inferType' (e : Expr) : RecPE := do
   -- if (← readThe Context).const == `eq_of_heq' then
@@ -466,24 +514,18 @@ def inferType' (e : Expr) : RecPE := do
     | .forallE .. => inferForall e
     | .app f a =>
       let (fType, f'?) ← inferType' f
-      let (fTypeSort, fType''?) ← inferType fType
-      assert 6 $ fType''? == none
-      let (fTypeSort', fs?) ← ensureSortCore fTypeSort fType
-      assert 7 $ fs? == none
-      let fTypeLvl := fTypeSort'.toExpr.sortLevel!
       let (fType', pf'?) ← ensureForallCore fType f
-      let f' ← maybeCast pf'? fTypeLvl fType fType' (f'?.getD f.toPExpr)
+      let f' ← maybeCast pf'? fType fType' (f'?.getD f.toPExpr)
       -- if (← readThe Context).const == `eq_of_heq' then if let .lam _ (.const `Ty _) _ _ := a then
       --   dbg_trace s!"DBG[5]: {a}"
 
       let (aType, a'?) ← inferType' a
-      let (aTypeLvl, _) ← getTypeLevel (a'?.getD a.toPExpr)
 
       let dType := Expr.bindingDomain! fType' |>.toPExpr
       -- it can be shown that if `e` is typeable as `T`, then `T` is typeable as `Sort l`
       -- for some universe level `l`, so this use of `isDefEq` is valid
       let (defEq, pa'?) ← isDefEq aType dType
-      let a' ← maybeCast pa'? aTypeLvl aType dType (a'?.getD a.toPExpr)
+      let a' ← maybeCast pa'? aType dType (a'?.getD a.toPExpr)
       if defEq then
         let patch := if f'?.isSome || a'?.isSome || pf'?.isSome || pa'?.isSome then .some (Expr.app f' a').toPExpr else none
         pure ((Expr.bindingBody! fType').instantiate1 a' |>.toPExpr, patch)
@@ -559,7 +601,7 @@ def getProjThm (structName : Name) (structType : PExpr) (projIdx : Nat) (projTyp
   let f ← withLCtx ((← getLCtx).mkLocalDecl ids `x structType default) do
     let svar := (Expr.fvar ids).toPExpr
     pure $ (← getLCtx).mkLambda #[svar] (.proj structName projIdx svar) |>.toPExpr
-  pure $ (mkAppN (← getConst `L4L.appArgHEq [structLvl, projLvl]) #[structType, projType, f]).toPExpr
+  pure $ (mkAppN (← getConst `L4L.appArgHEq' [structLvl, projLvl]) #[structType, projType, f]).toPExpr
 
 def appProjThm? (structName : Name) (projIdx : Nat) (struct structN : PExpr) (structEqstructN? : Option EExpr) : RecM (Option EExpr) := do
   structEqstructN?.mapM fun structEqstructN => do
@@ -654,12 +696,6 @@ def reduceNative (_env : Environment) (e : PExpr) : Except KernelException (Opti
   else if f == .const ``reduceNat [] then
     throw <| .other s!"lean4lean does not support 'reduceNat {c}' reduction"
   return none
-
-def appHEqSymm? (t s : PExpr) (theqs? : Option EExpr) : RecM (Option EExpr) := do
-  let some theqs := theqs? | return none
-  let (lvl, tType) ← getTypeLevel t
-  let sType ← inferTypePure s
-  pure $ Lean.mkAppN (← getConst `HEq.symm [lvl]) #[tType, sType, t, s, theqs.toExpr] |>.toEExpr
 
 def appHEqTrans? (t s r : PExpr) (theqs? sheqr? : Option EExpr) : RecM (Option EExpr) := do
   match theqs?, sheqr? with
@@ -1810,8 +1846,8 @@ def ensureSortPure (t : PExpr) (lps : List Name) (s := t) : M PExpr := withReade
 @[inherit_doc ensureForallCore]
 def ensureForall (t : PExpr) (lps : List Name) (s := t) : MEE := withReader ({ · with lparams := lps }) $ (ensureForallCore t s).run
 
-def maybeCast (p? : Option EExpr) (lvl : Level) (typLhs typRhs e : PExpr) (lps : List Name) : M PExpr := 
-  withReader ({ · with lparams := lps }) (Inner.maybeCast p? lvl typLhs typRhs e).run
+def maybeCast (p? : Option EExpr) (typLhs typRhs e : PExpr) (lps : List Name) : M PExpr := 
+  withReader ({ · with lparams := lps }) (Inner.maybeCast p? typLhs typRhs e).run
 
 -- def test' : MetaM String := do
 --   dbg_trace s!"test"

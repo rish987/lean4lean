@@ -125,3 +125,9 @@ set_option pp.all true
 --   | .zero => Prop
 --   | .succ _ => (fun (x : T (test1 .zero)) => Bool) t
 -- end
+
+axiom G : P → Type
+axiom H : (p : P) → G p → Type
+axiom H.mk : (p : P) → (g : G p) → H p g
+
+noncomputable def pushTest : (g : G q) → H q g := fun (g : G p) => H.mk p g

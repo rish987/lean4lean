@@ -169,6 +169,12 @@ inductive EExpr where
 | app     : AppData EExpr → EExpr
 deriving Inhabited
 
+-- def EExpr.reverse : EExpr → EExpr
+-- | other   (e : Expr) => sorry
+-- | lam     (d : LamData EExpr) => sorry
+-- | forallE (d : ForallData EExpr) => sorry
+-- | app     (d : AppData EExpr) => sorry
+
 mutual
 def LamDataExtra.lemmaName (dep : Bool) (d : LamDataExtra EExpr) : Name :=
 let name := match d with
