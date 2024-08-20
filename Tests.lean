@@ -132,20 +132,19 @@ axiom H.mk : (p : P) → (g : G p) → H p g
 
 noncomputable def pushTest : (g : G q) → H q g := fun (g : G p) => H.mk p g
 
-def F : Bool → Nat → Type
-| true, .zero => Bool
-| _, _ => Unit
+def F : Bool → Type
+| true => Bool
+| _ => Unit
 
-structure S (T : Type u) : Type u where
+structure S : Type where
 b : Bool
-n : Nat
-t : T
-f : F b n
+f : F b
 
 #check S.mk
 
 axiom B : Bool → Type
+axiom B.mk : (b : Bool) → B b
 
-axiom s : B (S.mk true .zero () true).4
-noncomputable def projTest : B (@K.rec (fun _ => S Unit) (S.mk true .zero () true) k).4 := s
+axiom s : B (@K.rec (fun _ => S) (S.mk true true) k).2
+noncomputable def projTest : B (S.mk true true).2 := s
 #check_l4l projTest

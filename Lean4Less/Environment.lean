@@ -49,18 +49,20 @@ def patchDefinition (env : Environment) (v : DefinitionVal) :
     M.run env v.name (safety := .safe) (lctx := {}) do
       dbg_trace s!"DBG[25]: Environment.lean:49: v.name={v.name}"
       let type ← checkConstantVal env v.toConstantVal (← checkPrimitiveDef env v)
-      dbg_trace s!"DBG[28]: Environment.lean:51: type={type}"
       checkNoMVarNoFVar env v.name v.value
+      dbg_trace s!"DBG[34]: Environment.lean:52 (after checkNoMVarNoFVar env v.name v.value)"
       let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
       let value' := value'?.getD v.value.toPExpr
+      dbg_trace s!"DBG[33]: Environment.lean:54 (after let value := value?.getD v.value.toPExpr)"
       let (defEq, valueTypeEqtype?) ← isDefEq valueType type v.levelParams
-      dbg_trace s!"DBG[26]: Environment.lean:56 (after let (defEq, valueTypeEqtype?) ← isDefE…)"
+      dbg_trace s!"DBG[31]: Environment.lean:57: valueTypeEqtype?={valueTypeEqtype?}"
 
       if !defEq then
         throw <| .declTypeMismatch env (.defnDecl v) valueType
 
       let value  ← maybeCast valueTypeEqtype? valueType type value' v.levelParams
       let v := {v with type, value}
+      dbg_trace s!"DBG[35]: Environment.lean:64 (after let v := v with type, value)"
       return (.defnInfo v)
 
 def patchTheorem (env : Environment) (v : TheoremVal) :

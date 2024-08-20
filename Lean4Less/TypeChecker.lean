@@ -598,7 +598,7 @@ def appProjThm? (structName : Name) (projIdx : Nat) (struct structN : PExpr) (st
   structEqstructN?.mapM fun structEqstructN => do
     let env ← getEnv
     let structType ← whnfPure (← inferTypePure struct)
-    let .const typeC lvls := structType.toExpr.appFn! | unreachable!
+    let .const typeC lvls := if structType.toExpr.isApp then structType.toExpr.appFn! else structType.toExpr | unreachable!
     let .inductInfo {ctors := [ctor], numParams, ..} ← env.get typeC | unreachable!
     let indices := structType.toExpr.getAppArgs
     let ctorInfo ← env.get ctor
@@ -632,6 +632,7 @@ def appProjThm? (structName : Name) (projIdx : Nat) (struct structN : PExpr) (st
       let f := (← getLCtx).mkLambda #[s] (.proj structName projIdx s) |>.toPExpr
 
       let ret := Lean.mkAppN (← getConst `L4L.appArgHEq' [structLvl, projLvl]) #[structType, U, f, struct, structN, structEqstructN.toExpr] |>.toEExpr
+      dbg_trace s!"DBG[32]: TypeChecker.lean:635: ret={ret}"
       pure ret
 
 /--
@@ -654,7 +655,6 @@ def reduceProj (structName : Name) (projIdx : Nat) (struct : PExpr) (cheapRec ch
     let .const mkC _ := mk | return none
     let .ctorInfo mkCtorInfo ← (← getEnv).get mkC | return none
     let projstructEqprojstructN? ← appProjThm? structName projIdx struct structN structEqc?
-    dbg_trace s!"DBG[22]: TypeChecker.lean:656: projstructEqprojstructN?={projstructEqprojstructN?}"
 
     return args[mkCtorInfo.numParams + projIdx]?.map (·.toPExpr, projstructEqprojstructN?)
 
@@ -1432,7 +1432,6 @@ private def _whnfCore' (e' : Expr) (cheapRec := false) (cheapProj := false) : Re
     if let some (m, eEqm?) ← reduceProj typeName idx s.toPExpr cheapRec cheapProj then
       let (r', mEqr'?) ← whnfCore m cheapRec cheapProj
       let eEqr'? ← appHEqTrans? e m r' eEqm? mEqr'?
-      dbg_trace s!"DBG[23]: TypeChecker.lean:1434: eEqm?={eEqr'?}"
       save (r', eEqr'?)
     else
       save (e, none)
