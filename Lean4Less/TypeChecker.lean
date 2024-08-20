@@ -517,7 +517,6 @@ def inferType' (e : Expr) : RecPE := do
       let (fType', pf'?) ← ensureForallCore fType f
       let f' ← maybeCast pf'? fType fType' (f'?.getD f.toPExpr)
       -- if (← readThe Context).const == `eq_of_heq' then if let .lam _ (.const `Ty _) _ _ := a then
-      --   dbg_trace s!"DBG[5]: {a}"
 
       let (aType, a'?) ← inferType' a
 
@@ -595,33 +594,45 @@ def whnfFVar (e : PExpr) (cheapRec cheapProj : Bool) : RecEE := do
     return ← whnfCore v.toPExpr cheapRec cheapProj
   return (e, none)
 
--- get projection congruence theorem
-def getProjThm (structName : Name) (structType : PExpr) (projIdx : Nat) (projType : PExpr) (structLvl projLvl : Level) : RecM PExpr := do
-  let ids := ⟨← mkFreshId⟩
-  let f ← withLCtx ((← getLCtx).mkLocalDecl ids `x structType default) do
-    let svar := (Expr.fvar ids).toPExpr
-    pure $ (← getLCtx).mkLambda #[svar] (.proj structName projIdx svar) |>.toPExpr
-  pure $ (mkAppN (← getConst `L4L.appArgHEq' [structLvl, projLvl]) #[structType, projType, f]).toPExpr
-
 def appProjThm? (structName : Name) (projIdx : Nat) (struct structN : PExpr) (structEqstructN? : Option EExpr) : RecM (Option EExpr) := do
   structEqstructN?.mapM fun structEqstructN => do
-    let structType ← inferTypePure struct
+    let env ← getEnv
+    let structType ← whnfPure (← inferTypePure struct)
+    let .const typeC lvls := structType.toExpr.appFn! | unreachable!
+    let .inductInfo {ctors := [ctor], numParams, ..} ← env.get typeC | unreachable!
+    let indices := structType.toExpr.getAppArgs
+    let ctorInfo ← env.get ctor
+    let ctorType := ctorInfo.instantiateTypeLevelParams lvls |>.toPExpr
+
     let structSort ← inferTypePure structType
     let structLvl := structSort.toExpr.sortLevel!
-    let env ← getEnv
+    
+    let ids := ⟨← mkFreshId⟩
+    withLCtx ((← getLCtx).mkLocalDecl ids default structType default) do
+      let s := (Expr.fvar ids).toPExpr
 
-    let fieldName := getStructureFields env structName |>.get! projIdx
-    let some projFnName := getProjFnForField? env structName fieldName | throw $ .other "unreachable 2"
-    let info ← env.get projFnName
-    let projFnType := info.instantiateTypeLevelParams [structLvl]
-    let .forallE n t b bi := projFnType | throw $ .other "unreachable 3"
+      let mut remCtorType := ctorType.toExpr
+      for idx in [:projIdx + numParams] do
+        if let .forallE _ _ b _ := remCtorType then
+          let inst :=
+            if idx >= numParams then
+              .proj structName idx s
+            else
+              indices[idx]!
+          remCtorType := b.instantiate1 inst
+        else
+          unreachable!
+      let .forallE _ projOutType _ _ := remCtorType | unreachable!
 
-    let projType := (Expr.lam n t b bi).toPExpr
-    let projSort ← inferTypePure (Expr.app projType structN).toPExpr
-    let .sort projLvl := (← ensureSortCorePure projSort projType).toExpr | throw $ .other "unreachable 4"
+      let U := ((← getLCtx).mkLambda #[s] projOutType).toPExpr
 
-    let projThm ← getProjThm structName structType projIdx projType structLvl projLvl
-    pure $ Lean.mkAppN projThm #[struct, structN, structEqstructN.toExpr] |>.toEExpr
+      let projSort ← inferTypePure (Expr.app U structN).toPExpr
+      let .sort projLvl := (← ensureSortCorePure projSort default).toExpr | throw $ .other "unreachable 4"
+
+      let f := (← getLCtx).mkLambda #[s] (.proj structName projIdx s) |>.toPExpr
+
+      let ret := Lean.mkAppN (← getConst `L4L.appArgHEq' [structLvl, projLvl]) #[structType, U, f, struct, structN, structEqstructN.toExpr] |>.toEExpr
+      pure ret
 
 /--
 Reduces a projection of `struct` at index `idx` (when `struct` is reducible to a
@@ -640,13 +651,12 @@ def reduceProj (structName : Name) (projIdx : Nat) (struct : PExpr) (cheapRec ch
     structN := Expr.strLitToConstructor s |>.toPExpr
 
   structN.toExpr.withApp fun mk args => do
-  let .const mkC _ := mk | return none
-  let env ← getEnv
-  let .ctorInfo mkInfo ← env.get mkC | return none
+    let .const mkC _ := mk | return none
+    let .ctorInfo mkCtorInfo ← (← getEnv).get mkC | return none
+    let projstructEqprojstructN? ← appProjThm? structName projIdx struct structN structEqc?
+    dbg_trace s!"DBG[22]: TypeChecker.lean:656: projstructEqprojstructN?={projstructEqprojstructN?}"
 
-  let projstructEqprojstructN? ← appProjThm? structName projIdx struct structN structEqc?
-
-  return args[mkInfo.numParams + projIdx]?.map (·.toPExpr, projstructEqprojstructN?)
+    return args[mkCtorInfo.numParams + projIdx]?.map (·.toPExpr, projstructEqprojstructN?)
 
 def isLetFVar (lctx : LocalContext) (fvar : FVarId) : Bool :=
   lctx.find? fvar matches some (.ldecl ..)
@@ -757,7 +767,7 @@ def reduceBinNatPred (op : Name) (f : Nat → Nat → Bool) (a b : PExpr) : RecM
 def mkNatSuccAppArgHEq? (p? : Option EExpr) (t s : PExpr) : RecM (Option EExpr) := do
   p?.mapM fun p => do
     pure $ (mkAppN (← getConst `appArgHEq [.succ .zero, .succ .zero]) #[.const `Nat [], --FIXME
-    (mkLambda default default (.const `Nat []) (.const `Nat [])), .const `Nat.succ [], t, s, p.toExpr]).toEExpr
+    .const `Nat [], .const `Nat.succ [], t, s, p.toExpr]).toEExpr
 
 /--
 Reduces `e` to a natural number literal if possible, where binary operations
@@ -1422,6 +1432,7 @@ private def _whnfCore' (e' : Expr) (cheapRec := false) (cheapProj := false) : Re
     if let some (m, eEqm?) ← reduceProj typeName idx s.toPExpr cheapRec cheapProj then
       let (r', mEqr'?) ← whnfCore m cheapRec cheapProj
       let eEqr'? ← appHEqTrans? e m r' eEqm? mEqr'?
+      dbg_trace s!"DBG[23]: TypeChecker.lean:1434: eEqm?={eEqr'?}"
       save (r', eEqr'?)
     else
       save (e, none)

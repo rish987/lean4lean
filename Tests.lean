@@ -50,7 +50,7 @@ noncomputable def kLikeReduction : BK true := hk
 axiom A : Type
 axiom a : A
 axiom h : Eq A A
-axiom R : BK true → P → Prop
+-- axiom R : BK true → P → Prop
 theorem aux (α β : Sort u) (a : α) (b : β) (h₁ : HEq a b) : (h : Eq α β) → Eq (cast h a) b :=
   h₁.rec (fun _ => rfl)
 axiom aux' : (α β : Sort u) → (a : α) → (b : β) → HEq a b → (h : Eq α β) → Eq (cast h a) b
@@ -131,3 +131,21 @@ axiom H : (p : P) → G p → Type
 axiom H.mk : (p : P) → (g : G p) → H p g
 
 noncomputable def pushTest : (g : G q) → H q g := fun (g : G p) => H.mk p g
+
+def F : Bool → Nat → Type
+| true, .zero => Bool
+| _, _ => Unit
+
+structure S (T : Type u) : Type u where
+b : Bool
+n : Nat
+t : T
+f : F b n
+
+#check S.mk
+
+axiom B : Bool → Type
+
+axiom s : B (S.mk true .zero () true).4
+noncomputable def projTest : B (@K.rec (fun _ => S Unit) (S.mk true .zero () true) k).4 := s
+#check_l4l projTest

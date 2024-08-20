@@ -47,11 +47,14 @@ def patchDefinition (env : Environment) (v : DefinitionVal) :
       return .defnInfo v
   else
     M.run env v.name (safety := .safe) (lctx := {}) do
+      dbg_trace s!"DBG[25]: Environment.lean:49: v.name={v.name}"
       let type ← checkConstantVal env v.toConstantVal (← checkPrimitiveDef env v)
+      dbg_trace s!"DBG[28]: Environment.lean:51: type={type}"
       checkNoMVarNoFVar env v.name v.value
       let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
       let value' := value'?.getD v.value.toPExpr
       let (defEq, valueTypeEqtype?) ← isDefEq valueType type v.levelParams
+      dbg_trace s!"DBG[26]: Environment.lean:56 (after let (defEq, valueTypeEqtype?) ← isDefE…)"
 
       if !defEq then
         throw <| .declTypeMismatch env (.defnDecl v) valueType
