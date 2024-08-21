@@ -140,11 +140,17 @@ structure S : Type where
 b : Bool
 f : F b
 
+def FS : S → Type
+| {b := true, ..} => Bool
+| _ => Unit
+
 #check S.mk
 
 axiom B : Bool → Type
 axiom B.mk : (b : Bool) → B b
 
-axiom s : B (@K.rec (fun _ => S) (S.mk true true) k).2
-noncomputable def projTest : B (S.mk true true).2 := s
-#check_l4l projTest
+axiom S.prj : (s : S) → FS s
+
+axiom s : B (@K.rec (fun _ => S) (S.mk true true) k).prj
+noncomputable def projTest : B (S.mk true true).prj := s
+-- #check_l4l projTest

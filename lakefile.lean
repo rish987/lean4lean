@@ -5,7 +5,7 @@ package lean4less
 
 require batteries from git "https://github.com/leanprover-community/batteries" @ "main"
 
-require lean4lean from "/home/rish/lean4lean/" -- "lean2dk" branch
+require lean4lean from "/home/rvaishna/projects/lean4lean/" -- "lean2dk" branch
 
 require Cli from git
   "https://github.com/leanprover/lean4-cli" @ "main"
