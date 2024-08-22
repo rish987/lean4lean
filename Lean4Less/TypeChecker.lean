@@ -82,6 +82,9 @@ abbrev RecEE := RecM (PExpr × (Option EExpr))
 abbrev RecB := RecM (Bool × (Option EExpr))
 abbrev RecLB := RecM (LBool × (Option EExpr))
 
+def runLeanMinus (M : Lean.TypeChecker.M T) : RecM T := do
+  Lean.TypeChecker.M.run' (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := false, proofIrrelevance := false}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams) M
+
 inductive ReductionStatus where
   | continue (nltn nlsn : PExpr) (pltnEqnltn? plsnEqnlsn? : Option EExpr)
   | unknown (ltn lsn : PExpr) (tnEqltn? snEqlsn? : Option EExpr)
@@ -342,7 +345,7 @@ def isDefEq (t s : PExpr) : RecB := do
   pure r
 
 def isDefEqPure (t s : PExpr) : RecM Bool := do
-  Lean.TypeChecker.M.run' (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := false, proofIrrelevance := false}) (← getLCtx) (Lean.TypeChecker.isDefEq t s)
+  runLeanMinus $ Lean.TypeChecker.isDefEq t s
 
 /--
 Infers the type of application `e`, assuming that `e` is already well-typed.
@@ -565,7 +568,7 @@ def inferType' (e : Expr) : RecPE := do
 --   return r
 
 def inferTypePure' (e : PExpr) : RecM PExpr := do -- TODO make more efficient
-  let eT ← Lean.TypeChecker.M.run' (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := false, proofIrrelevance := false}) (← getLCtx) (Lean.TypeChecker.inferTypeCheck e.toExpr)
+  let eT ← runLeanMinus $ Lean.TypeChecker.inferTypeCheck e.toExpr
   pure eT.toPExpr
 
 /--
@@ -1406,7 +1409,7 @@ private def _whnf' (e' : Expr) : RecEE := do
 def whnf' (e : PExpr) : RecEE := _whnf' e
 
 def whnfPure' (e : PExpr) : RecM PExpr := do
-  let leanMinusWhnf ← Lean.TypeChecker.M.run' (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := false, proofIrrelevance := false}) (← getLCtx) (Lean.TypeChecker.whnf e.toExpr)
+  let leanMinusWhnf ← runLeanMinus $ Lean.TypeChecker.whnf e.toExpr
   pure leanMinusWhnf.toPExpr
 
 /--
@@ -1631,7 +1634,7 @@ def isDefEqUnitLike (t s : PExpr) : RecB := do
 
 @[inherit_doc isDefEqCore]
 def isDefEqCore' (t s : PExpr) : RecB := do
-  let leanMinusDefEq ← Lean.TypeChecker.M.run' (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := false, proofIrrelevance := false}) (← getLCtx) (Lean.TypeChecker.isDefEq t.toExpr s.toExpr)
+  let leanMinusDefEq ← runLeanMinus $ Lean.TypeChecker.isDefEq t.toExpr s.toExpr
   if leanMinusDefEq then
     return (true, none)
   let (r, pteqs?) ← quickIsDefEq t s (useHash := true)
