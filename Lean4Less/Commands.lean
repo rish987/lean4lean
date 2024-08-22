@@ -32,6 +32,7 @@ The set of all constants used to patch terms, in linearised order based on
 dependencies in the patched versions of their types/values.
 -/
 def patchConsts : List Name := [
+`L4L.eq_of_heq,
 `cast,
 `L4L.castHEq,
 `HEq,
@@ -90,6 +91,8 @@ def checkL4L (ns : Array Name) (env : Environment) : IO Environment := do
   let env ← transL4L' ns env (pp := true)
   let nSet := ns.foldl (init := default) fun acc n => acc.insert n
 
+  let (_, checkEnv) ← checkConstants (printErr := true) env nSet @Lean4Lean.addDecl (initConsts := patchConsts) (opts := {proofIrrelevance := false, kLikeReduction := false})
+
   let env' ← transL4L' ns env
   for n in ns do
     let .some c  := env.find? n | unreachable!
@@ -99,9 +102,7 @@ def checkL4L (ns : Array Name) (env : Environment) : IO Environment := do
     let diffVals := c.value? != c'.value?
     if diffTypes || diffVals then
       throw $ IO.userError $ s!"failed round-trip test: \n--- LHS\n {← ppConst env n} \n--- RHS\n {← ppConst env' n}"
-
-  let (_, env) ← checkConstants (printErr := true) env nSet @Lean4Lean.addDecl (opts := {proofIrrelevance := false, kLikeReduction := false})
-  pure env
+  pure checkEnv
 
 elab "#trans_l4l " i:ident : command => do
   _ ← transL4L #[i.getId]

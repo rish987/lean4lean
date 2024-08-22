@@ -10,7 +10,9 @@ universe u v
 axiom prfIrrel (P : Prop) (p q : P) : HEq p q
 axiom prfIrrelHEq (P Q : Prop) (heq : HEq P Q) (p : P) (q : Q) : HEq p q
 
-axiom castHEq {α β : Sort u} (h : HEq α β) (a : α) : β
+axiom eq_of_heq {α : Sort u} {a a' : α} (h : HEq a a') : Eq a a'
+
+def castHEq {α β : Sort u} (h : HEq α β) (a : α) : β := cast (eq_of_heq h) a
 
 axiom castOrigHEq {α β : Sort u} : (h : HEq α β) → (a : α) → HEq (castHEq h a) a
 
@@ -37,7 +39,7 @@ axiom appArgHEq {A : Sort u} {U : Sort v}
 
 axiom appArgHEq' {A : Sort u} {U : A → Sort v}
   (f : (a : A) → U a)
-  {a b : A} (hab : HEq a b)
+  (a b : A) (hab : HEq a b)
   : HEq (f a) (f b)
 
 axiom appFunHEq {A : Sort u} {U : Sort v}

@@ -342,7 +342,7 @@ def isDefEq (t s : PExpr) : RecB := do
   pure r
 
 def isDefEqPure (t s : PExpr) : RecM Bool := do
-  pure (← withPure $ isDefEq t s).1
+  Lean.TypeChecker.M.run' (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := false, proofIrrelevance := false}) (← getLCtx) (Lean.TypeChecker.isDefEq t s)
 
 /--
 Infers the type of application `e`, assuming that `e` is already well-typed.
@@ -565,9 +565,8 @@ def inferType' (e : Expr) : RecPE := do
 --   return r
 
 def inferTypePure' (e : PExpr) : RecM PExpr := do -- TODO make more efficient
-  let (type, e'?) ← withPure $ inferType' e
-  assert 8 $ e'? == none
-  pure type
+  let eT ← Lean.TypeChecker.M.run' (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := false, proofIrrelevance := false}) (← getLCtx) (Lean.TypeChecker.inferTypeCheck e.toExpr)
+  pure eT.toPExpr
 
 /--
 Reduces `e` to its weak-head normal form, without unfolding definitions. This
@@ -631,6 +630,7 @@ def appProjThm? (structName : Name) (projIdx : Nat) (struct structN : PExpr) (st
 
       let f := (← getLCtx).mkLambda #[s] (.proj structName projIdx s) |>.toPExpr
 
+      dbg_trace s!"DBG[102]: TypeChecker.lean:633 (after let f := (← getLCtx).mkLambda #[s] (.p…)"
       let ret := Lean.mkAppN (← getConst `L4L.appArgHEq' [structLvl, projLvl]) #[structType, U, f, struct, structN, structEqstructN.toExpr] |>.toEExpr
       pure ret
 
@@ -896,18 +896,40 @@ def isDefEqBinderForApp' (aVars bVars : Array PExpr) (Uas Vbs : Array PExpr) (ds
     g := g.toExpr.app b |>.toPExpr
   pure fEqg?
 
-def isDefEqBinderForApp (T S : PExpr) (tArgs sArgs : Array PExpr) (tArgsEqsArgs? : Array (Option EExpr)) (tfEqsf? : (Option EExpr)) (f g : PExpr) : RecM (Option EExpr) := do
-  let rec loop idx T S as bs Uas Vbs ds? : RecM (Option EExpr) := do
+def isDefEqBinderForApp (T S : PExpr) (as bs : Array PExpr) (tArgsEqsArgs? : Array (Option EExpr)) (tfEqsf? : (Option EExpr)) (f g : PExpr) : RecM (Option EExpr) := do
+  let rec loop idx T S aVars bVars Uas Vbs ds? : RecM (Option EExpr) := do
     let (T', dA, S', dB) ← match (← whnfPure T).toExpr, (← whnfPure S).toExpr with
       | .forallE tName tDom tBody tBi, .forallE sName sDom sBody sBi =>
         pure $ (tBody, ({name := tName, dom := tDom.toPExpr, info := tBi} : BinderData), sBody, ({name := sName, dom := sDom.toPExpr, info := sBi} : BinderData))
       | tBody, sBody => unreachable!
 
-    let T := (T'.instantiate1 tArgs[idx]!.toExpr).toPExpr
-    let S := (S'.instantiate1 sArgs[idx]!.toExpr).toPExpr
+    let a := as[idx]!
+    let b := bs[idx]!
+
+    let T := (T'.instantiate1 a.toExpr).toPExpr
+    let S := (S'.instantiate1 b.toExpr).toPExpr
 
     let ({name := aName, dom := A, info := aBi},
       {name := bName, dom := B, info := bBi}) := (dA, dB)
+
+    -- sanity check
+    let aType ← inferTypePure a
+    let bType ← inferTypePure b
+
+    let .true ← isDefEqPure A aType | do
+      throw $ .other s!"expected: {A}\n inferred: {aType}"
+    let .true ← isDefEqPure B bType | do
+      let app := Lean.mkAppN g.toExpr (bs[:5].toArray.map PExpr.toExpr)
+      let appType ← whnfPure $ ← inferTypePure app.toPExpr
+      let .forallE _ _domType _ _ := appType.toExpr | unreachable!
+      -- dbg_trace s!""
+      -- dbg_trace s!"app: {appType}"
+      -- dbg_trace s!"b: {bType}"
+      -- dbg_trace s!"dom: {domType}"
+      -- dbg_trace s!"eq: {← isDefEqPure bType domType.toPExpr}"
+      -- dbg_trace s!"app b: {← whnfPure $ ← inferTypePure (app.app b).toPExpr}"
+      -- dbg_trace s!""
+      throw $ .other s!"expected: {B}\n inferred: {bType}"
 
     let AEqB? ← if A != B then
       let (defEq, AEqB?) ← isDefEq A B
@@ -919,35 +941,35 @@ def isDefEqBinderForApp (T S : PExpr) (tArgs sArgs : Array PExpr) (tArgsEqsArgs?
     let .sort lvl := (← ensureSortCorePure sort A).toExpr | throw $ .other "unreachable 5"
     let ida := ⟨← mkFreshId⟩
     withLCtx ((← getLCtx).mkLocalDecl ida aName A aBi) do
-      let a := (Expr.fvar ida).toPExpr
+      let aVar := (Expr.fvar ida).toPExpr
 
-      let cont d? b := do 
+      let cont d? bVar := do 
         let ds? := ds?.push d?
-          let Ua := (T'.instantiate1 a).toPExpr
-          let Vb := (S'.instantiate1 b).toPExpr
+        let Ua := (T'.instantiate1 aVar).toPExpr
+        let Vb := (S'.instantiate1 bVar).toPExpr
 
-          let as := as.push a
-          let bs := bs.push b
-          let Uas := Uas.push Ua
-          let Vbs := Vbs.push Vb
-          if _h : idx < tArgs.size - 1 then
-            loop (idx + 1) T S as bs Uas Vbs ds?
-          else
-            isDefEqBinderForApp' as bs Uas Vbs ds? tArgs sArgs tArgsEqsArgs? tfEqsf? f g
+        let aVars := aVars.push aVar
+        let bVars := bVars.push bVar
+        let Uas := Uas.push Ua
+        let Vbs := Vbs.push Vb
+        if _h : idx < as.size - 1 then
+          loop (idx + 1) T S aVars bVars Uas Vbs ds?
+        else
+          isDefEqBinderForApp' aVars bVars Uas Vbs ds? as bs tArgsEqsArgs? tfEqsf? f g
 
       if let some AEqB := AEqB? then 
         let idb := ⟨← mkFreshId⟩
         let idaEqb := ⟨← mkFreshId⟩
         withLCtx ((← getLCtx).mkLocalDecl idb bName B bBi) do
           let b := (Expr.fvar idb).toPExpr
-          let teqsType := mkAppN (.const `HEq [lvl]) #[A, a, B, b]
+          let teqsType := mkAppN (.const `HEq [lvl]) #[A, aVar, B, b]
           withLCtx ((← getLCtx).mkLocalDecl idaEqb default teqsType default) do
             withEqFVar ida idb idaEqb do
               let d := (idaEqb, AEqB)
               cont (.some d) b
       else
-        cont none a
-  termination_by (tArgs.size - 1) - idx
+        cont none aVar
+  termination_by (as.size - 1) - idx
 
   loop 0 T S #[] #[] #[] #[] #[]
 
@@ -1171,11 +1193,13 @@ def tryEtaExpansion (t s : PExpr) : RecB := do
   | (false, _) => 
     let (true, sEqt?) ← tryEtaExpansionCore s t | return (false, none)-- TODO apply symm
     return (true, ← appHEqSymm? s t sEqt?)
+
 /--
 Checks if applications `t` and `s` (should be WHNF) are defeq on account of
 their function heads and arguments being defeq.
 -/
-def isDefEqApp (t s : PExpr) (tfEqsf? : Option (Option EExpr) := none) (targsEqsargs? : HashMap Nat (Option EExpr) := default) : RecB := do
+def isDefEqApp' (t s : PExpr) (tfEqsf? : Option (Option EExpr) := none)
+   (targsEqsargs? : HashMap Nat (Option EExpr) := default) : RecM (Bool × (Option (EExpr × Array (Option EExpr)))) := do
   unless t.toExpr.isApp && s.toExpr.isApp do return (false, none)
   t.toExpr.withApp fun tf tArgs =>
   s.toExpr.withApp fun sf sArgs => do
@@ -1206,70 +1230,12 @@ def isDefEqApp (t s : PExpr) (tfEqsf? : Option (Option EExpr) := none) (targsEqs
   let tEqs? ← withAppDatas tfT sfT tArgs sArgs taEqsas ret? tf sf
 
   -- TODO(perf) restrict data collection to the case of `taEqsa?.isSome || ret?.isSome`
-  return (true, tEqs?)
-  -- fun datas => do
-  --   let mut tf := tf
-  --   let mut sf := sf
-  --   let mut ret? := ret?
-  --
-  --   assert 9 $ datas.size >= tArgs.size
-  --
-  --   -- let mut datas' := #[]
-  --   -- for data in datas do
-  --   --   datas' := datas' ++ #[data]
-  --   --   if data.p?.isNone then break
-  --
-  --   for i in [:tArgs.size] do
-  --     let ({A, a, Ua, u, v, extra}, ta, sa, taEqsa?) := (datas[i]!, tArgs[i]!, sArgs[i]!, taEqsas[i]!)
-  --     if taEqsa?.isSome || ret?.isSome then
-  --       ret? := .some $ ← match extra with
-  --       | .none => do
-  --         let (U, dep) ← getMaybeDepLemmaApp1 Ua a
-  --         if let some taEqsa := taEqsa? then
-  --           if let some ret := ret? then
-  --             let n := if dep then `L4L.appHEq else `L4L.appHEq'
-  --             pure $ (Lean.mkAppN (.const n [u, v]) #[A, U, tf, sf, ta, sa, ret, taEqsa]).toEExpr
-  --           else
-  --             pure $ (← getMaybeDepLemmaApp1 `L4L.appArgHEq [u, v]
-  --               #[A] #[tf, ta, sa, taEqsa] Ua a).toEExpr
-  --         else if let some ret := ret? then
-  --           pure $ (← getMaybeDepLemmaApp1 `L4L.appFunHEq [u, v]
-  --             #[A] #[tf, sf, ta, ret] Ua a).toEExpr
-  --         else
-  --           throw $ .other "unreachable 13"
-  --       | .UV {b, Vb, hUV} => do
-  --         if let some ret := ret? then
-  --           if let some taEqsa := taEqsa? then
-  --             pure $ (← getMaybeDepLemmaApp2 `L4L.appHEqUV [u, v]
-  --               #[A] #[hUV, tf, sf, ta, sa, ret, taEqsa] Ua Vb a b).toEExpr
-  --           else
-  --             pure $ (← getMaybeDepLemmaApp2 `L4L.appFunHEqUV [u, v]
-  --               #[A] #[hUV, tf, sf, ta, ret] Ua Vb a b).toEExpr
-  --         else
-  --           throw $ .other "unreachable 14"
-  --       | .ABUV {B, hAB} {b, Vb, hUV, } => do
-  --         if let some ret := ret? then
-  --           if let some taEqsa := taEqsa? then
-  --             pure $ (← getMaybeDepLemmaApp2 `L4L.appHEqABUV [u, v]
-  --               #[A, B] #[hAB, hUV, tf, sf, ta, sa, ret, taEqsa] Ua Vb a b).toEExpr
-  --           else
-  --             throw $ .other "unreachable 15"
-  --         else
-  --           throw $ .other "unreachable 16"
-  --       | .AB {B, hAB} => do
-  --         if let some ret := ret? then
-  --           if let some taEqsa := taEqsa? then
-  --             pure $ (← getMaybeDepLemmaApp1 `L4L.appHEqAB [u, v]
-  --               #[A, B] #[hAB, tf, sf, ta, sa, ret, taEqsa] Ua a).toEExpr
-  --           else
-  --             throw $ .other "unreachable 15"
-  --         else
-  --           throw $ .other "unreachable 16"
-  --
-  --     tf := tf.toExpr.app ta |>.toPExpr
-  --     sf := sf.toExpr.app sa |>.toPExpr
-  --
-  --   return (true, ret?)
+  return (true, (tEqs?.map fun tEqs => (tEqs, taEqsas)))
+
+def isDefEqApp (t s : PExpr) (tfEqsf? : Option (Option EExpr) := none) (targsEqsargs? : HashMap Nat (Option EExpr) := default) : RecB := do
+  let (isDefEq, data?) ← isDefEqApp' t s tfEqsf? targsEqsargs?
+  pure (isDefEq, data?.map (·.1))
+
 
 /--
 Checks if `t` and `s` are application-defeq (as in `isDefEqApp`)
@@ -1328,7 +1294,8 @@ def reduceRecursor (e : PExpr) (cheapRec cheapProj : Bool) : RecM (Option (PExpr
       appPrfIrrelHEq := appPrfIrrelHEq
       appPrfIrrel := appPrfIrrel
       appHEqTrans? := appHEqTrans?
-      isDefEqApp := fun t s (idx, p?) => isDefEqApp t s (targsEqsargs? := .insert default idx p?)
+      isDefEqApp := fun t s m => isDefEqApp t s (targsEqsargs? := m)
+      isDefEqApp' := fun t s m => isDefEqApp' t s (targsEqsargs? := m)
     }
     env e
   if let some r := recReduced? then
@@ -1439,9 +1406,8 @@ private def _whnf' (e' : Expr) : RecEE := do
 def whnf' (e : PExpr) : RecEE := _whnf' e
 
 def whnfPure' (e : PExpr) : RecM PExpr := do
-  let (eN, p?) ← withPure $ whnf' e
-  assert 11 $ p? == none
-  pure eN
+  let leanMinusWhnf ← Lean.TypeChecker.M.run' (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := false, proofIrrelevance := false}) (← getLCtx) (Lean.TypeChecker.whnf e.toExpr)
+  pure leanMinusWhnf.toPExpr
 
 /--
 Checks if `t` and `s` are definitionally equivalent according to proof irrelevance

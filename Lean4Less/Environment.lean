@@ -52,6 +52,8 @@ def patchDefinition (env : Environment) (v : DefinitionVal) :
       checkNoMVarNoFVar env v.name v.value
       -- dbg_trace s!"DBG[34]: Environment.lean:52 (after checkNoMVarNoFVar env v.name v.value)"
       let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
+      -- dbg_trace s!"DBG[98]: Environment.lean:54: valueType={valueType}"
+      -- dbg_trace s!"DBG[100]: Environment.lean:51: type={type}"
       let value' := value'?.getD v.value.toPExpr
       -- dbg_trace s!"DBG[33]: Environment.lean:54 (after let value := value?.getD v.value.toPExpr)"
       let (defEq, valueTypeEqtype?) ← isDefEq valueType type v.levelParams
