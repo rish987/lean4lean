@@ -328,36 +328,34 @@ end
 
 mutual
 
-abbrev revhAB hAB A B u := EExpr.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ hAB 
-abbrev revhUV hUV U V v := HUVData.reverse (Prod.fst U) (Prod.fst V) v hUV
-abbrev revfEqg fEqg f g (U V : PExpr × PExpr) u v lctx := EExpr.reverse f g (LocalContext.mkForall lctx #[U.2] U.1).toPExpr (lctx.mkForall #[V.2] V.1).toPExpr (Level.imax u v) fEqg
-abbrev revaEqb aEqb a b A B u := EExpr.reverse a b A B u aEqb
+abbrev revaEqb aEqb (a b A B : PExpr) u := EExpr.reverse a b A B u aEqb
+abbrev revaEqb' aEqb (a b A B : PExpr) u := Lean.mkAppN (.const `HEq.symm [u]) #[A, B, a, b, aEqb] |>.toPExpr
 
 
 def LamData.reverse : LamData EExpr → EExpr
 | {u, v, A, U, f, a, g, faEqgx, extra, lctx} =>
   let (extra, newA, newU, newa) := match extra with
   | .ABUV {b, B, aEqb, hAB} {V} =>
-      (.ABUV {b := a, B := A, aEqb := sorry, hAB := revhAB hAB A B u} {V := U}, B, V, b)
+      (.ABUV {b := a, B := A, aEqb := revaEqb' aEqb a b A B u, hAB := EExpr.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ hAB} {V := U}, B, V, b)
   | .UV {V} => (.UV {V := U}, A, V, a)
   | .none => (.none, A, U, a)
 
-  let newfaEqgx := faEqgx.reverse sorry sorry sorry sorry sorry
+  let newfaEqgx := EExpr.reverse f g (LocalContext.mkForall lctx #[U.2] U.1).toPExpr (lctx.mkForall #[U.2] U.1).toPExpr (Level.imax u v) faEqgx
   .lam {u, v, A := newA, U := newU, f := g, a := newa, g := a, faEqgx := newfaEqgx, extra, lctx}
 
 
-def HUVData.reverse (Ua Vb : PExpr) (lvl : Level) : HUVData EExpr → HUVData EExpr
+def HUVData.reverse (A B Ua Vb : PExpr) (u v : Level) : HUVData EExpr → HUVData EExpr
 | {a, UaEqVb, extra} =>
-  let newUaEqVb := UaEqVb.reverse Ua Vb (Expr.sort lvl).toPExpr (Expr.sort lvl).toPExpr lvl.succ
+  let newUaEqVb := UaEqVb.reverse Ua Vb (Expr.sort v).toPExpr (Expr.sort v).toPExpr v.succ
   match extra with
-  | .some {b, aEqb} => {a := b, UaEqVb := newUaEqVb, extra := .some {b := a, aEqb := aEqb}}
+  | .some {b, aEqb} => {a := b, UaEqVb := newUaEqVb, extra := .some {b := a, aEqb := revaEqb' aEqb a b A B u}}
   | .none => {a, UaEqVb := newUaEqVb, extra := .none}
 
 def ForallData.reverse : ForallData EExpr → EExpr
 | {u, v, A, U, V, a, UaEqVx, extra, lctx} =>
   let (extra, newA, newa) := match extra with
   | .AB {b, B, hAB, aEqb} => 
-    (.AB {b := a, B := A, hAB := revhAB hAB A B u, aEqb := aEqb}, B, b)
+    (.AB {b := a, B := A, hAB := EExpr.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ hAB, aEqb := revaEqb' aEqb a b A B u}, B, b)
   | .none =>
     (.none, A, a)
 
@@ -368,29 +366,28 @@ def AppData.reverse : AppData EExpr → EExpr
 | {u, v, A, U, f, a, extra, lctx} =>
   let (extra, newA, newU, newf, newa) := match extra with
   | .ABUV {B, hAB, V, hUV, g, fEqg, b, aEqb} =>
-    (.ABUV {B := A, hAB := revhAB hAB A B u, V := U, hUV := revhUV hUV U V v, g := f, fEqg := revfEqg fEqg f g U V u v lctx, b, aEqb := revaEqb aEqb a b A B u}, B, V, g, b)
+    (.ABUV {B := A, hAB := EExpr.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ hAB, V := U, hUV := HUVData.reverse A B (Prod.fst U) (Prod.fst V) u v hUV, g := f, fEqg := EExpr.reverse f g (LocalContext.mkForall lctx #[U.2] U.1).toPExpr (lctx.mkForall #[V.2] V.1).toPExpr (Level.imax u v) fEqg, b, aEqb := EExpr.reverse a b A B u aEqb}, B, V, g, b)
   | .UV {V, hUV, g, fEqg, b, aEqb} => 
-    (.UV {V := U, hUV := revhUV hUV U V v, g := f, fEqg := revfEqg fEqg f g U V u v lctx, b := a, aEqb := revaEqb aEqb a b A A u}, A, V, g, b)
+    (.UV {V := U, hUV := HUVData.reverse A A (Prod.fst U) (Prod.fst V) u v hUV, g := f, fEqg := EExpr.reverse f g (LocalContext.mkForall lctx #[U.2] U.1).toPExpr (lctx.mkForall #[V.2] V.1).toPExpr (Level.imax u v) fEqg, b := a, aEqb := EExpr.reverse a b A A u aEqb}, A, V, g, b)
   | .UVFun {V, hUV, g, fEqg} => 
-    (.UVFun {V := U, hUV := revhUV hUV U V v, g := f, fEqg := revfEqg fEqg f g U V u v lctx}, A, V, g, a)
+    (.UVFun {V := U, hUV := HUVData.reverse A A (Prod.fst U) (Prod.fst V) u v hUV, g := f, fEqg := EExpr.reverse f g (LocalContext.mkForall lctx #[U.2] U.1).toPExpr (lctx.mkForall #[V.2] V.1).toPExpr (Level.imax u v) fEqg}, A, V, g, a)
   | .AB {B, hAB, g, fEqg, b, aEqb} => 
-    (.AB {B := A, hAB := revhAB hAB A B u, g := f, fEqg := revfEqg fEqg f g U U u v lctx, b := a, aEqb := revaEqb aEqb a b A B u}, B, U, g, b)
+    (.AB {B := A, hAB := EExpr.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ hAB, g := f, fEqg := EExpr.reverse f g (LocalContext.mkForall lctx #[U.2] U.1).toPExpr (lctx.mkForall #[U.2] U.1).toPExpr (Level.imax u v) fEqg, b := a, aEqb := EExpr.reverse a b A B u aEqb}, B, U, g, b)
   | .none {g, fEqg, b, aEqb} =>
-    (.none {g := f, fEqg := revfEqg fEqg f g U U u v lctx, b := a, aEqb := revaEqb aEqb a b A A u}, A, U, g, b)
+    (.none {g := f, fEqg := EExpr.reverse f g (LocalContext.mkForall lctx #[U.2] U.1).toPExpr (lctx.mkForall #[U.2] U.1).toPExpr (Level.imax u v) fEqg, b := a, aEqb := EExpr.reverse a b A A u aEqb}, A, U, g, b)
   | .Fun {g, fEqg} =>
-    (.Fun {g := f, fEqg := revfEqg fEqg f g U U u v lctx}, A, U, g, a)
+    (.Fun {g := f, fEqg := EExpr.reverse f g (LocalContext.mkForall lctx #[U.2] U.1).toPExpr (lctx.mkForall #[U.2] U.1).toPExpr (Level.imax u v) fEqg}, A, U, g, a)
   | .Arg {b, aEqb} =>
-    (.Arg {b := a, aEqb := revaEqb aEqb a b A A u}, A, U, f, b)
+    (.Arg {b := a, aEqb := EExpr.reverse a b A A u aEqb}, A, U, f, b)
   .app {u, v, A := newA, U := newU, f := newf, a := newa, extra, lctx}
 
 def PIData.reverse : PIData EExpr → EExpr
-:= sorry
--- | {P, p, q, extra} =>
---   let extra := match extra with
---   | .none => .none
---   | .HEq {Q, hPQ} =>
---     .HEq {Q := P, hPQ := hPQ.reverse P Q (Expr.sort 0).toPExpr (Expr.sort 0).toPExpr 1}
---   .prfIrrel {P, p := q, q := p, extra := extra}
+| {P, p, q, extra} =>
+  let extra := match extra with
+  | .none => .none
+  | .HEq {Q, hPQ} =>
+    .HEq {Q := P, hPQ := hPQ.reverse P Q (Expr.sort 0).toPExpr (Expr.sort 0).toPExpr 1}
+  .prfIrrel {P, p := q, q := p, extra := extra}
 
 def EExpr.reverse (t s tType sType : PExpr) (lvl : Level) : EExpr → EExpr
 | .other e => .other $ Lean.mkAppN (.const `HEq.symm [lvl]) #[tType, sType, t, s, e]

@@ -206,7 +206,7 @@ def getTypeLevel (e : PExpr) : RecM (Level × PExpr) := do
 def appHEqSymm (t s : PExpr) (theqs : EExpr) : RecM EExpr := do
   let (lvl, tType) ← getTypeLevel t
   let sType ← inferTypePure s
-  pure $ Lean.mkAppN (← getConst `HEq.symm [lvl]) #[tType, sType, t, s, theqs.toExpr] |>.toEExpr
+  pure $ theqs.reverse t s tType sType lvl
 
 def appHEqSymm? (t s : PExpr) (theqs? : Option EExpr) : RecM (Option EExpr) := do
   let some theqs := theqs? | return none
