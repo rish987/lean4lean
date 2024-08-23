@@ -32,7 +32,7 @@ structure LamABData (EExpr : Type) :=
 B      : PExpr
 b      : PExpr
 aEqb   : PExpr
-hAB : EExpr
+hAB    : EExpr
 
 structure LamUVData :=
 V   : PExpr × PExpr
@@ -326,90 +326,81 @@ def EExpr.toExpr : EExpr → Expr
 
 end
 
--- mutual
---
--- def LamData.reverse : LamData EExpr → EExpr
--- | {u, v, A, U, f, a, g, faEqgx, extra, lctx} =>
---   let hfg := match extra with
---   | .ABUV {b, idaEqb, ..} .. =>
---       lctx.mkLambda #[a, b, .fvar idaEqb] faEqgx.toExpr |>.toPExpr
---   | .UV ..
---   | .none => lctx.mkLambda #[a] faEqgx.toExpr |>.toPExpr
---
---   let (args, dep) := match extra with
---   | .ABUV {B, hAB, ..} {V} =>
---       let (U, V, dep) := getMaybeDepLemmaApp2 U V lctx
---       (#[A, B, U, V, f, g, hAB.toExpr, hfg], dep)
---   | .UV {V} => 
---       let (U, V, dep) := getMaybeDepLemmaApp2 U V lctx
---       (#[A, U, V, f, g, hfg], dep)
---   | .none => 
---       let (U, dep) := getMaybeDepLemmaApp1 U lctx
---       (#[A, U, f, g, hfg], dep)
---   let n := extra.lemmaName dep
---   Lean.mkAppN (.const n [u, v]) args
---
--- def HUVData.reverse : HUVData EExpr → HUVData EExpr
--- | {a, UaEqVb, extra} => match extra with
---   | .some {b, idaEqb} => {a := b, UaEqVb := UaEqVb.reverse sorry sorry sorry sorry sorry, extra := .some {b := a, idaEqb := sorry}}
---   | .none => {a, UaEqVb := UaEqVb.reverse sorry sorry sorry sorry sorry, extra := .none}
---
---
--- def ForallData.reverse : ForallData EExpr → EExpr
--- | {u, v, A, U, V, a, UaEqVx, extra, lctx} =>
---   let hUV dep :=
---     if dep then match extra with
---       | .AB {b, idaEqb, ..} => lctx.mkLambda #[a, b, .fvar idaEqb] UaEqVx.toExpr |>.toPExpr
---       | .none => lctx.mkLambda #[a] UaEqVx.toExpr |>.toPExpr
---     else
---       UaEqVx.toExpr
---
---   let (args, dep) := match extra with
---   | .AB {B, hAB, ..} => 
---       let (U, V, dep) := getMaybeDepLemmaApp2 U V lctx
---       (#[A, B, U, V, hAB.toExpr, hUV dep], dep)
---   | .none =>
---       let (U, V, dep) := getMaybeDepLemmaApp2 U V lctx
---       (#[A, U, V, hUV dep], dep)
---
---   let n := extra.lemmaName dep
---   Lean.mkAppN (.const n [u, v]) args
---
--- def AppData.reverse : AppData EExpr → EExpr
--- | {u, v, A, U, f, a, extra, lctx} =>
---   let (extra, newA, newU, newf, newa) := match extra with
---   | .ABUV {B, hAB, V, hUV, g, fEqg, b, aEqb} =>
---     (.ABUV {B := A, hAB := hAB.reverse A B sorry sorry sorry, V := U, hUV := hUV.reverse sorry sorry sorry sorry sorry, g, fEqg, b, aEqb}, B, V, g, b)
---   | .UV {V, hUV, g, fEqg, b, aEqb} => 
---     (.UV {V, hUV, g, fEqg, b, aEqb}, A, V, g, b)
---   | .UVFun {V, hUV, g, fEqg} => 
---     (.UVFun {V, hUV, g, fEqg}, A, V, g, a)
---   | .AB {B, hAB, g, fEqg, b, aEqb} => 
---     (.AB {B, hAB := hAB.reverse A B sorry sorry sorry, g, fEqg, b, aEqb}, B, U, g, b)
---   | .none {g, fEqg, b, aEqb} =>
---     (.none {g, fEqg, b, aEqb}, A, U, g, b)
---   | .Fun {g, fEqg} =>
---     (.Fun {g, fEqg}, A, U, g, a)
---   | .Arg {b, aEqb} =>
---     (.Arg {b, aEqb}, A, U, f, b)
---   .app {u, v, A := newA, U := newU, f := newf, a := newa, extra, lctx}
---
--- def PIData.reverse : PIData EExpr → EExpr
--- | {P, p, q, extra} =>
---   let extra := match extra with
---   | .none => .none
---   | .HEq {Q, hPQ} =>
---     .HEq {Q := P, hPQ := hPQ.reverse P Q (Expr.sort 0).toPExpr (Expr.sort 0).toPExpr 1}
---   .prfIrrel {P, p := q, q := p, extra := extra}
---
--- def EExpr.reverse (t s tType sType : PExpr) (lvl : Level) : EExpr → EExpr
--- | .other e => .other $ Lean.mkAppN (.const `HEq.symm [lvl]) #[tType, sType, t, s, e]
--- | .lam d
--- | .forallE d
--- | .app d
--- | .prfIrrel d  => d.reverse
---
--- end
+mutual
+
+def LamData.reverse : LamData EExpr → EExpr
+| {u, v, A, U, f, a, g, faEqgx, extra, lctx} =>
+  let revhAB hAB B := hAB.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ
+  let (extra, newA, newU, newa) := match extra with
+  | .ABUV {b, B, aEqb, hAB} {V} =>
+      (.ABUV {b := a, B := A, aEqb := sorry, hAB := revhAB hAB B} {V := U}, B, V, b)
+  | .UV {V} => (.UV {V := U}, A, V, a)
+  | .none => (.none, A, U, a)
+
+  let newfaEqgx := faEqgx.reverse sorry sorry sorry sorry sorry
+  .lam {u, v, A := newA, U := newU, f := g, a := newa, g := a, faEqgx := newfaEqgx, extra, lctx}
+
+
+def HUVData.reverse (Ua Vb : PExpr) (lvl : Level) : HUVData EExpr → HUVData EExpr
+| {a, UaEqVb, extra} =>
+  let newUaEqVb := UaEqVb.reverse Ua Vb (Expr.sort lvl).toPExpr (Expr.sort lvl).toPExpr lvl.succ
+  match extra with
+  | .some {b, aEqb} => {a := b, UaEqVb := newUaEqVb, extra := .some {b := a, aEqb := aEqb}}
+  | .none => {a, UaEqVb := newUaEqVb, extra := .none}
+
+def ForallData.reverse : ForallData EExpr → EExpr
+| {u, v, A, U, V, a, UaEqVx, extra, lctx} =>
+  let revhAB hAB B := hAB.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ
+
+  let (extra, newA, newa) := match extra with
+  | .AB {b, B, hAB, aEqb} => 
+    (.AB {b := a, B := A, hAB := revhAB hAB B, aEqb := aEqb}, B, b)
+  | .none =>
+    (.none, A, a)
+
+  let newUaEqVx := UaEqVx.reverse U.1 V.1 (Expr.sort v).toPExpr (Expr.sort v).toPExpr v.succ
+  .forallE {u, v, A := newA, U := V, V := U, a := newa, UaEqVx := newUaEqVx, extra, lctx}
+
+def AppData.reverse : AppData EExpr → EExpr
+| {u, v, A, U, f, a, extra, lctx} =>
+  let revhAB hAB B := hAB.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ
+  let revhUV hUV V := hUV.reverse U.1 V.1 v
+  let revfEqg fEqg g (V : PExpr × PExpr) := fEqg.reverse f g (lctx.mkForall #[U.2] U.1).toPExpr (lctx.mkForall #[V.2] V.1).toPExpr (Level.imax u v)
+  let revaEqb aEqb b B := aEqb.reverse a b A B u
+
+  let (extra, newA, newU, newf, newa) := match extra with
+  | .ABUV {B, hAB, V, hUV, g, fEqg, b, aEqb} =>
+    (.ABUV {B := A, hAB := revhAB hAB B, V := U, hUV := revhUV hUV V, g := f, fEqg := revfEqg fEqg g V, b, aEqb := revaEqb aEqb b B}, B, V, g, b)
+  | .UV {V, hUV, g, fEqg, b, aEqb} => 
+    (.UV {V := U, hUV := revhUV hUV V, g := f, fEqg := revfEqg fEqg g V, b := a, aEqb := revaEqb aEqb b A}, A, V, g, b)
+  | .UVFun {V, hUV, g, fEqg} => 
+    (.UVFun {V := U, hUV := revhUV hUV V, g := f, fEqg := revfEqg fEqg g V}, A, V, g, a)
+  | .AB {B, hAB, g, fEqg, b, aEqb} => 
+    (.AB {B := A, hAB := revhAB hAB B, g := f, fEqg := revfEqg fEqg g U, b := a, aEqb := revaEqb aEqb b B}, B, U, g, b)
+  | .none {g, fEqg, b, aEqb} =>
+    (.none {g := f, fEqg := revfEqg fEqg g U, b := a, aEqb := revaEqb aEqb b A}, A, U, g, b)
+  | .Fun {g, fEqg} =>
+    (.Fun {g := f, fEqg := revfEqg fEqg g U}, A, U, g, a)
+  | .Arg {b, aEqb} =>
+    (.Arg {b := a, aEqb := revaEqb aEqb b A}, A, U, f, b)
+  .app {u, v, A := newA, U := newU, f := newf, a := newa, extra, lctx}
+
+def PIData.reverse : PIData EExpr → EExpr
+| {P, p, q, extra} =>
+  let extra := match extra with
+  | .none => .none
+  | .HEq {Q, hPQ} =>
+    .HEq {Q := P, hPQ := hPQ.reverse P Q (Expr.sort 0).toPExpr (Expr.sort 0).toPExpr 1}
+  .prfIrrel {P, p := q, q := p, extra := extra}
+
+def EExpr.reverse (t s tType sType : PExpr) (lvl : Level) : EExpr → EExpr
+| .other e => .other $ Lean.mkAppN (.const `HEq.symm [lvl]) #[tType, sType, t, s, e]
+| .lam d
+| .forallE d
+| .app d
+| .prfIrrel d  => d.reverse
+
+end
 
 namespace EExpr
 

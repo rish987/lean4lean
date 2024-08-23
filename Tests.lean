@@ -144,6 +144,8 @@ n : Nat
 t : T
 f : F b n
 
+-- #check S.mk
+
 axiom B : Bool → Type
 
 axiom s : B (S.mk true .zero () true).4
