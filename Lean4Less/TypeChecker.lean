@@ -233,11 +233,11 @@ def smartCast (e tl tr : PExpr) (p : EExpr) : RecM PExpr := do
 
         let (newPrfVars, newPrfVals, vCast) ←
           match extra with
-          | .AB {B, b, idaEqb, hAB} =>
+          | .AB {B, b, aEqb, hAB} =>
             let hBA ← appHEqSymm A B hAB
             let vCast ← mkCast B.toExpr A.toExpr hBA v prfVars prfVals
             let vCastEqv ← mkCast' `L4L.castOrigHEq B.toExpr A.toExpr hBA v prfVars prfVals
-            pure (#[a.toExpr, b.toExpr, Expr.fvar idaEqb], #[vCast, v, vCastEqv], vCast)
+            pure (#[a.toExpr, b.toExpr, aEqb], #[vCast, v, vCastEqv], vCast)
           | _ => 
             pure (#[a.toExpr], #[v], v)
         let prfVars := prfVars ++ newPrfVars
@@ -633,7 +633,7 @@ def appProjThm? (structName : Name) (projIdx : Nat) (struct structN : PExpr) (st
 
       let f := (← getLCtx).mkLambda #[s] (.proj structName projIdx s) |>.toPExpr
 
-      let ret := Lean.mkAppN (← getConst `L4L.appArgHEq' [structLvl, projLvl]) #[structType, U, f, struct, structN, structEqstructN.toExpr] |>.toEExpr
+      let ret := .app {u := structLvl, v := projLvl, A := structType, U := (projOutType.toPExpr, s), f, a := struct, extra := .Arg {b := structN, aEqb := structEqstructN}, lctx := (← getLCtx)}
       pure ret
 
 /--
@@ -805,20 +805,6 @@ dom : PExpr
 info : BinderInfo
 deriving Inhabited
 
-def gethUV1 (Ua Vb a b : Expr) (UaEqVa : EExpr) : RecM PExpr := do
-  let hUV ← if Ua.containsFVar a.fvarId! || Vb.containsFVar b.fvarId! then
-      pure $ (← getLCtx).mkLambda #[a] UaEqVa |>.toPExpr
-    else
-      pure $ UaEqVa.toPExpr
-  pure hUV
-
-def gethUV2 (Ua Vb a b : Expr) (UaEqVb : EExpr) (idaEqb : FVarId) : RecM PExpr := do
-  let hUV ← if Ua.containsFVar a.fvarId! || Vb.containsFVar b.fvarId! then
-      pure $ (← getLCtx).mkLambda #[a, b, .fvar idaEqb] UaEqVb |>.toPExpr
-    else
-      pure $ UaEqVb.toPExpr
-  pure hUV
-
 def isDefEqBinderForApp' (aVars bVars : Array PExpr) (Uas Vbs : Array PExpr) (ds? : Array (Option (FVarId × EExpr))) (as bs : Array PExpr) (asEqbs? : Array (Option EExpr)) (fEqg? : Option EExpr) (f g : PExpr) 
 : RecM (Option EExpr) := do
   let mut fEqg? := fEqg?
@@ -865,7 +851,7 @@ def isDefEqBinderForApp' (aVars bVars : Array PExpr) (Uas Vbs : Array PExpr) (ds
 
           if UaEqVb?.isSome || dep then
             let UaEqVb ← UaEqVb?.getDM $ mkHRefl UaTypeLvl UaType Ua
-            let hUV ← gethUV2 Ua Vb aVar bVar UaEqVb idaEqb
+            let hUV := {a := aVar, UaEqVb, extra := .some {b := bVar, aEqb := (Expr.fvar idaEqb).toPExpr}}
             pure $ .ABUV {B, hAB, V, hUV, g, fEqg, b, aEqb}
           else
             assert! not dep
@@ -873,7 +859,7 @@ def isDefEqBinderForApp' (aVars bVars : Array PExpr) (Uas Vbs : Array PExpr) (ds
         else
           if let .some UaEqVb := UaEqVb? then
             let some fEqg := fEqg? | unreachable!
-            let hUV ← gethUV1 Ua Vb aVar bVar UaEqVb
+            let hUV := {a := aVar, UaEqVb, extra := .none}
             if let some aEqb := aEqb? then
               pure $ .UV {V, hUV, g, fEqg, b, aEqb}
             else
@@ -1057,19 +1043,14 @@ def isDefEqLambda (t s : PExpr) : RecB := do
         let (U, V) := ((Ua, a), (Vx, x))
         let extra ← if let some (b, idaEqb, hAB) := d? then
           let B ← inferTypePure b
-
-          -- let hfg := (← getLCtx).mkLambda #[a, b, .fvar idaEqb] faEqgx |>.toPExpr
-          pure $ .ABUV {B, b, hAB, idaEqb} {V}
-          -- faEqgx? := .some $ (← getMaybeDepLemmaApp2 `L4L.lambdaHEqABUV [u, v] #[A, B] #[f, g, hAB, hfg] Ua Vx a x).toEExpr
+          let aEqb := (Expr.fvar idaEqb).toPExpr
+          pure $ .ABUV {B, b, hAB, aEqb} {V}
         else
-          -- let hfg := (← getLCtx).mkLambda #[a] faEqgx |>.toPExpr
           let (_, UaEqVx?) ← isDefEq Ua Vx
           if UaEqVx?.isSome then
             pure $ .UV {V}
-            -- faEqgx? := .some $ (← getMaybeDepLemmaApp2 `L4L.lambdaHEqUV [u, v] #[A] #[f, g, hfg] Ua Vx a x) |>.toEExpr
           else
             pure $ .none
-            -- faEqgx? := .some $ (← getMaybeDepLemmaApp1 `L4L.lambdaHEq [u, v] #[A] #[f, g, hfg] Ua a) |>.toEExpr
         faEqgx? := .some $ .lam {u, v, A, a, U, f, g, faEqgx, extra, lctx := ← getLCtx}
 
       fa := f
@@ -1118,18 +1099,13 @@ def isDefEqForall' (t s : PExpr) : RecB := do
         let (U, V) := ((Ua, a), (Vx, x))
 
         let extra ← if let .some (b, idaEqb, hAB) := d? then
-          -- let hUV ← gethUV2 Ua Vx a x UaEqVx idaEqb
-
           let B ← inferTypePure b
-          pure $ .AB {B, b, idaEqb, hAB,}
-          -- UaEqVx? := .some $ (← getMaybeDepLemmaApp2 `L4L.forallHEqAB [u, v] #[A, B] #[hAB, hUV] Ua Vx a x) |>.toEExpr
+          let aEqb := (Expr.fvar idaEqb).toPExpr
+          pure $ .AB {B, b, aEqb, hAB}
         else
-          -- let hUV ← gethUV1 Ua Vx a x UaEqVx
           pure .none
 
         UaEqVx? := .some $ .forallE {u, v, A, a, U, V, UaEqVx, extra, lctx := ← getLCtx}
-
-          -- UaEqVx? := .some $ (← getMaybeDepLemmaApp2 `L4L.forallHEq [u, v] #[A] #[hUV] Ua Vx a x).toEExpr
 
       Ua := (← getLCtx).mkForall #[a] Ua |>.toPExpr
       Vx := (← getLCtx).mkForall #[x] Vx |>.toPExpr
@@ -1275,11 +1251,11 @@ def tryEtaStruct (t s : PExpr) : RecB := do
     let (true, sEqt?) ← tryEtaStructCore s t | return (false, none)
     return (true, ← appHEqSymm? s t sEqt?)
 
-def appPrfIrrelHEq (P Q : PExpr) (PEqQ : EExpr) (p q : PExpr) : RecM EExpr := do
-  return Lean.mkAppN (← getConst `L4L.prfIrrelHEq []) #[P, Q, PEqQ, p, q] |>.toEExpr
+def appPrfIrrelHEq (P Q : PExpr) (hPQ : EExpr) (p q : PExpr) : RecM EExpr := do
+  return .prfIrrel {P, p, q, extra := .HEq {Q, hPQ}}
 
 def appPrfIrrel (P : PExpr) (p q : PExpr) : RecM EExpr := do
-  return Lean.mkAppN (← getConst `L4L.prfIrrel []) #[P, p, q] |>.toEExpr
+  return .prfIrrel {P, p, q}
 
 def reduceRecursor (e : PExpr) (cheapRec cheapProj : Bool) : RecM (Option (PExpr × Option EExpr)) := do
   let env ← getEnv
