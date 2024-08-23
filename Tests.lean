@@ -154,36 +154,8 @@ axiom S.prj : (s : S) → FS s
 
 set_option linter.unusedVariables false
 
-axiom s : B
-  (@L4L.castHEq (FS (@K.rec (fun (x : K) => S) (S.mk Bool.true Bool.true) k)) Bool
-    (@L4L.appArgHEq' S (fun (t : S) => (fun (x : S) => (fun (x : S) => Type) x) t)
-      (@S.rec (fun (x : S) => (fun (x : S) => Type) x) fun (b : Bool) (f : F b) =>
-        (fun (b : Bool) (f : F b) =>
-            @Bool.casesOn (fun (x : Bool) => (f : F x) → (fun (x : S) => Type) (S.mk x f)) b
-              (fun (f : F Bool.false) => (fun (x : S) => Unit) (S.mk Bool.false f))
-              (fun (f : F Bool.true) => (fun (f : F Bool.true) => Bool) f) f)
-          b f)
-      (@K.rec (fun (x : K) => S) (S.mk Bool.true Bool.true) k) (S.mk Bool.true Bool.true)
-      (@L4L.appArgHEq' K (fun (t : K) => (fun (x : K) => S) t) (@K.rec (fun (x : K) => S) (S.mk Bool.true Bool.true)) k
-        K.mk (L4L.prfIrrel K k K.mk)))
-    (@K.rec (fun (x : K) => S) (S.mk Bool.true Bool.true) k).prj)
+axiom s : B (@K.rec (fun (x : K) => S) (S.mk Bool.true Bool.true) k).prj
 noncomputable def projTest : B (S.mk true true).prj := s
-
-axiom ex : B
-  (@L4L.castHEq (FS (@K.rec (fun (x : K) => S) (S.mk Bool.true Bool.true) k)) Bool
-    (@L4L.appArgHEq' S (fun (t : S) => (fun (x : S) => (fun (x : S) => Type) x) t)
-      (@S.rec (fun (x : S) => (fun (x : S) => Type) x) fun (b : Bool) (f : F b) =>
-        (fun (b : Bool) (f : F b) =>
-            @Bool.casesOn (fun (x : Bool) => (f : F x) → (fun (x : S) => Type) (S.mk x f)) b
-              (fun (f : F Bool.false) => (fun (x : S) => Unit) (S.mk Bool.false f))
-              (fun (f : F Bool.true) => (fun (f : F Bool.true) => Bool) f) f)
-          b f)
-      (@K.rec (fun (x : K) => S) (S.mk Bool.true Bool.true) k) (S.mk Bool.true Bool.true)
-      (@L4L.appArgHEq' K (fun (t : K) => (fun (x : K) => S) t) (@K.rec (fun (x : K) => S) (S.mk Bool.true Bool.true)) k
-        K.mk (L4L.prfIrrel K k K.mk)))
-    (@K.rec (fun (x : K) => S) (S.mk Bool.true Bool.true) k).prj)
-
-noncomputable example : B (S.mk true true).prj := ex
 
 -- axiom ex : B (L4L.castHEq.{1} (FS (K.rec.{1} (fun (x._@.Tests._hyg.675 : K) => S) (S.mk Bool.true Bool.true) k)) Bool (L4L.appArgHEq'.{1, 2} S (fun (t : S) => (fun (x : S) => (fun (x._@.Tests._hyg.603.614 : S) => Type) x) t) (S.rec.{2} (fun (x : S) => (fun (x._@.Tests._hyg.603.614 : S) => Type) x) (fun (b : Bool) (f : F b) => (fun (b._@.Tests._hyg.634 : Bool) (f._@.Tests._hyg.635 : F b._@.Tests._hyg.634) => Bool.casesOn.{2} (fun (x : Bool) => forall (f._@.Tests._hyg.635 : F x), (fun (x._@.Tests._hyg.603.614 : S) => Type) (S.mk x f._@.Tests._hyg.635)) b._@.Tests._hyg.634 (fun (f._@.Tests._hyg.635 : F Bool.false) => (fun (x._@.Tests._hyg.631 : S) => Unit) (S.mk Bool.false f._@.Tests._hyg.635)) (fun (f._@.Tests._hyg.635 : F Bool.true) => (fun (f._@.Tests._hyg.625 : F Bool.true) => Bool) f._@.Tests._hyg.635) f._@.Tests._hyg.635) b f)) (K.rec.{1} (fun (x._@.Tests._hyg.675 : K) => S) (S.mk Bool.true Bool.true) k) (S.mk Bool.true Bool.true) (L4L.appArgHEq'.{0, 1} K (fun (t : K) => (fun (x._@.Tests._hyg.675 : K) => S) t) (K.rec.{1} (fun (x._@.Tests._hyg.675 : K) => S) (S.mk Bool.true Bool.true)) k K.mk (L4L.prfIrrel K k K.mk))) (S.prj (K.rec.{1} (fun (x._@.Tests._hyg.675 : K) => S) (S.mk Bool.true Bool.true) k)))
 

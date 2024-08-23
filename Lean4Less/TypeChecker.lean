@@ -633,7 +633,6 @@ def appProjThm? (structName : Name) (projIdx : Nat) (struct structN : PExpr) (st
 
       let f := (← getLCtx).mkLambda #[s] (.proj structName projIdx s) |>.toPExpr
 
-      dbg_trace s!"DBG[102]: TypeChecker.lean:633 (after let f := (← getLCtx).mkLambda #[s] (.p…)"
       let ret := Lean.mkAppN (← getConst `L4L.appArgHEq' [structLvl, projLvl]) #[structType, U, f, struct, structN, structEqstructN.toExpr] |>.toEExpr
       pure ret
 
@@ -1202,7 +1201,7 @@ Checks if applications `t` and `s` (should be WHNF) are defeq on account of
 their function heads and arguments being defeq.
 -/
 def isDefEqApp' (t s : PExpr) (tfEqsf? : Option (Option EExpr) := none)
-   (targsEqsargs? : HashMap Nat (Option EExpr) := default) : RecM (Bool × (Option (EExpr × Array (Option EExpr)))) := do
+   (targsEqsargs? : HashMap Nat (Option EExpr) := default) : RecM (Bool × (Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))) := do
   unless t.toExpr.isApp && s.toExpr.isApp do return (false, none)
   t.toExpr.withApp fun tf tArgs =>
   s.toExpr.withApp fun sf sArgs => do
@@ -1224,13 +1223,13 @@ def isDefEqApp' (t s : PExpr) (tfEqsf? : Option (Option EExpr) := none)
     else
       let (.true, _p?) ← isDefEq ta sa | return (false, none)
       p? := _p?
-    taEqsas := taEqsas.push p?
+    taEqsas := taEqsas.push (p?.map (ta, sa, ·))
     idx := idx + 1
 
   let mut tfT ← inferTypePure tf
   let mut sfT ← inferTypePure sf
 
-  let tEqs? ← withAppDatas tfT sfT tArgs sArgs taEqsas ret? tf sf
+  let tEqs? ← withAppDatas tfT sfT tArgs sArgs (taEqsas.map (·.map (·.2.2))) ret? tf sf
 
   -- TODO(perf) restrict data collection to the case of `taEqsa?.isSome || ret?.isSome`
   return (true, (tEqs?.map fun tEqs => (tEqs, taEqsas)))
@@ -1299,6 +1298,7 @@ def reduceRecursor (e : PExpr) (cheapRec cheapProj : Bool) : RecM (Option (PExpr
       appHEqTrans? := appHEqTrans?
       isDefEqApp := fun t s m => isDefEqApp t s (targsEqsargs? := m)
       isDefEqApp' := fun t s m => isDefEqApp' t s (targsEqsargs? := m)
+      withPure := withPure
     }
     env e
   if let some r := recReduced? then
@@ -1337,6 +1337,7 @@ private def _whnfCore' (e' : Expr) (cheapRec := false) (cheapProj := false) : Re
       throw $ .other "unreachable 10"
 
 
+    -- dbg_trace s!"DBG[133]: TypeChecker.lean:1355 {f}"
     if let (.lam _ _ body _) := f.toExpr then
       -- if e'.isApp then if let .const `Bool.casesOn _ := e'.withApp fun f _ => f then
       --   dbg_trace s!"DBG[66]: TypeChecker.lean:1407 (after dbg_trace s!DBG[47]: TypeChecker.lean:14…)"
@@ -1388,9 +1389,9 @@ private def _whnf' (e' : Expr) : RecEE := do
     if !isLetFVar (← getLCtx) id then
       return (e, none)
   | .lam .. | .app .. | .const .. | .letE .. | .proj .. => pure ()
-  -- check cache
-  if let some r := (← get).whnfCache.find? e then
-    return r
+  -- check cache FIXME re-enable
+  -- if let some r := (← get).whnfCache.find? e then
+  --   return r
   let rec loop le eEqle?
   | 0 => throw .deterministicTimeout
   | fuel+1 => do
