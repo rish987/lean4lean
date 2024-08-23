@@ -602,7 +602,7 @@ def appProjThm? (structName : Name) (projIdx : Nat) (struct structN : PExpr) (st
     let structType ← whnfPure (← inferTypePure struct)
     let .const typeC lvls := if structType.toExpr.isApp then structType.toExpr.withApp fun f _ => f else structType.toExpr | unreachable!
     let .inductInfo {ctors := [ctor], numParams, ..} ← env.get typeC | unreachable!
-    let indices := structType.toExpr.getAppArgs
+    let params := structType.toExpr.getAppArgs
     let ctorInfo ← env.get ctor
     let ctorType := ctorInfo.instantiateTypeLevelParams lvls |>.toPExpr
 
@@ -618,9 +618,9 @@ def appProjThm? (structName : Name) (projIdx : Nat) (struct structN : PExpr) (st
         if let .forallE _ _ b _ := remCtorType then
           let inst :=
             if idx >= numParams then
-              .proj structName idx s
+              .proj structName (idx - numParams) s
             else
-              indices[idx]!
+              params[idx]!
           remCtorType := b.instantiate1 inst
         else
           unreachable!

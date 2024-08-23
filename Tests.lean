@@ -40,6 +40,7 @@ inductive K : Prop where
 --   (t : K a b c) : motive c t
 
 axiom k : K 
+axiom k' : K 
 axiom BK : Bool → Type
 axiom hk : BK (@K.rec (fun _ => Bool) true k)
 
@@ -133,29 +134,22 @@ axiom H.mk : (p : P) → (g : G p) → H p g
 
 noncomputable def pushTest : (g : G q) → H q g := fun (g : G p) => H.mk p g
 
-def F : Bool → Type
-| true => Bool
-| _ => Unit
+def F : Bool → Nat → Type
+| true, .zero => Bool
+| _, _ => Unit
 
-structure S : Type where
+structure S (T : Type u) : Type u where
 b : Bool
-f : F b
+n : Nat
+t : T
+f : F b n
 
-def FS : S → Type
-| {b := true, ..} => Bool
-| _ => Unit
-
-#check S.mk
+-- #check S.mk
 
 axiom B : Bool → Type
-axiom B.mk : (b : Bool) → B b
 
-axiom S.prj : (s : S) → FS s
-
-set_option linter.unusedVariables false
-
-axiom s : B (@K.rec (fun (x : K) => S) (S.mk Bool.true Bool.true) k).prj
-noncomputable def projTest : B (S.mk true true).prj := s
+axiom s : B (S.mk true .zero () true).4
+noncomputable def projTest : B (@K.rec (fun _ => S Unit) (S.mk true .zero () true) k).4 := s
 
 -- axiom ex : B (L4L.castHEq.{1} (FS (K.rec.{1} (fun (x._@.Tests._hyg.675 : K) => S) (S.mk Bool.true Bool.true) k)) Bool (L4L.appArgHEq'.{1, 2} S (fun (t : S) => (fun (x : S) => (fun (x._@.Tests._hyg.603.614 : S) => Type) x) t) (S.rec.{2} (fun (x : S) => (fun (x._@.Tests._hyg.603.614 : S) => Type) x) (fun (b : Bool) (f : F b) => (fun (b._@.Tests._hyg.634 : Bool) (f._@.Tests._hyg.635 : F b._@.Tests._hyg.634) => Bool.casesOn.{2} (fun (x : Bool) => forall (f._@.Tests._hyg.635 : F x), (fun (x._@.Tests._hyg.603.614 : S) => Type) (S.mk x f._@.Tests._hyg.635)) b._@.Tests._hyg.634 (fun (f._@.Tests._hyg.635 : F Bool.false) => (fun (x._@.Tests._hyg.631 : S) => Unit) (S.mk Bool.false f._@.Tests._hyg.635)) (fun (f._@.Tests._hyg.635 : F Bool.true) => (fun (f._@.Tests._hyg.625 : F Bool.true) => Bool) f._@.Tests._hyg.635) f._@.Tests._hyg.635) b f)) (K.rec.{1} (fun (x._@.Tests._hyg.675 : K) => S) (S.mk Bool.true Bool.true) k) (S.mk Bool.true Bool.true) (L4L.appArgHEq'.{0, 1} K (fun (t : K) => (fun (x._@.Tests._hyg.675 : K) => S) t) (K.rec.{1} (fun (x._@.Tests._hyg.675 : K) => S) (S.mk Bool.true Bool.true)) k K.mk (L4L.prfIrrel K k K.mk))) (S.prj (K.rec.{1} (fun (x._@.Tests._hyg.675 : K) => S) (S.mk Bool.true Bool.true) k)))
 
