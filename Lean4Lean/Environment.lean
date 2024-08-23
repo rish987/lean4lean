@@ -30,13 +30,13 @@ def addDefinition (env : Environment) (v : DefinitionVal) (opts : TypeCheckerOpt
     _ ← (checkConstantVal env v.toConstantVal).run env (safety := .unsafe)
     let env' := add env (.opaqueInfo {v with isUnsafe := false})
     checkNoMVarNoFVar env' v.name v.value
-    let (_, s) ← M.run env' (safety := .unsafe) (lctx := {}) opts do
+    let (_, s) ← M.run env' (safety := .unsafe) (lctx := {}) (opts := opts) do
       let valType ← TypeChecker.check v.value v.levelParams
       if !(← isDefEq valType v.type) then
         throw <| .declTypeMismatch env' (.defnDecl v) valType
     return (add env (.defnInfo v), s.data)
   else
-    let (_, s) ← M.run env (safety := .safe) (lctx := {}) opts do
+    let (_, s) ← M.run env (safety := .safe) (lctx := {}) (opts := opts) do
       checkConstantVal env v.toConstantVal (← checkPrimitiveDef env v)
       checkNoMVarNoFVar env v.name v.value
       let valType ← TypeChecker.check v.value v.levelParams
@@ -47,7 +47,7 @@ def addDefinition (env : Environment) (v : DefinitionVal) (opts : TypeCheckerOpt
 def addTheorem (env : Environment) (v : TheoremVal) (opts : TypeCheckerOpts := {}) :
     Except KernelException (Environment × Data) := do
   -- TODO(Leo): we must add support for handling tasks here
-  let (_, s) ← M.run env (safety := .safe) (lctx := {}) opts do
+  let (_, s) ← M.run env (safety := .safe) (lctx := {}) (opts := opts) do
     if !(← isProp v.type) then
       throw <| .thmTypeIsNotProp env v.name v.type
     checkConstantVal env v.toConstantVal
@@ -59,7 +59,7 @@ def addTheorem (env : Environment) (v : TheoremVal) (opts : TypeCheckerOpts := {
 
 def addOpaque (env : Environment) (v : OpaqueVal) (opts : TypeCheckerOpts := {}) :
     Except KernelException (Environment × Data) := do
-  let (_, s) ← M.run env (safety := .safe) (lctx := {}) opts do
+  let (_, s) ← M.run env (safety := .safe) (lctx := {}) (opts := opts) do
     checkConstantVal env v.toConstantVal
     let valType ← TypeChecker.check v.value v.levelParams
     if !(← isDefEq valType v.type) then
@@ -71,7 +71,7 @@ def addMutual (env : Environment) (vs : List DefinitionVal) (opts : TypeCheckerO
   let v₀ :: _ := vs | throw <| .other "invalid empty mutual definition"
   if let .safe := v₀.safety then
     throw <| .other "invalid mutual definition, declaration is not tagged as unsafe/partial"
-  let _ ← M.run env (safety := v₀.safety) (lctx := {}) opts do
+  let _ ← M.run env (safety := v₀.safety) (lctx := {}) (opts := opts) do
     for v in vs do
       if v.safety != v₀.safety then
         throw <| .other
@@ -80,7 +80,7 @@ def addMutual (env : Environment) (vs : List DefinitionVal) (opts : TypeCheckerO
   let mut env' := env
   for v in vs do
     env' := add env' (.opaqueInfo {v with isUnsafe := false})
-  let (_, s) ← M.run env' (safety := v₀.safety) (lctx := {}) opts do
+  let (_, s) ← M.run env' (safety := v₀.safety) (lctx := {}) (opts := opts) do
     for v in vs do
       checkNoMVarNoFVar env' v.name v.value
       let valType ← TypeChecker.check v.value v.levelParams

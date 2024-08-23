@@ -39,13 +39,13 @@ namespace TypeChecker
 
 abbrev M := ReaderT Context <| StateT State <| Except KernelException
 
-def M.run (env : Environment) (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {})
-    (x : M α) : Except KernelException (α × State) :=
-  x { env, safety, lctx, opts } |>.run {}
+def M.run (env : Environment) (x : M α)
+   (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) : Except KernelException (α × State) :=
+  x { env, safety, lctx, opts, lparams} |>.run {}
 
-def M.run' (env : Environment) (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {})
-    (x : M α) : Except KernelException α :=
-  x { env, safety, lctx, opts } |>.run' {}
+def M.run' (env : Environment) (x : M α)
+   (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) : Except KernelException α :=
+  x { env, safety, lctx, opts, lparams } |>.run' {}
 
 instance : MonadEnv M where
   getEnv := return (← read).env
@@ -744,6 +744,8 @@ def check (e : Expr) (lps : List Name) : M Expr :=
 def whnf (e : Expr) : M Expr := (Inner.whnf e).run
 
 def inferType (e : Expr) : M Expr := (Inner.inferType e).run
+
+def inferTypeCheck (e : Expr) : M Expr := (Inner.inferType e (inferOnly := false)).run
 
 def isDefEq (t s : Expr) : M Bool := (Inner.isDefEq t s).run
 
