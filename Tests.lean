@@ -134,6 +134,8 @@ axiom H.mk : (p : P) → (g : G p) → H p g
 
 noncomputable def pushTest : (g : G q) → H q g := fun (g : G p) => H.mk p g
 
+#print BitVec.mul_def
+
 def F : Bool → Nat → Type
 | true, .zero => Bool
 | _, _ => Unit

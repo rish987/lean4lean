@@ -74,11 +74,10 @@ def patchConsts : List Name := [
 `L4L.appHEqBinNatFn,
 ]
 
-def transL4L' (n : Array Name) (env : Environment) (pp := false) : IO Environment := do
-  let mut newEnv := env
-  for n in n do
-    let (_, env') ← checkConstants (printErr := true) newEnv (.insert default n) @Lean4Less.addDecl (initConsts := patchConsts) (op := "patch")
-    newEnv := env'
+def transL4L' (ns : Array Name) (env : Environment) (pp := false) : IO Environment := do
+  let map := ns.foldl (init := default) fun acc n => .insert acc n
+  let (_, newEnv) ← checkConstants (printErr := true) env map @Lean4Less.addDecl (initConsts := patchConsts) (op := "patch")
+  for n in ns do
     if pp then
       ppConst newEnv n
   pure newEnv
@@ -87,11 +86,11 @@ def transL4L (n : Array Name) (env? : Option Environment := none) : Lean.Elab.Co
   let env ← env?.getDM getEnv
   transL4L' n env
 
-def checkL4L (ns : Array Name) (env : Environment) : IO Environment := do
-  let env ← transL4L' ns env (pp := true)
+def checkL4L (ns : Array Name) (env : Environment) (printOutput := true) : IO Environment := do
+  let env ← transL4L' ns env (pp := printOutput)
   let nSet := ns.foldl (init := default) fun acc n => acc.insert n
 
-  let (_, checkEnv) ← checkConstants (printErr := true) env nSet @Lean4Lean.addDecl (initConsts := patchConsts) (opts := {proofIrrelevance := false, kLikeReduction := false})
+  let (_, checkEnv) ← checkConstants (printErr := true) env nSet Lean4Lean.addDecl (initConsts := patchConsts) (opts := {proofIrrelevance := false, kLikeReduction := false})
 
   let env' ← transL4L' ns env
   for n in ns do
@@ -108,10 +107,10 @@ elab "#trans_l4l " i:ident : command => do
   _ ← transL4L #[i.getId]
 
 elab "#check_only " i:ident : command => do
-  _ ← checkConstants (printErr := true) (← getEnv) (.insert default i.getId) @Lean4Lean.addDecl (opts := {})
+  _ ← checkConstants (printErr := true) (← getEnv) (.insert default i.getId) (Lean4Lean.addDecl (verbose := true)) (opts := {})
 
 elab "#check_off " i:ident : command => do
-  _ ← checkConstants (printErr := true) (← getEnv) (.insert default i.getId) @Lean4Lean.addDecl (opts := {proofIrrelevance := false, kLikeReduction := false})
+  _ ← checkConstants (printErr := true) (← getEnv) (.insert default i.getId) Lean4Lean.addDecl (opts := {proofIrrelevance := false, kLikeReduction := false})
 
 elab "#check_l4l " i:ident : command => do
   _ ← checkL4L #[i.getId] (← getEnv)
