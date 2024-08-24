@@ -28,10 +28,22 @@ def getMaybeDepLemmaApp2 (U V : (PExpr × PExpr)) (lctx : LocalContext) : (PExpr
   | (#[U, V], dep) => (U, V, dep)
   | _ => unreachable!
 
+
+
+/--
+Tracks fvars for an equality in both directions (useful when reversing equalities).
+-/
+structure FVarData where
+aEqb : PExpr
+bEqa : PExpr
+deriving Inhabited
+
+
+
 structure LamABData (EExpr : Type) :=
 B      : PExpr
 b      : PExpr
-aEqb   : PExpr
+vaEqb  : FVarData
 hAB    : EExpr
 
 structure LamUVData :=
@@ -61,7 +73,7 @@ deriving Inhabited
 structure ForallABData (EExpr : Type) :=
 B      : PExpr
 b      : PExpr
-aEqb   : PExpr
+vaEqb  : FVarData
 hAB    : EExpr
 
 inductive ForallDataExtra (EExpr : Type) :=
@@ -85,7 +97,7 @@ deriving Inhabited
 
 structure HUVDataExtra (EExpr : Type) where
 b      : PExpr
-aEqb   : PExpr
+vaEqb  : FVarData
 deriving Inhabited
 
 structure HUVData (EExpr : Type) where
@@ -200,6 +212,7 @@ inductive EExpr where
 | forallE  : ForallData EExpr → EExpr
 | app      : AppData EExpr → EExpr
 | prfIrrel : PIData EExpr → EExpr
+| fvar     : FVarData → EExpr
 deriving Inhabited
 
 -- def EExpr.reverse : EExpr → EExpr
@@ -212,7 +225,7 @@ mutual
 def HUVData.toExpr (lctx : LocalContext) (dep : Bool) : HUVData EExpr → Expr
 | {a, UaEqVb, extra} =>
   if dep then match extra with
-    | .some {b, aEqb} => lctx.mkLambda #[a, b, aEqb] UaEqVb.toExpr |>.toPExpr
+    | .some {b, vaEqb} => lctx.mkLambda #[a, b, vaEqb.aEqb] UaEqVb.toExpr |>.toPExpr
     | .none => lctx.mkLambda #[a] UaEqVb.toExpr |>.toPExpr
   else
     UaEqVb.toExpr
@@ -227,8 +240,8 @@ if dep then name.toString ++ "'" |>.toName else name
 def LamData.toExpr : LamData EExpr → Expr
 | {u, v, A, U, f, a, g, faEqgx, extra, lctx} =>
   let hfg := match extra with
-  | .ABUV {b, aEqb, ..} .. =>
-      lctx.mkLambda #[a, b, aEqb] faEqgx.toExpr |>.toPExpr
+  | .ABUV {b, vaEqb, ..} .. =>
+      lctx.mkLambda #[a, b, vaEqb.toExpr] faEqgx.toExpr |>.toPExpr
   | .UV ..
   | .none => lctx.mkLambda #[a] faEqgx.toExpr |>.toPExpr
 
@@ -255,7 +268,7 @@ def ForallData.toExpr : ForallData EExpr → Expr
 | {u, v, A, U, V, a, UaEqVx, extra, lctx} =>
   let hUV dep :=
     if dep then match extra with
-      | .AB {b, aEqb, ..} => lctx.mkLambda #[a, b, aEqb] UaEqVx.toExpr |>.toPExpr
+      | .AB {b, vaEqb, ..} => lctx.mkLambda #[a, b, vaEqb.toExpr] UaEqVx.toExpr |>.toPExpr
       | .none => lctx.mkLambda #[a] UaEqVx.toExpr |>.toPExpr
     else
       UaEqVx.toExpr
@@ -317,26 +330,31 @@ def PIData.toExpr : PIData EExpr → Expr
   | .HEq {Q, hPQ} =>
     Lean.mkAppN (.const `L4L.prfIrrelHEq []) #[P, Q, hPQ.toExpr, p, q]
 
+def FVarData.toExpr : FVarData → Expr
+| {aEqb, ..} => aEqb
+
 def EExpr.toExpr : EExpr → Expr
 | .other e => e
 | .lam d
 | .forallE d
 | .app d
-| .prfIrrel d  => d.toExpr
+| .prfIrrel d
+| .fvar d  => d.toExpr
 
 end
 
 mutual
 
 abbrev revaEqb aEqb (a b A B : PExpr) u := EExpr.reverse a b A B u aEqb
-abbrev revaEqb' aEqb (a b A B : PExpr) u := Lean.mkAppN (.const `HEq.symm [u]) #[A, B, a, b, aEqb] |>.toPExpr
 
+def FVarData.reverse : FVarData → FVarData
+| {aEqb, bEqa} => {aEqb := bEqa, bEqa := aEqb} 
 
 def LamData.reverse : LamData EExpr → EExpr
 | {u, v, A, U, f, a, g, faEqgx, extra, lctx} =>
   let (extra, newA, newU, newa) := match extra with
-  | .ABUV {b, B, aEqb, hAB} {V} =>
-      (.ABUV {b := a, B := A, aEqb := revaEqb' aEqb a b A B u, hAB := EExpr.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ hAB} {V := U}, B, V, b)
+  | .ABUV {b, B, vaEqb, hAB} {V} =>
+      (.ABUV {b := a, B := A, vaEqb := vaEqb.reverse, hAB := EExpr.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ hAB} {V := U}, B, V, b)
   | .UV {V} => (.UV {V := U}, A, V, a)
   | .none => (.none, A, U, a)
 
@@ -344,18 +362,18 @@ def LamData.reverse : LamData EExpr → EExpr
   .lam {u, v, A := newA, U := newU, f := g, a := newa, g := a, faEqgx := newfaEqgx, extra, lctx}
 
 
-def HUVData.reverse (A B Ua Vb : PExpr) (u v : Level) : HUVData EExpr → HUVData EExpr
+def HUVData.reverse (Ua Vb : PExpr) (v : Level) : HUVData EExpr → HUVData EExpr
 | {a, UaEqVb, extra} =>
   let newUaEqVb := UaEqVb.reverse Ua Vb (Expr.sort v).toPExpr (Expr.sort v).toPExpr v.succ
   match extra with
-  | .some {b, aEqb} => {a := b, UaEqVb := newUaEqVb, extra := .some {b := a, aEqb := revaEqb' aEqb a b A B u}}
+  | .some {b, vaEqb} => {a := b, UaEqVb := newUaEqVb, extra := .some {b := a, vaEqb := vaEqb.reverse}}
   | .none => {a, UaEqVb := newUaEqVb, extra := .none}
 
 def ForallData.reverse : ForallData EExpr → EExpr
 | {u, v, A, U, V, a, UaEqVx, extra, lctx} =>
   let (extra, newA, newa) := match extra with
-  | .AB {b, B, hAB, aEqb} => 
-    (.AB {b := a, B := A, hAB := EExpr.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ hAB, aEqb := revaEqb' aEqb a b A B u}, B, b)
+  | .AB {b, B, hAB, vaEqb} => 
+    (.AB {b := a, B := A, hAB := EExpr.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ hAB, vaEqb := vaEqb.reverse}, B, b)
   | .none =>
     (.none, A, a)
 
@@ -366,11 +384,11 @@ def AppData.reverse : AppData EExpr → EExpr
 | {u, v, A, U, f, a, extra, lctx} =>
   let (extra, newA, newU, newf, newa) := match extra with
   | .ABUV {B, hAB, V, hUV, g, fEqg, b, aEqb} =>
-    (.ABUV {B := A, hAB := EExpr.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ hAB, V := U, hUV := HUVData.reverse A B (Prod.fst U) (Prod.fst V) u v hUV, g := f, fEqg := EExpr.reverse f g (LocalContext.mkForall lctx #[U.2] U.1).toPExpr (lctx.mkForall #[V.2] V.1).toPExpr (Level.imax u v) fEqg, b, aEqb := EExpr.reverse a b A B u aEqb}, B, V, g, b)
+    (.ABUV {B := A, hAB := EExpr.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ hAB, V := U, hUV := HUVData.reverse (Prod.fst U) (Prod.fst V) v hUV, g := f, fEqg := EExpr.reverse f g (LocalContext.mkForall lctx #[U.2] U.1).toPExpr (lctx.mkForall #[V.2] V.1).toPExpr (Level.imax u v) fEqg, b := a, aEqb := EExpr.reverse a b A B u aEqb}, B, V, g, b)
   | .UV {V, hUV, g, fEqg, b, aEqb} => 
-    (.UV {V := U, hUV := HUVData.reverse A A (Prod.fst U) (Prod.fst V) u v hUV, g := f, fEqg := EExpr.reverse f g (LocalContext.mkForall lctx #[U.2] U.1).toPExpr (lctx.mkForall #[V.2] V.1).toPExpr (Level.imax u v) fEqg, b := a, aEqb := EExpr.reverse a b A A u aEqb}, A, V, g, b)
+    (.UV {V := U, hUV := HUVData.reverse (Prod.fst U) (Prod.fst V) v hUV, g := f, fEqg := EExpr.reverse f g (LocalContext.mkForall lctx #[U.2] U.1).toPExpr (lctx.mkForall #[V.2] V.1).toPExpr (Level.imax u v) fEqg, b := a, aEqb := EExpr.reverse a b A A u aEqb}, A, V, g, b)
   | .UVFun {V, hUV, g, fEqg} => 
-    (.UVFun {V := U, hUV := HUVData.reverse A A (Prod.fst U) (Prod.fst V) u v hUV, g := f, fEqg := EExpr.reverse f g (LocalContext.mkForall lctx #[U.2] U.1).toPExpr (lctx.mkForall #[V.2] V.1).toPExpr (Level.imax u v) fEqg}, A, V, g, a)
+    (.UVFun {V := U, hUV := HUVData.reverse (Prod.fst U) (Prod.fst V) v hUV, g := f, fEqg := EExpr.reverse f g (LocalContext.mkForall lctx #[U.2] U.1).toPExpr (lctx.mkForall #[V.2] V.1).toPExpr (Level.imax u v) fEqg}, A, V, g, a)
   | .AB {B, hAB, g, fEqg, b, aEqb} => 
     (.AB {B := A, hAB := EExpr.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ hAB, g := f, fEqg := EExpr.reverse f g (LocalContext.mkForall lctx #[U.2] U.1).toPExpr (lctx.mkForall #[U.2] U.1).toPExpr (Level.imax u v) fEqg, b := a, aEqb := EExpr.reverse a b A B u aEqb}, B, U, g, b)
   | .none {g, fEqg, b, aEqb} =>
@@ -383,11 +401,11 @@ def AppData.reverse : AppData EExpr → EExpr
 
 def PIData.reverse : PIData EExpr → EExpr
 | {P, p, q, extra} =>
-  let extra := match extra with
-  | .none => .none
+  let (extra, newP) := match extra with
+  | .none => (.none, P)
   | .HEq {Q, hPQ} =>
-    .HEq {Q := P, hPQ := hPQ.reverse P Q (Expr.sort 0).toPExpr (Expr.sort 0).toPExpr 1}
-  .prfIrrel {P, p := q, q := p, extra := extra}
+    (.HEq {Q := P, hPQ := hPQ.reverse P Q (Expr.sort 0).toPExpr (Expr.sort 0).toPExpr 1}, Q)
+  .prfIrrel {P := newP, p := q, q := p, extra := extra}
 
 def EExpr.reverse (t s tType sType : PExpr) (lvl : Level) : EExpr → EExpr
 | .other e => .other $ Lean.mkAppN (.const `HEq.symm [lvl]) #[tType, sType, t, s, e]
@@ -395,6 +413,7 @@ def EExpr.reverse (t s tType sType : PExpr) (lvl : Level) : EExpr → EExpr
 | .forallE d
 | .app d
 | .prfIrrel d  => d.reverse
+| .fvar d  => .fvar d.reverse
 
 end
 

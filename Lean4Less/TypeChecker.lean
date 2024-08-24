@@ -233,11 +233,11 @@ def smartCast (e tl tr : PExpr) (p : EExpr) : RecM PExpr := do
 
         let (newPrfVars, newPrfVals, vCast) ←
           match extra with
-          | .AB {B, b, aEqb, hAB} =>
+          | .AB {B, b, vaEqb, hAB} =>
             let hBA ← appHEqSymm A B hAB
             let vCast ← mkCast B.toExpr A.toExpr hBA v prfVars prfVals
             let vCastEqv ← mkCast' `L4L.castOrigHEq B.toExpr A.toExpr hBA v prfVars prfVals
-            pure (#[a.toExpr, b.toExpr, aEqb], #[vCast, v, vCastEqv], vCast)
+            pure (#[a.toExpr, b.toExpr, vaEqb.aEqb], #[vCast, v, vCastEqv], vCast)
           | _ => 
             pure (#[a.toExpr], #[v], v)
         let prfVars := prfVars ++ newPrfVars
@@ -805,7 +805,7 @@ dom : PExpr
 info : BinderInfo
 deriving Inhabited
 
-def isDefEqBinderForApp' (aVars bVars : Array PExpr) (Uas Vbs : Array PExpr) (ds? : Array (Option (FVarId × EExpr))) (as bs : Array PExpr) (asEqbs? : Array (Option EExpr)) (fEqg? : Option EExpr) (f g : PExpr) 
+def isDefEqBinderForApp' (aVars bVars : Array PExpr) (Uas Vbs : Array PExpr) (ds? : Array (Option (FVarId × FVarId × EExpr))) (as bs : Array PExpr) (asEqbs? : Array (Option EExpr)) (fEqg? : Option EExpr) (f g : PExpr) 
 : RecM (Option EExpr) := do
   let mut fEqg? := fEqg?
   let mut f := f
@@ -838,7 +838,7 @@ def isDefEqBinderForApp' (aVars bVars : Array PExpr) (Uas Vbs : Array PExpr) (ds
 
         let (U, V) := ((Ua, aVar), (Vb, bVar))
 
-        let extra ← if let .some (idaEqb, hAB) := d? then
+        let extra ← if let .some (idaEqb, idbEqa, hAB) := d? then
           let B ← inferTypePure bVar
 
           let some fEqg := fEqg? | unreachable!
@@ -851,7 +851,7 @@ def isDefEqBinderForApp' (aVars bVars : Array PExpr) (Uas Vbs : Array PExpr) (ds
 
           if UaEqVb?.isSome || dep then
             let UaEqVb ← UaEqVb?.getDM $ mkHRefl UaTypeLvl UaType Ua
-            let hUV := {a := aVar, UaEqVb, extra := .some {b := bVar, aEqb := (Expr.fvar idaEqb).toPExpr}}
+            let hUV := {a := aVar, UaEqVb, extra := .some {b := bVar, vaEqb := {aEqb := (Expr.fvar idaEqb).toPExpr, bEqa := (Expr.fvar idbEqa).toPExpr}}}
             pure $ .ABUV {B, hAB, V, hUV, g, fEqg, b, aEqb}
           else
             assert! not dep
@@ -903,7 +903,6 @@ def isDefEqBinderForApp (T S : PExpr) (as bs : Array PExpr) (tArgsEqsArgs? : Arr
     -- sanity check
     let aType ← inferTypePure a
     let bType ← inferTypePure b
-
     let .true ← isDefEqPure A aType | do
       throw $ .other s!"expected: {A}\n inferred: {aType}"
     let .true ← isDefEqPure B bType | do
@@ -948,13 +947,16 @@ def isDefEqBinderForApp (T S : PExpr) (as bs : Array PExpr) (tArgsEqsArgs? : Arr
       if let some AEqB := AEqB? then 
         let idb := ⟨← mkFreshId⟩
         let idaEqb := ⟨← mkFreshId⟩
+        let idbEqa := ⟨← mkFreshId⟩
         withLCtx ((← getLCtx).mkLocalDecl idb bName B bBi) do
-          let b := (Expr.fvar idb).toPExpr
-          let teqsType := mkAppN (.const `HEq [lvl]) #[A, aVar, B, b]
+          let bVar := (Expr.fvar idb).toPExpr
+          let teqsType := mkAppN (.const `HEq [lvl]) #[A, aVar, B, bVar]
+          let seqtType := mkAppN (.const `HEq [lvl]) #[B, bVar, A, aVar]
           withLCtx ((← getLCtx).mkLocalDecl idaEqb default teqsType default) do
-            withEqFVar ida idb idaEqb do
-              let d := (idaEqb, AEqB)
-              cont (.some d) b
+            withLCtx ((← getLCtx).mkLocalDecl idbEqa default seqtType default) do
+              withEqFVar ida idb idaEqb do
+                let d := (idaEqb, idbEqa, AEqB)
+                cont (.some d) bVar
       else
         cont none aVar
   termination_by (as.size - 1) - idx
@@ -962,9 +964,9 @@ def isDefEqBinderForApp (T S : PExpr) (as bs : Array PExpr) (tArgsEqsArgs? : Arr
   loop 0 T S #[] #[] #[] #[] #[]
 
 def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : PExpr)
-(f : PExpr → PExpr → Option EExpr → Array PExpr → Array (Option (PExpr × FVarId × EExpr)) → RecM (Option T))
+(f : PExpr → PExpr → Option EExpr → Array PExpr → Array (Option (PExpr × FVarId × FVarId × EExpr)) → RecM (Option T))
 : RecM (Bool × (Option T)) := do
-  let rec loop idx tvars svars (ds : Array (Option (PExpr × FVarId × EExpr))): RecM (Bool × (Option T)) := do
+  let rec loop idx tvars svars ds : RecM (Bool × (Option T)) := do
     let ({name := tName, dom := tDom, info := tBi},
       {name := sName, dom := sDom,  info := sBi}) := binDatas.get! idx
     let tDom := tDom.instantiateRev tvars
@@ -999,10 +1001,13 @@ def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : P
         withLCtx ((← getLCtx).mkLocalDecl ids sName sDom sBi) do
           let svar := (Expr.fvar ids).toPExpr
           let teqsType := mkAppN (.const `HEq [lvl]) #[tDom, tvar, sDom, svar]
+          let seqtType := mkAppN (.const `HEq [lvl]) #[sDom, svar, tDom, tvar]
           let idtEqs := ⟨← mkFreshId⟩
+          let idsEqt := ⟨← mkFreshId⟩
           withLCtx ((← getLCtx).mkLocalDecl idtEqs default teqsType default) do
-            withEqFVar idt ids idtEqs do
-              cont (.some (svar, idtEqs, p)) svar 
+            withLCtx ((← getLCtx).mkLocalDecl idsEqt default seqtType default) do
+              withEqFVar idt ids idtEqs do
+                cont (.some (svar, idtEqs, idsEqt, p)) svar 
       else
         cont none tvar
 
@@ -1041,10 +1046,11 @@ def isDefEqLambda (t s : PExpr) : RecB := do
         let Vx ← inferTypePure gx
         let faEqgx ← faEqgx?.getDM $ mkHRefl UaLvl Ua fa
         let (U, V) := ((Ua, a), (Vx, x))
-        let extra ← if let some (b, idaEqb, hAB) := d? then
+        let extra ← if let some (b, idaEqb, idbEqa, hAB) := d? then
           let B ← inferTypePure b
           let aEqb := (Expr.fvar idaEqb).toPExpr
-          pure $ .ABUV {B, b, hAB, aEqb} {V}
+          let bEqa := (Expr.fvar idbEqa).toPExpr
+          pure $ .ABUV {B, b, hAB, vaEqb := {aEqb, bEqa}} {V}
         else
           let (_, UaEqVx?) ← isDefEq Ua Vx
           if UaEqVx?.isSome then
@@ -1098,10 +1104,11 @@ def isDefEqForall' (t s : PExpr) : RecB := do
         let UaEqVx := UaEqVx?.getD $ ← mkHRefl UaTypeLvl UaType Ua
         let (U, V) := ((Ua, a), (Vx, x))
 
-        let extra ← if let .some (b, idaEqb, hAB) := d? then
+        let extra ← if let .some (b, idaEqb, idbEqa, hAB) := d? then
           let B ← inferTypePure b
           let aEqb := (Expr.fvar idaEqb).toPExpr
-          pure $ .AB {B, b, aEqb, hAB}
+          let bEqa := (Expr.fvar idbEqa).toPExpr
+          pure $ .AB {B, b, vaEqb := {aEqb, bEqa}, hAB}
         else
           pure .none
 
