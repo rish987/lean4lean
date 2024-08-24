@@ -715,7 +715,8 @@ def appHEqTrans? (t s r : PExpr) (theqs? sheqr? : Option EExpr) : RecM (Option E
     let (lvl, tType) ← getTypeLevel t
     let sType ← inferTypePure s
     let rType ← inferTypePure r
-    return Lean.mkAppN (← getConst `HEq.trans [lvl]) #[tType, sType, rType, t, s, r, theqs, sheqr] |>.toEExpr
+
+    return .some $ .trans {u := lvl, A := tType, B := sType, C := rType, a := t, b := s, c := r, aEqb := theqs, bEqc := sheqr}
   | none, .some sheqr => return sheqr
   | .some theqs, none => return theqs
 
@@ -723,7 +724,7 @@ def appHEqTrans? (t s r : PExpr) (theqs? sheqr? : Option EExpr) : RecM (Option E
 --   pure $ Lean.mkAppN (← getConst `Eq.refl [lvl]) #[T, t] |>.toEExprD
 
 def mkHRefl (lvl : Level) (T : PExpr) (t : PExpr) : RecM EExpr := do
-  pure $ Lean.mkAppN (← getConst `HEq.refl [lvl]) #[T, t] |>.toEExpr
+  pure $ .refl {u := lvl, A := T, a := t}
 
 def natLitExt? (e : Expr) : Option Nat := if e == .natZero then some 0 else e.rawNatLit?
 

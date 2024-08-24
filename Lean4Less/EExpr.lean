@@ -184,6 +184,39 @@ deriving Inhabited
 
 
 
+structure TransData (EExpr : Type) where
+u     : Level
+A     : PExpr
+B     : PExpr
+C     : PExpr
+a     : PExpr
+b     : PExpr
+c     : PExpr
+aEqb  : EExpr
+bEqc  : EExpr
+deriving Inhabited
+
+
+
+structure SymmData (EExpr : Type) where
+u     : Level
+A     : PExpr
+B     : PExpr
+a     : PExpr
+b     : PExpr
+aEqb  : EExpr
+deriving Inhabited
+
+
+
+structure ReflData where
+u     : Level
+A     : PExpr
+a     : PExpr
+deriving Inhabited
+
+
+
 structure PIDataHEq (EExpr : Type) where
 Q    : PExpr
 hPQ  : EExpr
@@ -211,6 +244,9 @@ inductive EExpr where
 | lam      : LamData EExpr → EExpr
 | forallE  : ForallData EExpr → EExpr
 | app      : AppData EExpr → EExpr
+| trans    : TransData EExpr → EExpr
+| symm     : SymmData EExpr → EExpr
+| refl     : ReflData → EExpr
 | prfIrrel : PIData EExpr → EExpr
 | fvar     : FVarData → EExpr
 deriving Inhabited
@@ -322,6 +358,16 @@ def AppData.toExpr : AppData EExpr → Expr
   let n := extra.lemmaName dep
   Lean.mkAppN (.const n [u, v]) args
 
+def TransData.toExpr : TransData EExpr → Expr
+| {u, A, B, C, a, b, c, aEqb, bEqc} =>
+  Lean.mkAppN (.const `HEq.trans [u]) #[A, B, C, a, b, c, aEqb.toExpr, bEqc.toExpr]
+
+def SymmData.toExpr : SymmData EExpr → Expr
+| {u, A, B, a, b, aEqb} => Lean.mkAppN (.const `HEq.symm [u]) #[A, B, a, b, aEqb.toExpr]
+
+def ReflData.toExpr : ReflData → Expr
+| {u, A, a} => Lean.mkAppN (.const `HEq.refl [u]) #[A, a]
+
 def PIData.toExpr : PIData EExpr → Expr
 | {P, p, q, extra} =>
   match extra with
@@ -338,6 +384,9 @@ def EExpr.toExpr : EExpr → Expr
 | .lam d
 | .forallE d
 | .app d
+| .trans d
+| .symm d
+| .refl d
 | .prfIrrel d
 | .fvar d  => d.toExpr
 
@@ -399,6 +448,15 @@ def AppData.reverse : AppData EExpr → EExpr
     (.Arg {b := a, aEqb := EExpr.reverse a b A A u aEqb}, A, U, f, b)
   .app {u, v, A := newA, U := newU, f := newf, a := newa, extra, lctx}
 
+def TransData.reverse : TransData EExpr → EExpr
+| {u, A, B, C, a, b, c, aEqb, bEqc} =>
+  .trans {u, A := C, B, C := A, a := c, b, c := a, aEqb := bEqc.reverse b c B C u, bEqc := aEqb.reverse a b A B u}
+
+def SymmData.reverse : SymmData EExpr → EExpr
+| {aEqb, ..} => aEqb
+
+def ReflData.reverse : ReflData → EExpr := .refl
+
 def PIData.reverse : PIData EExpr → EExpr
 | {P, p, q, extra} =>
   let (extra, newP) := match extra with
@@ -408,10 +466,13 @@ def PIData.reverse : PIData EExpr → EExpr
   .prfIrrel {P := newP, p := q, q := p, extra := extra}
 
 def EExpr.reverse (t s tType sType : PExpr) (lvl : Level) : EExpr → EExpr
-| .other e => .other $ Lean.mkAppN (.const `HEq.symm [lvl]) #[tType, sType, t, s, e]
+| .other e => .symm {u := lvl, A := tType, B := sType, a := t, b := s, aEqb := .other e}
 | .lam d
 | .forallE d
 | .app d
+| .trans d
+| .symm d
+| .refl d
 | .prfIrrel d  => d.reverse
 | .fvar d  => .fvar d.reverse
 
