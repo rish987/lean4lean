@@ -32,9 +32,9 @@ unsafe def main (args : List String) : IO UInt32 := do
       | .anonymous => throw <| IO.userError s!"Could not resolve module: {mod}"
       | m =>
         if fresh then
-          replayFromFresh addDecl m verbose compare
+          replayFromFresh addDecl m (verbose := verbose) (compare := compare)
         else
-          replayFromImports addDecl m verbose compare
+          replayFromImports addDecl m (verbose := verbose) (compare := compare)
     | _ => do
       if fresh then
         throw <| IO.userError "--fresh flag is only valid when specifying a single module"
