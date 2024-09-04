@@ -7,6 +7,7 @@ import Lean.CoreM
 import Cli
 import Lean.Util.FoldConsts
 import Lean4Less.Environment
+import Lean4Less.Fixtures.Tests -- FIXME should use separate fixtures dir
 import Lean4Less.Replay
 import Lean4Less.Commands
 

@@ -34,10 +34,10 @@ def nestedPrfIrrelTest : T q Qq := t
 
 inductive K : Prop where
   | mk : K
--- K.rec.{u} {a b : Nat}
---   {motive : (c : Nat) → K a b c → Sort u} 
---   (mk : motive 0 (K.mk a b)) {c : Nat}
---   (t : K a b c) : motive c t
+-- K.rec.{u}
+--   {motive : K → Sort u} 
+--   (mk : motive K.mk)
+--   (t : K) : motive t
 
 axiom k : K 
 axiom k' : K 
@@ -102,7 +102,7 @@ axiom l2 : L' (Q q) (Q q) fun qq qq' : Q q => M2 qq qq'
 noncomputable def lamTest1 : L' (Q p) (Q q) fun _qp qq => M1 qq := l1
 noncomputable def lamTest2 : L' (Q p) (Q q) fun qp qq => M2 qp qq := l2
 
-#print Eq.rec
+-- #print Eq.rec
 set_option pp.all true
 -- #print if_pos.match_1
 -- #check_only lamTest
@@ -134,7 +134,7 @@ axiom H.mk : (p : P) → (g : G p) → H p g
 
 noncomputable def pushTest : (g : G q) → H q g := fun (g : G p) => H.mk p g
 
-#print BitVec.mul_def
+-- #print BitVec.mul_def
 
 def F : Bool → Nat → Type
 | true, .zero => Bool
@@ -145,8 +145,6 @@ b : Bool
 n : Nat
 t : T
 f : F b n
-
--- #check S.mk
 
 axiom B : Bool → Type
 

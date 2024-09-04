@@ -237,7 +237,7 @@ deriving Inhabited
 
 
 /--
-The type of expressions for proofs of equality.
+Structured data representing expressions for proofs of equality.
 -/
 inductive EExpr where
 | other    : Expr → EExpr

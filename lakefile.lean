@@ -14,9 +14,6 @@ require Cli from git
 lean_lib patch { globs := #[Glob.submodules `patch] }
 
 @[default_target]
-lean_lib tests { roots := #[`Tests] }
-
-@[default_target]
 lean_lib Lean4Less
 
 @[default_target]
