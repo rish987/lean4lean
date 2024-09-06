@@ -73,7 +73,8 @@ structure State where
   env : Environment
   data : Data := {}
   printNewLine := false
-  numConstants : Nat
+  numToCheck : Nat
+  numChecked : Nat := 0
   remaining : NameSet := {}
   pending : NameSet := {}
   postponedConstructors : NameSet := {}
@@ -98,9 +99,9 @@ def print (m : String) : M Unit := do
   IO.print m
 
 def printProgress : M Unit := do
-  let numConstants := (← get).numConstants
-  let numFinished := numConstants - (← get).remaining.size
-  IO.print s!"{Ansi.resetLine}[{numFinished}/{numConstants}] ({(numFinished  * 100) / numConstants}%) constants typechecked"
+  let numToCheck := (← get).numToCheck
+  let numChecked := (← get).numChecked
+  IO.print s!"{Ansi.resetLine}[{numChecked}/{numToCheck}] ({(numChecked  * 100) / numToCheck}%) constants typechecked"
   modify fun s => {s with printNewLine := true}
   let stdout ← IO.getStdout
   stdout.flush
@@ -162,6 +163,17 @@ deriving instance BEq for RecursorVal
 
 mutual
 
+partial def getDepConsts (newConstants : HashMap Name ConstantInfo) (names : List Name) : IO NameSet := do
+  let rec loop ret names := do
+    let mut ret := ret
+    for name in names do
+      if let none := ret.find? name then
+        let acc' := ret.insert name
+        let some ci := newConstants.find? name | unreachable!
+        ret ← loop acc' ci.getUsedConstants.toList
+    pure ret
+  loop default names
+
 /--
 Check if a `Name` still needs to be processed (i.e. is in `remaining`).
 
@@ -171,14 +183,21 @@ to ensure we add declarations in the right order.
 The construct the `Declaration` from its stored `ConstantInfo`,
 and add it to the environment.
 -/
-partial def replayConstant (name : Name) (addDeclFn : Declaration → M Unit) (printProgress? : Bool := false) : M Unit := do
-  if ← isTodo name then
+partial def replayConstant (name : Name) (addDeclFn' : Declaration → M Unit) (printProgress? : Bool := false) : M Unit := do
+  let postAddDecl := do
+    modify fun s => {s with numChecked := s.numChecked + 1}
     if printProgress? then
       printProgress
+
+  let addDeclFn := fun decl => do
+    addDeclFn' decl
+    postAddDecl
+
+  if ← isTodo name then
     -- dbg_trace s!"Processing deps: {name}"
 
     let some ci := (← read).newConstants.find? name | unreachable!
-    replayConstants ci.getUsedConstants addDeclFn
+    replayConstants ci.getUsedConstants addDeclFn' printProgress?
     -- Check that this name is still pending: a mutual block may have taken care of it.
     if (← get).pending.contains name then
       match ci with
@@ -200,7 +219,7 @@ partial def replayConstant (name : Name) (addDeclFn : Declaration → M Unit) (p
           -- because the kernel treats the existence of the `String` type as license
           -- to use string literals, which use `Char.ofNat` internally. However
           -- this definition is not transitively reachable from the declaration of `String`.
-          if o.name == ``String then replayConstant ``Char.ofNat addDeclFn
+          if o.name == ``String then replayConstant ``Char.ofNat addDeclFn'
           modify fun s =>
             { s with remaining := s.remaining.erase o.name, pending := s.pending.erase o.name }
         let ctorInfo ← all.mapM fun ci => do
@@ -209,7 +228,7 @@ partial def replayConstant (name : Name) (addDeclFn : Declaration → M Unit) (p
         -- Make sure we are really finished with the constructors.
         for (_, ctors) in ctorInfo do
           for ctor in ctors do
-            replayConstants ctor.getUsedConstants addDeclFn
+            replayConstants ctor.getUsedConstants addDeclFn'
         let types : List InductiveType := ctorInfo.map fun ⟨ci, ctors⟩ =>
           { name := ci.name
             type := ci.type
@@ -220,9 +239,11 @@ partial def replayConstant (name : Name) (addDeclFn : Declaration → M Unit) (p
       -- to the constructors generated when we replay the inductives.
       | .ctorInfo info =>
         modify fun s => { s with postponedConstructors := s.postponedConstructors.insert info.name }
+        postAddDecl
       -- Similarly we postpone checking recursors.
       | .recInfo info =>
         modify fun s => { s with postponedRecursors := s.postponedRecursors.insert info.name }
+        postAddDecl
       | .quotInfo _ =>
         addDeclFn (Declaration.quotDecl)
       modify fun s => { s with pending := s.pending.erase name }
@@ -231,8 +252,8 @@ partial def replayConstant (name : Name) (addDeclFn : Declaration → M Unit) (p
     -- dbg_trace s!"DBG[14]: {name}"
 
 /-- Replay a set of constants one at a time. -/
-partial def replayConstants (names : NameSet) (addDeclFn : Declaration → M Unit) : M Unit := do
-  for n in names do replayConstant n addDeclFn
+partial def replayConstants (names : NameSet) (addDeclFn : Declaration → M Unit) (printProgress? : Bool := false) : M Unit := do
+  for n in names do replayConstant n addDeclFn printProgress?
 
 end
 
@@ -263,14 +284,16 @@ variable (addDeclFn : Declaration → M Unit)
 /-- "Replay" some constants into an `Environment`, sending them to the kernel for checking. -/
 def replay (ctx : Context) (env : Environment) (onlyConsts? : Option (List Name) := none) (decl : Option Name := none) (printProgress : Bool := false) (op : String := "typecheck") : IO Environment := do 
   let mut remaining : NameSet := ∅
-  let mut numConstants : Nat := 0
+  let mut numToCheck : Nat := 0
   for (n, ci) in ctx.newConstants.toList do
     -- We skip unsafe constants, and also partial constants.
     -- Later we may want to handle partial constants.
     if !ci.isUnsafe && !ci.isPartial then
       remaining := remaining.insert n
-      numConstants := numConstants + 1
-  let (_, s) ← StateRefT'.run (s := { env, remaining, numConstants }) do
+      numToCheck := numToCheck + 1
+  if let some onlyConsts := onlyConsts? then
+    numToCheck := (← getDepConsts ctx.newConstants onlyConsts).size
+  let (_, s) ← StateRefT'.run (s := { env, remaining, numToCheck }) do
     ReaderT.run (r := ctx) do
       match decl with
       | some d => replayConstant d addDeclFn
@@ -293,7 +316,7 @@ def replay (ctx : Context) (env : Environment) (onlyConsts? : Option (List Name)
   if s.printNewLine then
     IO.println ""
   if printProgress then
-    IO.println s!"{numConstants} total constants typechecked"
+    IO.println s!"{numToCheck} total constants typechecked"
     IO.println s!"-- {s.data.prfIrrelUses} used proof irrelevance"
     IO.println s!"-- {s.data.kLikeRedUses} used k-like reduction"
   return s.env
