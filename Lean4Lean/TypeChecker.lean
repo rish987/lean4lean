@@ -252,6 +252,8 @@ def inferProj (typeName : Name) (idx : Nat) (struct structType : Expr) : RecM Ex
   return dom
 
 def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
+  if e.isApp then if let (.const `PProd _, 2) := e.withApp fun f as => (f, as.size) then
+    dbg_trace s!"DBG[7]: TypeChecker.lean:254 {e}"
   if e.isBVar then
     throw <| .other
       s!"type checker does not support loose bound variables, {""
@@ -280,14 +282,21 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
       else
         let fType ← ensureForallCore (← inferType' f inferOnly) e
         let aType ← inferType' a inferOnly
+        if e.isApp then if let .const `PProd _ := e.withApp fun f _ => f then
+          dbg_trace s!"DBG[10]: TypeChecker.lean:286 (after let aType ← inferType a inferOnly)"
         let dType := fType.bindingDomain!
         if !(← isDefEq dType aType) then
+          dbg_trace s!"DBG[15]: TypeChecker.lean:284 {e}"
+          dbg_trace s!"DBG[16]: TypeChecker.lean:284 {fType}"
+          dbg_trace s!"DBG[17]: TypeChecker.lean:284 {aType}"
           throw <| .appTypeMismatch (← getEnv) (← getLCtx) e fType aType
         pure <| fType.bindingBody!.instantiate1 a
     | .letE .. => inferLet e inferOnly
   modify fun s => cond inferOnly
     { s with inferTypeI := s.inferTypeI.insert e r }
     { s with inferTypeC := s.inferTypeC.insert e r }
+  if e.isApp then if let (.const `PProd _, 2) := e.withApp fun f as => (f, as.size) then
+    dbg_trace s!"DBG[9]: TypeChecker.lean:298 (after if e.isApp then if let .const PProd _ :=…)"
   return r
 
 def whnfCore (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr :=
