@@ -532,6 +532,8 @@ def inferType' (e : Expr) : RecPE := do
         let patch := if f'?.isSome || a'?.isSome || pf'?.isSome || pa'?.isSome then .some (Expr.app f' a').toPExpr else none
         pure ((Expr.bindingBody! fType').instantiate1 a' |>.toPExpr, patch)
       else
+        -- if e'.isApp then if let .const `Bool.casesOn _ := e'.withApp fun f _ => f then
+        --   dbg_trace s!"DBG[66]: TypeChecker.lean:1407 (after dbg_trace s!DBG[47]: TypeChecker.lean:14…)"
         throw <| .appTypeMismatch (← getEnv) (← getLCtx) e fType' aType
     | .letE .. => inferLet e
   modify fun s => { s with inferTypeC := s.inferTypeC.insert e (r, ep?) }
@@ -568,7 +570,9 @@ def inferType' (e : Expr) : RecPE := do
 --   return r
 
 def inferTypePure' (e : PExpr) : RecM PExpr := do -- TODO make more efficient
+  dbg_trace s!"DBG[3]: TypeChecker.lean:573 {e.toExpr}"
   let eT ← runLeanMinus $ Lean.TypeChecker.inferTypeCheck e.toExpr
+  dbg_trace s!"DBG[4]: TypeChecker.lean:574 (after let eT ← runLeanMinus  Lean.TypeChecke…)"
   pure eT.toPExpr
 
 /--

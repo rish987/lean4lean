@@ -44,6 +44,12 @@ axiom k' : K
 axiom BK : Bool → Type
 axiom hk : BK (@K.rec (fun _ => Bool) true k)
 
+-- #print PProd
+-- set_option pp.explicit true in
+theorem ex : Nat.modCore 0 0 = Nat.modCore 0 0 := by rfl
+#print PProd
+#print Nat.modCore._unary.proof_1
+
 -- succeeds because of K-like reduction
 -- (do not need constructor application to reduce)
 noncomputable def kLikeReduction : BK true := hk
