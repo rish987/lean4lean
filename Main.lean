@@ -36,11 +36,11 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
     | .anonymous => throw <| IO.userError s!"Could not resolve module: {mod}"
     | m =>
       if let some onlyConsts := onlyConsts? then
-        Lean.withImportModules #[{module := mod}] {} 0 fun env => do
+        Lean.withImportModules #[{module := mod}, {module := `patch.PatchTheoremsAx}] {} 0 fun env => do
           _ ← Lean4Less.checkL4L (onlyConsts.map (·.toName)) env
       else
         replayFromFresh' Lean4Less.addDecl `patch.PatchTheoremsAx (onlyConsts? := Lean4Less.patchConsts) (op := "patch") fun env =>
-          replayFromInit Lean4Less.addDecl m env (op := "patch") (onlyConsts? := [`Classical.em])
+          replayFromInit Lean4Less.addDecl m env (op := "patch")
   return 0
 
 unsafe def transCmd : Cmd := `[Cli|

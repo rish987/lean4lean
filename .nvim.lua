@@ -85,7 +85,7 @@ local function task_split (task)
   overseer.run_action(task, "open vsplit")
   curr_task_win = vim.api.nvim_get_current_win()
   vim.cmd("wincmd L")
-  vim.cmd("wincmd 90|")
+  vim.cmd("wincmd 170|")
   vim.cmd("set winfixwidth")
   vim.cmd("set wrap")
 
@@ -245,6 +245,7 @@ end
 
 vim.keymap.set("n", "<leader>tt", function () run_template("translate", {file = curr_trans_file}) end)
 vim.keymap.set("n", "<leader>to", function () run_only(vim.fn.input("enter constant names (comma-separated, no whitespace): ")) end)
+vim.keymap.set("n", "<leader>tF", function () choose_trans(vim.fn.input("enter module name: ")) end)
 vim.keymap.set("v", "<leader>to", function () run_only(region_to_text()) end)
 vim.keymap.set("n", "<leader>tO", function () only_picker():find() end)
 vim.keymap.set("n", "<leader>tf", function () transfile_picker():find() end)

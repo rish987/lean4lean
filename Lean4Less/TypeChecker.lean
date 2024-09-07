@@ -83,7 +83,7 @@ abbrev RecB := RecM (Bool × (Option EExpr))
 abbrev RecLB := RecM (LBool × (Option EExpr))
 
 def runLeanMinus (M : Lean.TypeChecker.M T) : RecM T := do
-  Lean.TypeChecker.M.run' (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := false, proofIrrelevance := false}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams) M
+  Lean.TypeChecker.M.run' (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := false, proofIrrelevance := false}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams) (ngen := (← get).ngen) M
 
 inductive ReductionStatus where
   | continue (nltn nlsn : PExpr) (pltnEqnltn? plsnEqnlsn? : Option EExpr)
@@ -532,6 +532,8 @@ def inferType' (e : Expr) : RecPE := do
         let patch := if f'?.isSome || a'?.isSome || pf'?.isSome || pa'?.isSome then .some (Expr.app f' a').toPExpr else none
         pure ((Expr.bindingBody! fType').instantiate1 a' |>.toPExpr, patch)
       else
+        -- if e'.isApp then if let .const `Bool.casesOn _ := e'.withApp fun f _ => f then
+        --   dbg_trace s!"DBG[66]: TypeChecker.lean:1407 (after dbg_trace s!DBG[47]: TypeChecker.lean:14…)"
         throw <| .appTypeMismatch (← getEnv) (← getLCtx) e fType' aType
     | .letE .. => inferLet e
   modify fun s => { s with inferTypeC := s.inferTypeC.insert e (r, ep?) }
@@ -1321,7 +1323,6 @@ private def _whnfCore' (e' : Expr) (cheapRec := false) (cheapProj := false) : Re
       throw $ .other "unreachable 10"
 
 
-    -- dbg_trace s!"DBG[133]: TypeChecker.lean:1355 {f}"
     if let (.lam _ _ body _) := f.toExpr then
       -- if e'.isApp then if let .const `Bool.casesOn _ := e'.withApp fun f _ => f then
       --   dbg_trace s!"DBG[66]: TypeChecker.lean:1407 (after dbg_trace s!DBG[47]: TypeChecker.lean:14…)"
