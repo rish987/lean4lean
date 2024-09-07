@@ -35,7 +35,8 @@ namespace Deps
     | .none =>
       let some const := (← read).env.find? name | throw $ IO.userError s!"could not find constant \"{name}\" for translation, verify that it exists in the Lean input"
       modify fun s => { s with map := s.map.insert name const }
-      let deps := const.getUsedConstantsAsSet
+      let mut deps := const.getUsedConstantsAsSet
+      if name == ``String then deps := deps.insert ``Char.ofNat
       for dep in deps do
         if !dep.isImplementationDetail && !dep.isCStage then
           namedConstDeps dep

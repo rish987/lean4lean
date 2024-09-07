@@ -14,8 +14,10 @@ structure TypeChecker.Data where
 usedProofIrrelevance : Bool := false
 usedKLikeReduction : Bool := false
 
+def defngen : NameGenerator := { namePrefix := `_kernel_fresh, idx := 0 }
+
 structure TypeChecker.State where
-  ngen : NameGenerator := { namePrefix := `_kernel_fresh, idx := 0 }
+  ngen : NameGenerator := defngen
   inferTypeI : InferCache := {}
   inferTypeC : InferCache := {}
   data : Data := {}
@@ -29,6 +31,7 @@ structure TypeCheckerOpts where
   kLikeReduction := true
 
 structure TypeChecker.Context where
+  dbg : Nat := 0
   env : Environment
   opts : TypeCheckerOpts := {}
   lctx : LocalContext := {}
@@ -40,12 +43,12 @@ namespace TypeChecker
 abbrev M := ReaderT Context <| StateT State <| Except KernelException
 
 def M.run (env : Environment) (x : M α)
-   (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) : Except KernelException (α × State) :=
-  x { env, safety, lctx, opts, lparams} |>.run {}
+   (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) (ngen : NameGenerator := defngen) : Except KernelException (α × State) :=
+  x { env, safety, lctx, opts, lparams} |>.run {ngen}
 
 def M.run' (env : Environment) (x : M α)
-   (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) : Except KernelException α :=
-  x { env, safety, lctx, opts, lparams } |>.run' {}
+   (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) (ngen : NameGenerator := defngen): Except KernelException α :=
+  x { env, safety, lctx, opts, lparams } |>.run' {ngen}
 
 instance : MonadEnv M where
   getEnv := return (← read).env
@@ -80,6 +83,9 @@ def whnf (e : Expr) : RecM Expr := fun m => m.whnf e
 
 @[inline] def withLCtx [MonadWithReaderOf LocalContext m] (lctx : LocalContext) (x : m α) : m α :=
   withReader (fun _ => lctx) x
+
+@[inline] def withDbg [MonadWithReaderOf Context m] (i : Nat) (x : m α) : m α :=
+  withReader (fun l => {l with dbg := i}) x
 
 def ensureSortCore (e s : Expr) : RecM Expr := do
   if e.isSort then return e
