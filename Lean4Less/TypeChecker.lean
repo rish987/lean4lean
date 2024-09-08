@@ -1182,19 +1182,8 @@ def tryEtaExpansion (t s : PExpr) : RecB := do
     let (true, sEqt?) ← tryEtaExpansionCore s t | return (false, none)-- TODO apply symm
     return (true, ← appHEqSymm? s t sEqt?)
 
-/--
-Checks if applications `t` and `s` (should be WHNF) are defeq on account of
-their function heads and arguments being defeq.
--/
-def isDefEqApp' (t s : PExpr) (tfEqsf? : Option (Option EExpr) := none)
+def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr) (tfEqsf? : Option (Option EExpr) := none)
    (targsEqsargs? : HashMap Nat (Option EExpr) := default) : RecM (Bool × (Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))) := do
-  unless t.toExpr.isApp && s.toExpr.isApp do return (false, none)
-  t.toExpr.withApp fun tf tArgs =>
-  s.toExpr.withApp fun sf sArgs => do
-  let tf := tf.toPExpr
-  let sf := sf.toPExpr
-  let tArgs := tArgs.map (·.toPExpr)
-  let sArgs := sArgs.map (·.toPExpr)
   unless tArgs.size == sArgs.size do return (false, none)
 
   let (.true, ret?) ← if tfEqsf?.isSome then pure (.true, tfEqsf?.get!)
@@ -1219,6 +1208,21 @@ def isDefEqApp' (t s : PExpr) (tfEqsf? : Option (Option EExpr) := none)
 
   -- TODO(perf) restrict data collection to the case of `taEqsa?.isSome || ret?.isSome`
   return (true, (tEqs?.map fun tEqs => (tEqs, taEqsas)))
+
+/--
+Checks if applications `t` and `s` (should be WHNF) are defeq on account of
+their function heads and arguments being defeq.
+-/
+def isDefEqApp' (t s : PExpr) (tfEqsf? : Option (Option EExpr) := none)
+   (targsEqsargs? : HashMap Nat (Option EExpr) := default) : RecM (Bool × (Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))) := do
+  unless t.toExpr.isApp && s.toExpr.isApp do return (false, none)
+  t.toExpr.withApp fun tf tArgs =>
+  s.toExpr.withApp fun sf sArgs => 
+    let tf := tf.toPExpr
+    let sf := sf.toPExpr
+    let tArgs := tArgs.map (·.toPExpr)
+    let sArgs := sArgs.map (·.toPExpr)
+    isDefEqApp'' tf sf tArgs sArgs tfEqsf? targsEqsargs?
 
 def isDefEqApp (t s : PExpr) (tfEqsf? : Option (Option EExpr) := none) (targsEqsargs? : HashMap Nat (Option EExpr) := default) : RecB := do
   let (isDefEq, data?) ← isDefEqApp' t s tfEqsf? targsEqsargs?
@@ -1317,10 +1321,11 @@ private def _whnfCore' (e' : Expr) (cheapRec := false) (cheapProj := false) : Re
     -- patch to cast rargs as necessary to agree with type of f
     let (_, frargs'?) ← inferType frargs
     let frargs' := frargs'?.getD frargs.toPExpr
-    let rargs' := frargs'.toExpr.getAppArgs.reverse
+    let rargs' := frargs'.toExpr.getAppArgs[f.toExpr.getAppArgs.size:].toArray.reverse
     assert 10 $ rargs'.size == rargs.size
-    let (.true, eEqfrargs'?) ← isDefEqApp e frargs' pf0Eqf? |
+    let (.true, data?) ← isDefEqApp'' f0.toPExpr f (rargs.map (·.toPExpr)).reverse (rargs'.map (·.toPExpr)).reverse pf0Eqf? |
       throw $ .other "unreachable 10"
+    let eEqfrargs'? := data?.map (·.1)
 
 
     if let (.lam _ _ body _) := f.toExpr then
