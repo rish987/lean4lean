@@ -16,15 +16,15 @@ vim.list_extend(lean_files, vim.split(vim.fn.glob("*.lean"), "\n"))
 vim.list_extend(lean_files, vim.split(vim.fn.glob("Lean4Less/**/*.lean"), "\n"))
 vim.list_extend(lean_files, vim.split(vim.fn.glob("patch/**/*.lean"), "\n"))
 
-local prev_trans_file = vim.fn.stdpath("data") .. "/" .. "l4l_prev_trans.json"
-local prev_trans = vim.fn.filereadable(prev_trans_file) ~= 0 and vim.fn.json_decode(vim.fn.readfile(prev_trans_file)) or {}
-local curr_trans_file
+local prev_mod_file = vim.fn.stdpath("data") .. "/" .. "l4l_prev_trans.json"
+local prev_mod = vim.fn.filereadable(prev_mod_file) ~= 0 and vim.fn.json_decode(vim.fn.readfile(prev_mod_file)) or {}
+local curr_module
 
 -- choose the most recently translated file
 local max_ts = 0
-for prev, time in pairs(prev_trans) do
+for prev, time in pairs(prev_mod) do
   if time > max_ts then
-    curr_trans_file = prev
+    curr_module = prev
     max_ts = time
   end
 end
@@ -34,7 +34,7 @@ local templates = {
     builder = function(params)
       return {
         cmd = { "lake" },
-        args = { "exe", "lean4less", "Lean4Less.Fixtures.Tests"},
+        args = { "exe", "lean4less", params.mod},
         components = {
           { "restart_on_save", paths = lean_files}, -- TODO "intelligently" switch task to check if a dk file was modified
           "default",
@@ -46,7 +46,7 @@ local templates = {
     builder = function(params)
       return {
         cmd = { "lake" },
-        args = { "exe", "lean4less", "Lean4Less.Fixtures.Tests", "--only", params.only},
+        args = { "exe", "lean4less", params.mod, "--only", params.only},
         components = {
           { "restart_on_save", paths = lean_files},
           "default",
@@ -118,11 +118,11 @@ local function resume_prev_template()
   run_template(last_template, last_params)
 end
 
-local function choose_trans(trans_file)
-  prev_trans[trans_file] = os.time()
-  local json = vim.fn.json_encode(prev_trans)
-  vim.fn.writefile({json}, prev_trans_file)
-  curr_trans_file = trans_file
+local function choose_mod(mod)
+  prev_mod[mod] = os.time()
+  local json = vim.fn.json_encode(prev_mod)
+  vim.fn.writefile({json}, prev_mod_file)
+  curr_module = mod
 end
 
 local function _run_only(only_info)
@@ -131,34 +131,33 @@ local function _run_only(only_info)
   local json = vim.fn.json_encode(prev_onlys)
   vim.fn.writefile({json}, prev_onlys_file)
 
-  choose_trans(only_info.file)
-  run_template("translate only", {only = only_info.const, file = only_info.file})
+  choose_mod(only_info.mod)
+  run_template("translate only", {only = only_info.const, mod = only_info.mod})
 end
 
-local function run_only(const, file)
-  file = file or curr_trans_file
+local function run_only(const, mod)
+  mod = mod or curr_module
   if #const == 0 then print"Error: no constant specified" return end
-  local key = file .. "->" .. const
-  local only_info = prev_onlys[key] or {const = const, file = file}
+  local key = mod .. "->" .. const
+  local only_info = prev_onlys[key] or {const = const, mod = mod}
   prev_onlys[key] = only_info
   _run_only(only_info)
 end
 
-local transfile_picker = function(opts)
+local transmod_picker = function(opts)
   opts = opts or {}
 
   local results = {}
 
-  for _, file in ipairs(vim.fn.split(vim.fn.glob("Lean4Less/Fixtures/*.lean"), "\n")) do
-    file = vim.loop.fs_realpath(file)
-    if file ~= curr_trans_file then
-      table.insert(results, file)
+  for module, _ in pairs(prev_mod) do
+    if module ~= curr_module then
+      table.insert(results, module)
     end
   end
 
   return pickers
     .new(opts, {
-      prompt_title = string.format("Choose file to translate (current: %s)", vim.fn.fnamemodify(curr_trans_file, ":t")),
+      prompt_title = string.format("Choose module to translate (current: %s)", vim.fn.fnamemodify(curr_module, ":t")),
       finder = finders.new_table {
         results = results,
         entry_maker = opts.entry_maker or make_entry.gen_from_file(opts),
@@ -167,7 +166,7 @@ local transfile_picker = function(opts)
         discard = true,
 
         scoring_function = function(_, _, line)
-          return prev_trans[line] and -prev_trans[line] or 0
+          return prev_mod[line] and -prev_mod[line] or 0
         end,
       },
       previewer = conf.grep_previewer(opts),
@@ -176,9 +175,9 @@ local transfile_picker = function(opts)
           local selection = action_state.get_selected_entry()
 
           actions.close(prompt_bufnr)
-          choose_trans(selection.value)
+          choose_mod(selection.value)
           if last_template == "translate" or last_template == "translate only" then
-            run_template(last_template, vim.tbl_extend("keep", {file = curr_trans_file}, last_params))
+            run_template(last_template, vim.tbl_extend("keep", {mod = curr_module}, last_params))
           end
         end)
 
@@ -194,8 +193,8 @@ local only_picker = function(opts) return pickers
       results = (function()
         local onlys = {}
         for key, only_info in pairs(prev_onlys) do
-          local file = type(only_info) == "table" and vim.fn.fnamemodify(only_info.file, ":~:.") or "(UNSET)"
-          local info = {const = key, text = file .. " --> " .. only_info.const}
+          local mod = type(only_info) == "table" and only_info.mod
+          local info = {const = key, text = mod .. " --> " .. only_info.const}
           table.insert(onlys, info)
         end
         return onlys
@@ -243,11 +242,11 @@ for name, template in pairs(templates) do
   overseer.register_template(template)
 end
 
-vim.keymap.set("n", "<leader>tt", function () run_template("translate", {file = curr_trans_file}) end)
+vim.keymap.set("n", "<leader>tt", function () run_template("translate", {mod = curr_module}) end)
 vim.keymap.set("n", "<leader>to", function () run_only(vim.fn.input("enter constant names (comma-separated, no whitespace): ")) end)
-vim.keymap.set("n", "<leader>tF", function () choose_trans(vim.fn.input("enter module name: ")) end)
+vim.keymap.set("n", "<leader>tF", function () choose_mod(vim.fn.input("enter module name: ")) end)
 vim.keymap.set("v", "<leader>to", function () run_only(region_to_text()) end)
 vim.keymap.set("n", "<leader>tO", function () only_picker():find() end)
-vim.keymap.set("n", "<leader>tf", function () transfile_picker():find() end)
+vim.keymap.set("n", "<leader>tf", function () transmod_picker():find() end)
 vim.keymap.set("n", "<leader>tq", function () abort_curr_task() end)
 vim.keymap.set("n", "<leader>t<Tab>", function () resume_prev_template() end)

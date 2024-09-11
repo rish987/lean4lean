@@ -104,6 +104,12 @@ axiom appHEqABUV' {A B : Sort u} {U : A → Sort v} {V : B → Sort v}
   (hfg : HEq f g) (hab : HEq a b)
   : HEq (f a) (g b)
 
+axiom appAbsHEqABUV' {A B : Sort u} {U : A → Sort v} {V : B → Sort v}
+  (hAB : HEq A B) (hUV : (a : A) → (b : B) → HEq a b → HEq (U a) (V b))
+  {f : (a : A) → U a} {g : (b : B) → V b} {a : A} {b : B}
+  (hfg : (a : A) → (b : B) → HEq a b → HEq (f a) (g b)) (hab : HEq a b)
+  : HEq (f a) (g b)
+
 axiom appHEqBinNatFn {N : Type} {T : Type}
   {f : N → N → T} {a1 a2 : N} {b1 b2 : N}
   (ha : HEq a1 a2)

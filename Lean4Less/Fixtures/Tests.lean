@@ -7,6 +7,7 @@ axiom P : Prop
 axiom Q : P → Prop
 axiom p : P
 axiom q : P
+axiom r : P
 
 axiom X : (p : P) → Q p → Q p
 
@@ -29,6 +30,27 @@ axiom T : (p : P) → Q p → Prop
 
 axiom t : T p Qp
 
+inductive I : Type where
+| left  : P → I
+| right : P → I
+
+axiom LL : (x : P) → P → Q x → P → P → P → Q x → Prop
+axiom ll : LL p p Qp p p p Qp
+
+-- def absTest : LL q p Qq p p p Qq := ll
+axiom N : Nat → (x : P) → Q x → Prop
+axiom Np : N 0 p Qp
+axiom Nq : N 0 q Qq
+
+def IT : I → Type
+| .left x  => P → P → P → P → P → P → (n : Nat) → (Qx : Q x) → N n x Qx → Prop
+| .right _ => Bool
+
+axiom M : (i : I) → (j : I) → IT i → IT j
+axiom mp : M (.right p) (.left p) true p p p p p p 0 Qp Np
+axiom mq : M (.right q) (.left q) true p p p p p p 0 Qq Nq
+def absTest : M (.right p) (.left p) true p p p p p p 0 Qp Np := mq
+
 -- with proof irrelevance, `t` would suffice
 def nestedPrfIrrelTest : T q Qq := t
 
@@ -44,11 +66,33 @@ axiom k' : K
 axiom BK : Bool → Type
 axiom hk : BK (@K.rec (fun _ => Bool) true k)
 
+abbrev gcd (m : @& Nat) : Nat :=
+  if let Nat.succ m' := m then
+    gcd m'
+  else
+    0
+  termination_by m
+
+-- theorem ex (y : Nat) : gcd (Nat.succ y) = gcd y := rfl
+-- #print gcd
+-- #check_l4l ex
+--
+-- axiom x : Nat
+-- axiom y : Nat
+--
+-- #reduce gcd (Nat.succ x)
+
 -- #print PProd
 -- set_option pp.explicit true in
-theorem ex : Nat.modCore 0 0 = Nat.modCore 0 0 := by rfl
-#print PProd
-#print Nat.modCore._unary.proof_1
+-- theorem ex : @WellFounded _
+--      (@invImage ((_ : Nat) ×' Nat) Nat (fun x => @PSigma.casesOn Nat (fun m => Nat) (fun _x => Nat) x fun m n => m)
+--          (@instWellFoundedRelationOfSizeOf Nat instSizeOfNat)).1 :=
+--    (@invImage ((_ : Nat) ×' Nat) Nat (fun x => @PSigma.casesOn Nat (fun m => Nat) (fun _x => Nat) x fun m n => m)
+--        (@instWellFoundedRelationOfSizeOf Nat instSizeOfNat)).2
+
+set_option pp.explicit true
+-- #print PProd
+-- #print Nat.modCore._unary.proof_1
 
 -- succeeds because of K-like reduction
 -- (do not need constructor application to reduce)

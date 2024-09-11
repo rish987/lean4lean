@@ -6,7 +6,7 @@ open Lean4Less.TypeChecker
 
 open private add from Lean.Environment
 
-private def arrow := Expr.arrow
+private def arrow (d b : Expr) : Expr := Expr.arrow d b
 
 def checkPrimitiveDef (env : Environment) (v : DefinitionVal) : M Bool := do
   let fail {α} : M α := throw <| .other s!"invalid form for primitive def {v.name}"
