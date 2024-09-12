@@ -967,11 +967,11 @@ def mkAppEqProof (T S : PExpr) (as bs : Array PExpr) (asEqbs? : Array (Option EE
   loop 0 T S #[] #[] #[] #[] #[]
 
 def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
-   (targsEqsargs? : HashMap Nat (Option EExpr) := default) : RecM (Bool × (Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))) := do
+   (targsEqsargs? : HashMap Nat (Option EExpr) := default) (tfEqsf? : Option (Option EExpr) := none) : RecM (Bool × (Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))) := do
   unless tArgs.size == sArgs.size do return (false, none)
 
-  let (.true, tfEqsf'?) ← isDefEq tf sf | return (false, none)
-  assert! tfEqsf'?.isNone
+  let (.true, tfEqsf?) ← if tfEqsf?.isSome then pure (.true, tfEqsf?.get!)
+    else isDefEq tf sf | return (false, none)
 
   let mut taEqsaDatas := #[]
 
@@ -979,12 +979,10 @@ def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
   let mut sBod := sf
   let mut tArgs' := #[]
   let mut sArgs' := #[]
-  let mut tVars : Array FVarId := #[]
-  let mut sVars : Array FVarId := #[]
+  let mut tVars : Array (FVarId × PExpr) := #[]
+  let mut sVars : Array (FVarId × PExpr) := #[]
   let mut tArgsVars : Array FVarId := #[]
   let mut sArgsVars : Array FVarId := #[]
-  let mut tVarTypes : Array PExpr := #[]
-  let mut sVarTypes : Array PExpr := #[]
   let mut absArgs : HashSet Nat := default
   let mut tfT ← inferTypePure tBod
   let mut sfT ← inferTypePure sBod
@@ -992,45 +990,71 @@ def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
   let mut sBodT := sfT
   let mut taEqsas' := #[]
 
+  assert! tfEqsf?.isNone -- FIXME
+
   let mkAppEqProof' := do -- TODO check that this uses up-to-date mutable variables
-    let tLCtx := (tVars.zip tVarTypes).foldl (init := (← getLCtx)) fun acc (id, (type : PExpr)) => LocalContext.mkLocalDecl acc id default type default
-    let sLCtx := (sVars.zip sVarTypes).foldl (init := (← getLCtx)) fun acc (id, (type : PExpr)) => LocalContext.mkLocalDecl acc id default type default
-    let tf := tLCtx.mkLambda (tVars.map (.fvar ·)) tBod
-    let sf := sLCtx.mkLambda (sVars.map (.fvar ·)) sBod
-    let tfType := tLCtx.mkForall (tVars.map (.fvar ·)) tfT
-    let sfType := sLCtx.mkForall (sVars.map (.fvar ·)) sfT
-    pure (← mkAppEqProof tfType.toPExpr sfType.toPExpr tArgs' sArgs' taEqsas' tf.toPExpr sf.toPExpr, tf.toPExpr, sf.toPExpr)
+    let tLCtx := tVars.foldl (init := (← getLCtx)) fun acc (id, (type : PExpr)) => LocalContext.mkLocalDecl acc id default type default
+    let sLCtx := sVars.foldl (init := (← getLCtx)) fun acc (id, (type : PExpr)) => LocalContext.mkLocalDecl acc id default type default
+    let tf := tLCtx.mkLambda (tVars.map (.fvar ·.1)) tBod
+    let sf := sLCtx.mkLambda (sVars.map (.fvar ·.1)) sBod
+    let tfType := tLCtx.mkForall (tVars.map (.fvar ·.1)) tBodT
+    let sfType := sLCtx.mkForall (sVars.map (.fvar ·.1)) sBodT
+    pure (← mkAppEqProof tfType.toPExpr sfType.toPExpr tArgs' sArgs' taEqsas' tf.toPExpr sf.toPExpr, (Lean.mkAppN tf (tArgs'.map (·.toExpr))).toPExpr, (Lean.mkAppN sf (sArgs'.map (·.toExpr))).toPExpr) -- FIXME reduce redexes in last two values (construct partial application directly)
 
   for idx in [:tArgs.size] do
     let (tBodDom, sBodDom) ← do
-      let tBodT' ← whnfPure tBodT
-      let sBodT' ← whnfPure sBodT
-      let ok? ← 
-        match tBodT'.toExpr, sBodT'.toExpr with
-          | .forallE _ tDom _ _, .forallE _ sDom _ _ =>
-            if tArgsVars.any fun id => tDom.containsFVar id || sArgsVars.any fun id => tDom.containsFVar id then
-              pure none
-            else
-              pure $ .some (tDom, sDom)
-          | _, _ => pure none
+      let ok? ←
+        if idx == 0 && tfEqsf?.isSome then
+          pure none
+        else
+          let tBodT' ← whnfPure tBodT
+          let sBodT' ← whnfPure sBodT
+          match tBodT'.toExpr, sBodT'.toExpr with
+            | .forallE _ tDom _ _, .forallE _ sDom _ _ =>
+              if tArgsVars.any fun id => tDom.containsFVar id || sArgsVars.any fun id => sDom.containsFVar id then
+                pure none
+              else
+                pure $ .some (tDom, sDom)
+            | _, _ => pure none
 
       if let .some (tBodDom, sBodDom) := ok? then
         pure (tBodDom.toPExpr, sBodDom.toPExpr)
       else
-        let (tfEqsf?, tf, sf) ← mkAppEqProof'
+        let (tfEqsf'?, tf, sf) ←
+          if idx == 0 && tfEqsf?.isSome then
+            pure (tfEqsf?, tf, sf)
+          else
+            mkAppEqProof'
 
         -- TODO
-        let (tfVar, tfVarType, tfTAbsDomsVars, tfTAbsDomsVarsTypes, tfTAbsDoms, sfVar, sfVarType, sfTAbsDomsVars, sfTAbsDomsVarsTypes, sfTAbsDoms, tfTAbsDomsEqsfTAbsDoms?, absArgs') ← sorry
+        let ((tfVar : FVarId × PExpr), tfTAbsDomsVars, tfTAbsDoms, (sfVar : FVarId × PExpr), sfTAbsDomsVars, sfTAbsDoms, tfTAbsDomsEqsfTAbsDoms?, absArgs') ← do
+          let loop tfT sfT tDomsVars tDoms sDomsVars sDoms tDomsEqsDoms (absArgs' : HashSet Nat) idx' := do
+            let cont :=
+              if idx' < tArgs.size then
+                if let .forallE .. := tfT then
+                  if let .forallE ..  := sfT then
+                    true
+                  else false
+                else false
+              else false
 
-        tBod := Expr.fvar tfVar |>.toPExpr
-        sBod := Expr.fvar sfVar |>.toPExpr
-        tBodT := tfVarType
-        sBodT := sfVarType
-        taEqsas' := tfTAbsDomsEqsfTAbsDoms? ++ #[tfEqsf?]
+            match tfT, sfT with
+              | .forallE _ tDom tBod _, .forallE _ sDom sBod _ =>
+                pure sorry
+              | tBod, sBod =>
+
+                pure ((⟨← mkFreshId⟩, sorry), tDomsVars, tDoms, (⟨← mkFreshId⟩, sorry), sDomsVars, sDoms, tDomsEqsDoms, absArgs')
+
+          loop tfT.toExpr sfT.toExpr #[] #[] #[] #[] #[] default idx
+                
+
+        tBod := Expr.fvar tfVar.1 |>.toPExpr
+        sBod := Expr.fvar sfVar.1 |>.toPExpr
+        tBodT := tfVar.2
+        sBodT := sfVar.2
+        taEqsas' := tfTAbsDomsEqsfTAbsDoms? ++ #[tfEqsf'?]
         tArgs' := tfTAbsDoms ++ #[tf]
         sArgs' := sfTAbsDoms ++ #[sf]
-        tVarTypes := tfTAbsDomsVarsTypes ++ #[tfVarType]
-        sVarTypes := sfTAbsDomsVarsTypes ++ #[sfVarType]
         tArgsVars := #[]
         sArgsVars := #[]
         tVars := tfTAbsDomsVars ++ #[tfVar]
@@ -1061,17 +1085,15 @@ def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
       sArgs' := sArgs'.push sa
       taEqsas' := taEqsas'.push taEqsa?
 
-      let tVar := ⟨← mkFreshId⟩
-      let sVar := ⟨← mkFreshId⟩
+      let tVar := (⟨← mkFreshId⟩, tBodDom)
+      let sVar := (⟨← mkFreshId⟩, sBodDom)
 
-      tVarTypes := tVarTypes.push tBodDom
-      sVarTypes := sVarTypes.push sBodDom
       tVars := tVars.push tVar
       sVars := sVars.push sVar
-      tArgsVars := tArgsVars.push tVar
-      sArgsVars := sArgsVars.push sVar
+      tArgsVars := tArgsVars.push tVar.1
+      sArgsVars := sArgsVars.push sVar.1
 
-      pure (Expr.fvar tVar |>.toPExpr, Expr.fvar sVar |>.toPExpr)
+      pure (Expr.fvar tVar.1 |>.toPExpr, Expr.fvar sVar.1 |>.toPExpr)
     else 
       pure (ta, sa)
 
@@ -1088,9 +1110,9 @@ def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
         pure $ (tBody.instantiate1 tBoda |>.toPExpr, sBody.instantiate1 sBoda |>.toPExpr)
       | _, _ => unreachable!
 
-  let (tfEqsf?, _, _) ← mkAppEqProof'
+  let (tEqs?, _, _) ← mkAppEqProof'
   -- TODO(perf) restrict data collection to the case of `taEqsa?.isSome || ret?.isSome`
-  return (true, (tfEqsf?.map fun tEqs => (tEqs, taEqsaDatas)))
+  return (true, (tEqs?.map fun tEqs => (tEqs, taEqsaDatas)))
 
 /--
 Checks if applications `t` and `s` (should be WHNF) are defeq on account of
@@ -1419,7 +1441,7 @@ private def _whnfCore' (e' : Expr) (cheapRec := false) (cheapProj := false) : Re
     let frargs' := frargs'?.getD frargs.toPExpr
     let rargs' := frargs'.toExpr.getAppArgs[f.toExpr.getAppArgs.size:].toArray.reverse
     assert 10 $ rargs'.size == rargs.size
-    let (.true, data?) ← isDefEqApp'' f0.toPExpr f (rargs.map (·.toPExpr)).reverse (rargs'.map (·.toPExpr)).reverse pf0Eqf? |
+    let (.true, data?) ← isDefEqApp'' f0.toPExpr f (rargs.map (·.toPExpr)).reverse (rargs'.map (·.toPExpr)).reverse (tfEqsf? := pf0Eqf?) |
       throw $ .other "unreachable 10"
     let eEqfrargs'? := data?.map (·.1)
 
@@ -1597,7 +1619,7 @@ def lazyDeltaReductionStep (ltn lsn : PExpr) : RecM ReductionStatus := do
         && !failedBefore (← get).failure ltn lsn
       then
         if Level.isEquivList ltn.toExpr.getAppFn.constLevels! lsn.toExpr.getAppFn.constLevels! then
-          let (r, proof?) ← isDefEqApp ltn lsn (tfEqsf? := some none)
+          let (r, proof?) ← isDefEqApp ltn lsn
           if r then
             return .bool true proof?
         cacheFailure ltn lsn
