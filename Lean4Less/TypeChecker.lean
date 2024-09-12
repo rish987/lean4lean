@@ -808,9 +808,9 @@ dom : PExpr
 info : BinderInfo
 deriving Inhabited
 
-def mkAppEqProof? (aVars bVars : Array PExpr) (Uas Vbs : Array PExpr) (ds? : Array (Option (FVarId × FVarId × EExpr))) (as bs : Array PExpr) (asEqbs? : Array (Option EExpr)) (fEqg? : Option EExpr) (f g : PExpr) 
+def mkAppEqProof? (aVars bVars : Array PExpr) (Uas Vbs : Array PExpr) (ds? : Array (Option (FVarId × FVarId × EExpr))) (as bs : Array PExpr) (asEqbs? : Array (Option EExpr)) (f g : PExpr) 
 : RecM (Option EExpr) := do
-  let mut fEqg? := fEqg?
+  let mut fEqg? := none
   let mut f := f
   let mut g := g
   for idx in [:as.size] do
@@ -887,7 +887,7 @@ def mkAppEqProof? (aVars bVars : Array PExpr) (Uas Vbs : Array PExpr) (ds? : Arr
     g := g.toExpr.app b |>.toPExpr
   pure fEqg?
 
-def mkAppEqProof (T S : PExpr) (as bs : Array PExpr) (asEqbs? : Array (Option EExpr)) (fEqg? : (Option EExpr)) (f g : PExpr) : RecM (Option EExpr) := do
+def mkAppEqProof (T S : PExpr) (as bs : Array PExpr) (asEqbs? : Array (Option EExpr)) (f g : PExpr) : RecM (Option EExpr) := do
   let rec loop idx T S aVars bVars Uas Vbs ds? : RecM (Option EExpr) := do
     let (T', dA, S', dB) ← match (← whnfPure T).toExpr, (← whnfPure S).toExpr with
       | .forallE tName tDom tBody tBi, .forallE sName sDom sBody sBi =>
@@ -945,7 +945,7 @@ def mkAppEqProof (T S : PExpr) (as bs : Array PExpr) (asEqbs? : Array (Option EE
         if _h : idx < as.size - 1 then
           loop (idx + 1) T S aVars bVars Uas Vbs ds?
         else
-          mkAppEqProof? aVars bVars Uas Vbs ds? as bs asEqbs? fEqg? f g
+          mkAppEqProof? aVars bVars Uas Vbs ds? as bs asEqbs? f g
 
       if let some AEqB := AEqB? then 
         let idb := ⟨← mkFreshId⟩
@@ -966,13 +966,14 @@ def mkAppEqProof (T S : PExpr) (as bs : Array PExpr) (asEqbs? : Array (Option EE
 
   loop 0 T S #[] #[] #[] #[] #[]
 
-def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr) (tfEqsf? : Option (Option EExpr) := none)
+def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
    (targsEqsargs? : HashMap Nat (Option EExpr) := default) : RecM (Bool × (Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))) := do
   unless tArgs.size == sArgs.size do return (false, none)
 
-  let mut (.true, tfEqsf?) ← if tfEqsf?.isSome then pure (.true, tfEqsf?.get!)
-    else isDefEq tf sf | return (false, none)
-  let mut taEqsas := #[]
+  let (.true, tfEqsf'?) ← isDefEq tf sf | return (false, none)
+  assert! tfEqsf'?.isNone
+
+  let mut taEqsaDatas := #[]
 
   let mut tBod := tf
   let mut sBod := sf
@@ -980,50 +981,122 @@ def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr) (tfEqsf? : Option (
   let mut sArgs' := #[]
   let mut tVars : Array FVarId := #[]
   let mut sVars : Array FVarId := #[]
+  let mut tArgsVars : Array FVarId := #[]
+  let mut sArgsVars : Array FVarId := #[]
   let mut tVarTypes : Array PExpr := #[]
   let mut sVarTypes : Array PExpr := #[]
-  let mut sabsArgsTypes : HashMap Nat PExpr := default
-  let mut tabsArgsTypes : HashMap Nat PExpr := default
+  let mut absArgs : HashSet Nat := default
   let mut tfT ← inferTypePure tBod
   let mut sfT ← inferTypePure sBod
-
+  let mut tBodT := tfT
+  let mut sBodT := sfT
   let mut taEqsas' := #[]
+
+  let mkAppEqProof' := do -- TODO check that this uses up-to-date mutable variables
+    let tLCtx := (tVars.zip tVarTypes).foldl (init := (← getLCtx)) fun acc (id, (type : PExpr)) => LocalContext.mkLocalDecl acc id default type default
+    let sLCtx := (sVars.zip sVarTypes).foldl (init := (← getLCtx)) fun acc (id, (type : PExpr)) => LocalContext.mkLocalDecl acc id default type default
+    let tf := tLCtx.mkLambda (tVars.map (.fvar ·)) tBod
+    let sf := sLCtx.mkLambda (sVars.map (.fvar ·)) sBod
+    let tfType := tLCtx.mkForall (tVars.map (.fvar ·)) tfT
+    let sfType := sLCtx.mkForall (sVars.map (.fvar ·)) sfT
+    pure (← mkAppEqProof tfType.toPExpr sfType.toPExpr tArgs' sArgs' taEqsas' tf.toPExpr sf.toPExpr, tf.toPExpr, sf.toPExpr)
+
   for idx in [:tArgs.size] do
+    let (tBodDom, sBodDom) ← do
+      let tBodT' ← whnfPure tBodT
+      let sBodT' ← whnfPure sBodT
+      let ok? ← 
+        match tBodT'.toExpr, sBodT'.toExpr with
+          | .forallE _ tDom _ _, .forallE _ sDom _ _ =>
+            if tArgsVars.any fun id => tDom.containsFVar id || sArgsVars.any fun id => tDom.containsFVar id then
+              pure none
+            else
+              pure $ .some (tDom, sDom)
+          | _, _ => pure none
+
+      if let .some (tBodDom, sBodDom) := ok? then
+        pure (tBodDom.toPExpr, sBodDom.toPExpr)
+      else
+        let (tfEqsf?, tf, sf) ← mkAppEqProof'
+
+        -- TODO
+        let (tfVar, tfVarType, tfTAbsDomsVars, tfTAbsDomsVarsTypes, tfTAbsDoms, sfVar, sfVarType, sfTAbsDomsVars, sfTAbsDomsVarsTypes, sfTAbsDoms, tfTAbsDomsEqsfTAbsDoms?, absArgs') ← sorry
+
+        tBod := Expr.fvar tfVar |>.toPExpr
+        sBod := Expr.fvar sfVar |>.toPExpr
+        tBodT := tfVarType
+        sBodT := sfVarType
+        taEqsas' := tfTAbsDomsEqsfTAbsDoms? ++ #[tfEqsf?]
+        tArgs' := tfTAbsDoms ++ #[tf]
+        sArgs' := sfTAbsDoms ++ #[sf]
+        tVarTypes := tfTAbsDomsVarsTypes ++ #[tfVarType]
+        sVarTypes := sfTAbsDomsVarsTypes ++ #[sfVarType]
+        tArgsVars := #[]
+        sArgsVars := #[]
+        tVars := tfTAbsDomsVars ++ #[tfVar]
+        sVars := sfTAbsDomsVars ++ #[sfVar]
+        absArgs := absArgs'
+
+        let tBodT' ← whnfPure tBodT
+        let sBodT' ← whnfPure sBodT
+        match tBodT'.toExpr, sBodT'.toExpr with
+          | .forallE _ tDom _ _, .forallE _ sDom _ _ =>
+            pure $ (tDom.toPExpr, sDom.toPExpr)
+          | _, _ => unreachable!
+
     let ta := tArgs[idx]!
     let sa := sArgs[idx]!
 
-    let mut p? := none
+    let mut taEqsa? := none
     if let some _p? := targsEqsargs?.find? idx then
-      p? := _p?
+      taEqsa? := _p?
     else
       let (.true, _p?) ← isDefEq ta sa | return (false, none)
-      p? := _p?
-    let taEqsa? := p?.map (ta, sa, ·)
-    taEqsas' := taEqsas'.push taEqsa?
-    taEqsas := taEqsas.push taEqsa?
-    tArgs' := tArgs'.push ta
-    sArgs' := sArgs'.push sa
+      taEqsa? := _p?
+    let taEqsaData? := taEqsa?.map (ta, sa, ·)
+    taEqsaDatas := taEqsaDatas.push taEqsaData?
 
-    if idx == tArgs.size - 1 then
-      let tLCtx := (tVars.zip tVarTypes).foldl (init := (← getLCtx)) fun acc (id, type) => acc.mkLocalDecl id default type default
-      let sLCtx := (sVars.zip sVarTypes).foldl (init := (← getLCtx)) fun acc (id, type) => acc.mkLocalDecl id default type default
-      let tf := tLCtx.mkLambda (tVars.map (.fvar ·)) tBod
-      let sf := sLCtx.mkLambda (sVars.map (.fvar ·)) sBod
-      tfEqsf? ← mkAppEqProof tfT sfT tArgs' sArgs' (taEqsas'.map (·.map (·.2.2))) tfEqsf? tf.toPExpr sf.toPExpr
-      -- tBod := sorry
-      -- sBod := sorry
-      taEqsas' := #[]
-      tArgs' := #[]
-      sArgs' := #[]
+    let (tBoda, sBoda) ← if taEqsa?.isSome || absArgs.contains idx then
+      tArgs' := tArgs'.push ta
+      sArgs' := sArgs'.push sa
+      taEqsas' := taEqsas'.push taEqsa?
 
+      let tVar := ⟨← mkFreshId⟩
+      let sVar := ⟨← mkFreshId⟩
+
+      tVarTypes := tVarTypes.push tBodDom
+      sVarTypes := sVarTypes.push sBodDom
+      tVars := tVars.push tVar
+      sVars := sVars.push sVar
+      tArgsVars := tArgsVars.push tVar
+      sArgsVars := sArgsVars.push sVar
+
+      pure (Expr.fvar tVar |>.toPExpr, Expr.fvar sVar |>.toPExpr)
+    else 
+      pure (ta, sa)
+
+    tBod := tBod.toExpr.app tBoda |>.toPExpr
+    sBod := sBod.toExpr.app sBoda |>.toPExpr
+
+    (tfT, sfT) ← match (← whnfPure tfT).toExpr, (← whnfPure sfT).toExpr with
+      | .forallE _ _ tBody _, .forallE _ _ sBody _ =>
+        pure $ (tBody.instantiate1 ta |>.toPExpr, sBody.instantiate1 sa |>.toPExpr)
+      | _, _ => unreachable!
+
+    (tBodT, sBodT) ← match (← whnfPure tBodT).toExpr, (← whnfPure sBodT).toExpr with
+      | .forallE _ _ tBody _, .forallE _ _ sBody _ =>
+        pure $ (tBody.instantiate1 tBoda |>.toPExpr, sBody.instantiate1 sBoda |>.toPExpr)
+      | _, _ => unreachable!
+
+  let (tfEqsf?, _, _) ← mkAppEqProof'
   -- TODO(perf) restrict data collection to the case of `taEqsa?.isSome || ret?.isSome`
-  return (true, (tfEqsf?.map fun tEqs => (tEqs, taEqsas)))
+  return (true, (tfEqsf?.map fun tEqs => (tEqs, taEqsaDatas)))
 
 /--
 Checks if applications `t` and `s` (should be WHNF) are defeq on account of
 their function heads and arguments being defeq.
 -/
-def isDefEqApp' (t s : PExpr) (tfEqsf? : Option (Option EExpr) := none)
+def isDefEqApp' (t s : PExpr)
    (targsEqsargs? : HashMap Nat (Option EExpr) := default) : RecM (Bool × (Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))) := do
   unless t.toExpr.isApp && s.toExpr.isApp do return (false, none)
   t.toExpr.withApp fun tf tArgs =>
@@ -1032,10 +1105,10 @@ def isDefEqApp' (t s : PExpr) (tfEqsf? : Option (Option EExpr) := none)
     let sf := sf.toPExpr
     let tArgs := tArgs.map (·.toPExpr)
     let sArgs := sArgs.map (·.toPExpr)
-    isDefEqApp'' tf sf tArgs sArgs tfEqsf? targsEqsargs?
+    isDefEqApp'' tf sf tArgs sArgs targsEqsargs?
 
-def isDefEqApp (t s : PExpr) (tfEqsf? : Option (Option EExpr) := none) (targsEqsargs? : HashMap Nat (Option EExpr) := default) : RecB := do
-  let (isDefEq, data?) ← isDefEqApp' t s tfEqsf? targsEqsargs?
+def isDefEqApp (t s : PExpr) (targsEqsargs? : HashMap Nat (Option EExpr) := default) : RecB := do
+  let (isDefEq, data?) ← isDefEqApp' t s targsEqsargs?
   pure (isDefEq, data?.map (·.1))
 
 def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : PExpr)
