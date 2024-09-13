@@ -1,5 +1,4 @@
-import Lean4Less.Quot
-import Lean4Less.Inductive.Reduce
+import Lean4Less.Quot import Lean4Less.Inductive.Reduce
 import Lean4Less.EExpr
 
 import Lean4Lean.Environment
@@ -1028,7 +1027,7 @@ def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
 
         -- TODO
         let ((tfVar : FVarId × PExpr), tfTAbsDomsVars, tfTAbsDoms, (sfVar : FVarId × PExpr), sfTAbsDomsVars, sfTAbsDoms, tfTAbsDomsEqsfTAbsDoms?, absArgs') ← do
-          let loop tfT sfT tDomsVars tDoms sDomsVars sDoms tDomsEqsDoms (absArgs' : HashSet Nat) idx' := do
+          let loop tfT sfT tDomsVars tDoms sDomsVars sDoms tDomsEqsDoms (absArgs' : HashSet Nat) idx' (origDomVars origDomVarsAbs : Array (FVarId × FVarId)) (origDomVarsToRefOrigDomVars : HashMap (FVarId × FVarId) (HashSet (FVarId × FVarId))) (origDomVarsToNewDomVars : HashMap (FVarId × FVarId) (FVarId × FVarId)) := do
             let cont :=
               if idx' < tArgs.size then
                 if let .forallE .. := tfT then
@@ -1038,14 +1037,63 @@ def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
                 else false
               else false
 
+            let maybeAbs tType sType := do 
+              if origDomVarsAbs.any (tType.containsFVar ·.1) || origDomVarsAbs.any (sType.containsFVar ·.2) then
+                let mut depVars := #[]
+                let mut origDepVars := #[]
+                let mut origDepVarsSet : HashSet (FVarId × FVarId) := default
+                for (tvar, svar) in origDomVars do
+                  if tType.containsFVar tvar || sType.containsFVar svar then
+                    origDepVarsSet := origDepVarsSet.insert (tvar, svar)
+                    for (tvar', svar') in origDomVarsToRefOrigDomVars.find! (tvar, svar) do
+                      origDepVarsSet := origDepVarsSet.insert (tvar', svar')
+
+                for (tvar, svar) in origDomVars do
+                  if origDepVarsSet.contains (tvar, svar) then
+                    depVars := depVars.push $ origDomVarsToNewDomVars.find! (tvar, svar)
+                    origDepVars := origDepVars.push $ (tvar, svar)
+
+                let tsort ← ensureSortCorePure (← inferTypePure tType.toPExpr) tType.toPExpr
+                let Mt := (← getLCtx).mkForall (depVars.map fun (tvar, _) => (Expr.fvar tvar)) tsort
+                let MtVar := (⟨← mkFreshId⟩, Mt.toPExpr)
+                let ssort ← ensureSortCorePure (← inferTypePure sType.toPExpr) sType.toPExpr
+                let Ms := (← getLCtx).mkForall (depVars.map fun (_, svar) => (Expr.fvar svar)) ssort
+                let MsVar := (⟨← mkFreshId⟩, Ms.toPExpr)
+
+                let tDomsVars := tDomsVars.push MtVar
+                let sDomsVars := sDomsVars.push MsVar
+                let tDom := (← getLCtx).mkLambda (origDepVars.map fun (tvar, _) => (Expr.fvar tvar)) tType |>.toPExpr
+                let sDom := (← getLCtx).mkLambda (origDepVars.map fun (_, svar) => (Expr.fvar svar)) sType |>.toPExpr
+                let tDoms := tDoms.push tDom
+                let sDoms := sDoms.push sDom
+                let (true, tDomEqsDom?) ← isDefEq tDom sDom | unreachable!
+                let tDomsEqsDoms := tDomsEqsDoms.push tDomEqsDom?
+                let newtType := Lean.mkAppN (.fvar MtVar.1) (depVars.map (.fvar ·.1))
+                let newsType := Lean.mkAppN (.fvar MsVar.1) (depVars.map (.fvar ·.2))
+                pure (newtType, newsType, tDomsVars, sDomsVars, tDoms, sDoms, tDomsEqsDoms)
+              else
+                pure (tType, sType, tDomsVars, sDomsVars, tDoms, sDoms, tDomsEqsDoms)
+
             match tfT, sfT with
               | .forallE _ tDom tBod _, .forallE _ sDom sBod _ =>
+                for (tvar, svar) in origDomVars do
+                  if tDom.containsFVar tvar || sDom.containsFVar svar then
+                    origDepVarsSet := origDepVarsSet.insert (tvar, svar)
+                    for (tvar', svar') in origDomVarsToRefOrigDomVars.find! (tvar, svar) do
+                      origDepVarsSet := origDepVarsSet.insert (tvar', svar')
+
                 pure sorry
               | tBod, sBod =>
+                let (newtBod, newsBod, tDomsVars, sDomsVars, tDoms, sDoms, tDomsEqsDoms) ← maybeAbs tBod sBod
+                let mut newDomVars := #[]
+                for tsvar in origDomVars do
+                  if let some tsvar' := origDomVarsToNewDomVars.find? tsvar then
+                    newDomVars := newDomVars.push tsvar'
+                  else
+                    newDomVars := newDomVars.push tsvar
+                pure ((⟨← mkFreshId⟩, (← getLCtx).mkForall (newDomVars.map (.fvar ·.1)) newtBod |>.toPExpr), tDomsVars, tDoms, (⟨← mkFreshId⟩, (← getLCtx).mkForall (newDomVars.map (.fvar ·.2)) newsBod |>.toPExpr), sDomsVars, sDoms, tDomsEqsDoms, absArgs')
 
-                pure ((⟨← mkFreshId⟩, sorry), tDomsVars, tDoms, (⟨← mkFreshId⟩, sorry), sDomsVars, sDoms, tDomsEqsDoms, absArgs')
-
-          loop tfT.toExpr sfT.toExpr #[] #[] #[] #[] #[] default idx
+          loop tfT.toExpr sfT.toExpr #[] #[] #[] #[] #[] default idx #[] #[] default default
                 
 
         tBod := Expr.fvar tfVar.1 |>.toPExpr
