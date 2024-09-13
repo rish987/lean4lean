@@ -42,14 +42,24 @@ axiom N : Nat → (x : P) → Q x → Prop
 axiom Np : N 0 p Qp
 axiom Nq : N 0 q Qq
 
+-- def IT : I → Type
+-- | .left x  => P → P → P → P → P → P → (n : Nat) → (Qx : Q x) → N n x Qx → Prop
+-- | .right _ => Bool
+
+-- axiom M : (i : I) → (j : I) → IT i → IT j
+-- axiom mp : M (.right p) (.left p) true p p p p p p 0 Qp Np
+-- axiom mq : M (.right q) (.left q) true p p p p p p 0 Qq Nq
+-- def absTest : M (.right p) (.left p) true p p p p p p 0 Qp Np := mq
+--
 def IT : I → Type
-| .left x  => P → P → P → P → P → P → (n : Nat) → (Qx : Q x) → N n x Qx → Prop
+| .left x  => Q x → P → P → P → P → P → P → Prop
 | .right _ => Bool
 
-axiom M : (i : I) → (j : I) → IT i → IT j
-axiom mp : M (.right p) (.left p) true p p p p p p 0 Qp Np
-axiom mq : M (.right q) (.left q) true p p p p p p 0 Qq Nq
-def absTest : M (.right p) (.left p) true p p p p p p 0 Qp Np := mq
+axiom M : (i : I) → IT i
+axiom mp : M (.left p) Qp p p p p p p
+axiom mq : M (.left q) Qq p p p p p p
+def absTest : M (.left p) Qp p p p p p p := mq
+-- def absTest : Q p := Qq
 
 -- with proof irrelevance, `t` would suffice
 def nestedPrfIrrelTest : T q Qq := t

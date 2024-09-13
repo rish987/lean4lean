@@ -843,6 +843,7 @@ def mkAppEqProof? (aVars bVars : Array PExpr) (Uas Vbs : Array PExpr) (ds? : Arr
         let extra ← if let .some (idaEqb, idbEqa, hAB) := d? then
           let B ← inferTypePure bVar
 
+          dbg_trace s!"DBG[1]: TypeChecker.lean:845 {idx}"
           let some fEqg := fEqg? | unreachable!
           let some aEqb := aEqb? | unreachable!
 
@@ -922,6 +923,8 @@ def mkAppEqProof (T S : PExpr) (as bs : Array PExpr) (asEqbs? : Array (Option EE
 
     let AEqB? ← if A != B then
       let (defEq, AEqB?) ← isDefEq A B
+      -- if idx == 0 then
+      --   dbg_trace s!"DBG[2]: TypeChecker.lean:925: AEqB?={T}, {S}, {A}, {B}, {AEqB?}"
       assert 22 defEq
       pure AEqB?
     else pure (none)
@@ -963,7 +966,10 @@ def mkAppEqProof (T S : PExpr) (as bs : Array PExpr) (asEqbs? : Array (Option EE
         cont none aVar
   termination_by (as.size - 1) - idx
 
-  loop 0 T S #[] #[] #[] #[] #[]
+  if as.size > 0 then
+    loop 0 T S #[] #[] #[] #[] #[]
+  else
+    pure none
 
 def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
    (targsEqsargs? : HashMap Nat (Option EExpr) := default) (tfEqsf? : Option (Option EExpr) := none) : RecM (Bool × (Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))) := do
@@ -971,6 +977,19 @@ def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
 
   let (.true, tfEqsf?) ← if tfEqsf?.isSome then pure (.true, tfEqsf?.get!)
     else isDefEq tf sf | return (false, none)
+
+  let mkAppEqProof' tVars sVars tArgs' sArgs' taEqsas' tBod sBod tBodT sBodT idx := do -- TODO check that this uses up-to-date mutable variables
+    let tLCtx := tVars.foldl (init := (← getLCtx)) fun acc (id, n, (type : PExpr)) => LocalContext.mkLocalDecl acc id n type default
+    let sLCtx := sVars.foldl (init := (← getLCtx)) fun acc (id, n, (type : PExpr)) => LocalContext.mkLocalDecl acc id n type default
+    let tf' := tLCtx.mkLambda (tVars.map (.fvar ·.1)) tBod
+    let sf' := sLCtx.mkLambda (sVars.map (.fvar ·.1)) sBod
+    let tfType := tLCtx.mkForall (tVars.map (.fvar ·.1)) tBodT
+    let sfType := sLCtx.mkForall (sVars.map (.fvar ·.1)) sBodT
+    -- dbg_trace s!"DBG[1]: {tArgs'.size} {sArgs'.size}"
+    -- dbg_trace s!"DBG[7]: TypeChecker.lean:1005: taEqsas'={taEqsas'}"
+    let ret ← mkAppEqProof tfType.toPExpr sfType.toPExpr tArgs' sArgs' taEqsas' tf'.toPExpr sf'.toPExpr
+    -- dbg_trace s!"DBG[2]: TypeChecker.lean:1002 (after let ret ← mkAppEqProof tfType.toPExpr …)"
+    pure (ret, (Lean.mkAppN tf (tArgs[:idx].toArray.map (·.toExpr))).toPExpr, (Lean.mkAppN sf (sArgs[:idx].toArray.map (·.toExpr))).toPExpr) -- FIXME reduce redexes in last two values (construct partial application directly)
 
   let mut taEqsaDatas := #[]
 
@@ -989,16 +1008,7 @@ def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
   let mut sBodT := sfT
   let mut taEqsas' := #[]
 
-  assert! tfEqsf?.isNone -- FIXME
-
-  let mkAppEqProof' := do -- TODO check that this uses up-to-date mutable variables
-    let tLCtx := tVars.foldl (init := (← getLCtx)) fun acc (id, n, (type : PExpr)) => LocalContext.mkLocalDecl acc id n type default
-    let sLCtx := sVars.foldl (init := (← getLCtx)) fun acc (id, n, (type : PExpr)) => LocalContext.mkLocalDecl acc id n type default
-    let tf := tLCtx.mkLambda (tVars.map (.fvar ·.1)) tBod
-    let sf := sLCtx.mkLambda (sVars.map (.fvar ·.1)) sBod
-    let tfType := tLCtx.mkForall (tVars.map (.fvar ·.1)) tBodT
-    let sfType := sLCtx.mkForall (sVars.map (.fvar ·.1)) sBodT
-    pure (← mkAppEqProof tfType.toPExpr sfType.toPExpr tArgs' sArgs' taEqsas' tf.toPExpr sf.toPExpr, (Lean.mkAppN tf (tArgs'.map (·.toExpr))).toPExpr, (Lean.mkAppN sf (sArgs'.map (·.toExpr))).toPExpr) -- FIXME reduce redexes in last two values (construct partial application directly)
+  -- assert! tfEqsf?.isNone -- FIXME
 
   for idx in [:tArgs.size] do
     let (tBodDom, tDomName, sBodDom, sDomName) ← do
@@ -1023,7 +1033,7 @@ def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
           if idx == 0 && tfEqsf?.isSome then
             pure (tfEqsf?, tf, sf)
           else
-            mkAppEqProof'
+            mkAppEqProof' tVars sVars tArgs' sArgs' taEqsas' tBod sBod tBodT sBodT idx
 
         -- TODO
         let ((tfVar : FVarId × Name × PExpr), tfTAbsDomsVars, tfTAbsDoms, (sfVar : FVarId × Name × PExpr), sfTAbsDomsVars, sfTAbsDoms, tfTAbsDomsEqsfTAbsDoms?, absArgs') ← do
@@ -1038,7 +1048,8 @@ def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
             --   else false
 
             let withMaybeAbs tType sType f (tName := `tT) (sName := `sT) (tBi := default) (sBi := default) := do 
-              if origDomVarsAbs.any (tType.containsFVar ·.1) || origDomVarsAbs.any (sType.containsFVar ·.2) then
+              let (true, tTypeEqsType?) ← isDefEq tType.toPExpr sType.toPExpr | unreachable!
+              if tTypeEqsType?.isSome || origDomVarsAbs.any (tType.containsFVar ·.1) || origDomVarsAbs.any (sType.containsFVar ·.2) then
                 let mut depVars := #[]
                 let mut origDepVars := #[]
                 let mut origDepVarsSet : HashSet (FVarId × FVarId) := default
@@ -1076,44 +1087,52 @@ def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
               else
                 f none tDomsVars sDomsVars tDoms sDoms tDomsEqsDoms
 
-            match tfT, sfT with
-              | .forallE tName tDom tBod tBi, .forallE sName sDom sBod sBi =>
-                let mut refs := default
-                for (tvar, svar) in origDomVars do
-                  if tDom.containsFVar tvar || sDom.containsFVar svar then
-                    refs := refs.insert (tvar, svar)
-                    for (tvar', svar') in origDomVarsRefs.find! (tvar, svar) do
-                      refs := refs.insert (tvar', svar')
+            let cont tBod sBod := do 
+              withMaybeAbs tBod sBod fun newtsBod? tDomsVars sDomsVars tDoms sDoms tDomsEqsDoms => do
+                let (newtBod, newsBod) := newtsBod?.getD (tBod, sBod)
+                let mut newDomVars := #[]
+                for tsvar in origDomVars do
+                  newDomVars := newDomVars.push (origDomVarsToNewDomVars.find! tsvar)
+                pure ((⟨← mkFreshId⟩, `f, (← getLCtx).mkForall (newDomVars.map (fun ((tvar, _) : FVarId × FVarId) => .fvar tvar)) newtBod |>.toPExpr), tDomsVars, tDoms, (⟨← mkFreshId⟩, `g, (← getLCtx).mkForall (newDomVars.map (fun ((_, svar) : FVarId × FVarId) => .fvar svar)) newsBod |>.toPExpr), sDomsVars, sDoms, tDomsEqsDoms, absArgs')
 
-                let idt := ⟨← mkFreshId⟩
-                let ids := ⟨← mkFreshId⟩
-                withLCtx ((← getLCtx).mkLocalDecl idt tName tDom tBi) do
-                  withLCtx ((← getLCtx).mkLocalDecl ids sName sDom sBi) do
-                    let origDomVarsRefs := origDomVarsRefs.insert (idt, ids) refs
-                    let origDomVars := origDomVars.push (idt, ids)
-                    withMaybeAbs tDom sDom (fun newtsDom? tDomsVars sDomsVars tDoms sDoms tDomsEqsDoms => do
-                        if let some (newtDom, newsDom) := newtsDom? then
-                          let origDomVarsAbs := origDomVarsAbs.push (idt, ids)
-                          let idnewt := ⟨← mkFreshId⟩
-                          let idnews := ⟨← mkFreshId⟩
-                          withLCtx ((← getLCtx).mkLocalDecl idnewt tName newtDom tBi) do
-                            withLCtx ((← getLCtx).mkLocalDecl idnews sName newsDom sBi) do
-                              let origDomVarsToNewDomVars := origDomVarsToNewDomVars.insert (idt, ids) (idnewt, idnews)
-                              let absArgs' := absArgs'.insert idx'
-                              loop tBod sBod tDomsVars tDoms sDomsVars sDoms tDomsEqsDoms absArgs' (idx' + 1) origDomVars origDomVarsAbs origDomVarsRefs origDomVarsToNewDomVars
-                        else
-                          let origDomVarsToNewDomVars := origDomVarsToNewDomVars.insert (idt, ids) (idt, ids)
-                          loop tBod sBod tDomsVars tDoms sDomsVars sDoms tDomsEqsDoms absArgs' (idx' + 1) origDomVars origDomVarsAbs origDomVarsRefs origDomVarsToNewDomVars
-                      )
-                      tName sName
-              | tBod, sBod =>
-                withMaybeAbs tBod sBod fun newtsBod? tDomsVars sDomsVars tDoms sDoms tDomsEqsDoms => do
-                  let (newtBod, newsBod) := newtsBod?.getD (tBod, sBod)
-                  let mut newDomVars := #[]
-                  for tsvar in origDomVars do
-                    newDomVars := newDomVars.push (origDomVarsToNewDomVars.find! tsvar)
-                  pure ((⟨← mkFreshId⟩, `f, (← getLCtx).mkForall (newDomVars.map (.fvar ·.1)) newtBod |>.toPExpr), tDomsVars, tDoms, (⟨← mkFreshId⟩, `g, (← getLCtx).mkForall (newDomVars.map (.fvar ·.2)) newsBod |>.toPExpr), sDomsVars, sDoms, tDomsEqsDoms, absArgs')
+            if idx' < tArgs.size then
+              match (← whnfPure tfT.toPExpr).toExpr, (← whnfPure sfT.toPExpr).toExpr with
+                | .forallE tName tDom tBod tBi, .forallE sName sDom sBod sBi =>
+                  let mut refs := default
+                  for (tvar, svar) in origDomVars do
+                    if tDom.containsFVar tvar || sDom.containsFVar svar then
+                      refs := refs.insert (tvar, svar)
+                      for (tvar', svar') in origDomVarsRefs.find! (tvar, svar) do
+                        refs := refs.insert (tvar', svar')
 
+                  let idt := ⟨← mkFreshId⟩
+                  let ids := ⟨← mkFreshId⟩
+                  withLCtx ((← getLCtx).mkLocalDecl idt tName tDom tBi) do
+                    withLCtx ((← getLCtx).mkLocalDecl ids sName sDom sBi) do
+                      let origDomVarsRefs := origDomVarsRefs.insert (idt, ids) refs
+                      let origDomVars := origDomVars.push (idt, ids)
+                      withMaybeAbs tDom sDom (fun newtsDom? tDomsVars sDomsVars tDoms sDoms tDomsEqsDoms => do
+                          if let some (newtDom, newsDom) := newtsDom? then
+                            dbg_trace s!"DBG[4]: TypeChecker.lean:1105 (after if let some (newtDom, newsDom) := newtsD…)"
+                            let origDomVarsAbs := origDomVarsAbs.push (idt, ids)
+                            let idnewt := ⟨← mkFreshId⟩
+                            let idnews := ⟨← mkFreshId⟩
+                            withLCtx ((← getLCtx).mkLocalDecl idnewt tName newtDom tBi) do
+                              withLCtx ((← getLCtx).mkLocalDecl idnews sName newsDom sBi) do
+                                let origDomVarsToNewDomVars := origDomVarsToNewDomVars.insert (idt, ids) (idnewt, idnews)
+                                let absArgs' := absArgs'.insert idx'
+                                loop tBod sBod tDomsVars tDoms sDomsVars sDoms tDomsEqsDoms absArgs' (idx' + 1) origDomVars origDomVarsAbs origDomVarsRefs origDomVarsToNewDomVars
+                          else
+                            let origDomVarsToNewDomVars := origDomVarsToNewDomVars.insert (idt, ids) (idt, ids)
+                            loop tBod sBod tDomsVars tDoms sDomsVars sDoms tDomsEqsDoms absArgs' (idx' + 1) origDomVars origDomVarsAbs origDomVarsRefs origDomVarsToNewDomVars
+                        )
+                        tName sName
+                | tBod, sBod =>
+                  cont tBod sBod
+            else
+              cont tfT sfT
+
+          dbg_trace s!"DBG[3]: TypeChecker.lean:1127: tfT.toExpr={tfT.toExpr} {sfT.toExpr}"
           loop tfT.toExpr sfT.toExpr #[] #[] #[] #[] #[] default idx #[] #[] default default
                 
 
@@ -1149,7 +1168,9 @@ def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
     let taEqsaData? := taEqsa?.map (ta, sa, ·)
     taEqsaDatas := taEqsaDatas.push taEqsaData?
 
+    -- dbg_trace s!"DBG[5]: TypeChecker.lean:1154 {ta}, {sa}"
     let (tBoda, sBoda) ← if taEqsa?.isSome || absArgs.contains idx then
+      -- dbg_trace s!"DBG[3]: TypeChecker.lean:1155 (after let (tBoda, sBoda) ← if taEqsa?.isSome…)"
       tArgs' := tArgs'.push ta
       sArgs' := sArgs'.push sa
       taEqsas' := taEqsas'.push taEqsa?
@@ -1179,7 +1200,8 @@ def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
         pure $ (tBody.instantiate1 tBoda |>.toPExpr, sBody.instantiate1 sBoda |>.toPExpr)
       | _, _ => unreachable!
 
-  let (tEqs?, _, _) ← mkAppEqProof'
+  let (tEqs?, _, _) ← mkAppEqProof' tVars sVars tArgs' sArgs' taEqsas' tBod sBod tBodT sBodT tArgs'.size
+  -- dbg_trace s!"DBG[6]: TypeChecker.lean:1190: tEqs?={tArgs'.size} {sArgs'.size} {tEqs?}"
   -- TODO(perf) restrict data collection to the case of `taEqsa?.isSome || ret?.isSome`
   return (true, (tEqs?.map fun tEqs => (tEqs, taEqsaDatas)))
 
