@@ -408,7 +408,7 @@ def LamData.reverse : LamData EExpr → EExpr
   | .none => (.none, A, U, a)
 
   let newfaEqgx := EExpr.reverse f g (LocalContext.mkForall lctx #[U.2] U.1).toPExpr (lctx.mkForall #[U.2] U.1).toPExpr (Level.imax u v) faEqgx
-  .lam {u, v, A := newA, U := newU, f := g, a := newa, g := a, faEqgx := newfaEqgx, extra, lctx}
+  .lam {u, v, A := newA, U := newU, f := g, a := newa, g := f, faEqgx := newfaEqgx, extra, lctx}
 
 
 def HUVData.reverse (Ua Vb : PExpr) (v : Level) : HUVData EExpr → HUVData EExpr
