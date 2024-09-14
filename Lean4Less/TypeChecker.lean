@@ -843,7 +843,6 @@ def mkAppEqProof? (aVars bVars : Array PExpr) (Uas Vbs : Array PExpr) (ds? : Arr
         let extra ← if let .some (idaEqb, idbEqa, hAB) := d? then
           let B ← inferTypePure bVar
 
-          dbg_trace s!"DBG[1]: TypeChecker.lean:845 {idx}"
           let some fEqg := fEqg? | unreachable!
           let some aEqb := aEqb? | unreachable!
 
@@ -978,11 +977,15 @@ def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
   let (.true, tfEqsf?) ← if tfEqsf?.isSome then pure (.true, tfEqsf?.get!)
     else isDefEq tf sf | return (false, none)
 
-  let mkAppEqProof' tVars sVars tArgs' sArgs' taEqsas' tBod sBod tBodT sBodT idx := do -- TODO check that this uses up-to-date mutable variables
+  let mkAppEqProof' tVars sVars tArgs' sArgs' taEqsas' tBodFun sBodFun tBodArgs sBodArgs tBodT sBodT tEtaVars sEtaVars idx := do -- FIXME why do I have to pass in the mutable variables?
     let tLCtx := tVars.foldl (init := (← getLCtx)) fun acc (id, n, (type : PExpr)) => LocalContext.mkLocalDecl acc id n type default
     let sLCtx := sVars.foldl (init := (← getLCtx)) fun acc (id, n, (type : PExpr)) => LocalContext.mkLocalDecl acc id n type default
-    let tf' := tLCtx.mkLambda (tVars.map (.fvar ·.1)) tBod
-    let sf' := sLCtx.mkLambda (sVars.map (.fvar ·.1)) sBod
+    let tVars' := tVars[:tVars.size - tEtaVars].toArray
+    let sVars' := sVars[:sVars.size - sEtaVars].toArray
+    let tBodArgs' := tBodArgs[:tBodArgs.size - tEtaVars].toArray
+    let sBodArgs' := sBodArgs[:sBodArgs.size - sEtaVars].toArray
+    let tf' := tLCtx.mkLambda (tVars'.map (.fvar ·.1)) (Lean.mkAppN tBodFun (tBodArgs'.map (·.toExpr)))
+    let sf' := sLCtx.mkLambda (sVars'.map (.fvar ·.1)) (Lean.mkAppN sBodFun (sBodArgs'.map (·.toExpr)))
     let tfType := tLCtx.mkForall (tVars.map (.fvar ·.1)) tBodT
     let sfType := sLCtx.mkForall (sVars.map (.fvar ·.1)) sBodT
     -- dbg_trace s!"DBG[1]: {tArgs'.size} {sArgs'.size}"
@@ -993,17 +996,21 @@ def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
 
   let mut taEqsaDatas := #[]
 
-  let mut tBod := tf
-  let mut sBod := sf
+  let mut tBodFun : PExpr := tf
+  let mut tBodArgs : Array PExpr := #[]
+  let mut sBodFun : PExpr := sf
+  let mut sBodArgs : Array PExpr := #[]
   let mut tArgs' := #[]
   let mut sArgs' := #[]
   let mut tVars : Array (FVarId × Name × PExpr) := #[]
   let mut sVars : Array (FVarId × Name × PExpr) := #[]
   let mut tArgsVars : Array FVarId := #[]
   let mut sArgsVars : Array FVarId := #[]
+  let mut tEtaVars : Nat := 0 -- number of vars that can be eliminated from the lambda by eta reduction
+  let mut sEtaVars : Nat := 0
   let mut absArgs : HashSet Nat := default
-  let mut tfT ← inferTypePure tBod
-  let mut sfT ← inferTypePure sBod
+  let mut tfT ← inferTypePure tBodFun
+  let mut sfT ← inferTypePure sBodFun
   let mut tBodT := tfT
   let mut sBodT := sfT
   let mut taEqsas' := #[]
@@ -1033,7 +1040,7 @@ def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
           if idx == 0 && tfEqsf?.isSome then
             pure (tfEqsf?, tf, sf)
           else
-            mkAppEqProof' tVars sVars tArgs' sArgs' taEqsas' tBod sBod tBodT sBodT idx
+            mkAppEqProof' tVars sVars tArgs' sArgs' taEqsas' tBodFun sBodFun tBodArgs sBodArgs tBodT sBodT tEtaVars sEtaVars idx
 
         -- TODO
         let ((tfVar : FVarId × Name × PExpr), tfTAbsDomsVars, tfTAbsDoms, (sfVar : FVarId × Name × PExpr), sfTAbsDomsVars, sfTAbsDoms, tfTAbsDomsEqsfTAbsDoms?, absArgs') ← do
@@ -1066,10 +1073,14 @@ def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
 
                 let tsort ← ensureSortCorePure (← inferTypePure tType.toPExpr) tType.toPExpr
                 let Mt := (← getLCtx).mkForall (depVars.map fun (tvar, _) => (Expr.fvar tvar)) tsort
-                let MtVar := (⟨← mkFreshId⟩, (tName.toString ++ "M").toName, Mt.toPExpr)
+                let MtNamePrefix := tName.getRoot.toString ++ "T" |>.toName
+                let MtName := tName.replacePrefix (tName.getRoot) MtNamePrefix
+                let MtVar := (⟨← mkFreshId⟩, MtName, Mt.toPExpr)
                 let ssort ← ensureSortCorePure (← inferTypePure sType.toPExpr) sType.toPExpr
                 let Ms := (← getLCtx).mkForall (depVars.map fun (_, svar) => (Expr.fvar svar)) ssort
-                let MsVar := (⟨← mkFreshId⟩, (sName.toString ++ "M").toName, Ms.toPExpr)
+                let MsNamePrefix := sName.getRoot.toString ++ "T" |>.toName
+                let MsName := sName.replacePrefix (sName.getRoot) MsNamePrefix
+                let MsVar := (⟨← mkFreshId⟩, MsName, Ms.toPExpr)
 
                 withLCtx ((← getLCtx).mkLocalDecl MtVar.1 MtVar.2.1 MtVar.2.2 tBi) do
                   withLCtx ((← getLCtx).mkLocalDecl MsVar.1 MsVar.2.1 MsVar.2.2 sBi) do
@@ -1113,7 +1124,6 @@ def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
                       let origDomVars := origDomVars.push (idt, ids)
                       withMaybeAbs tDom sDom (fun newtsDom? tDomsVars sDomsVars tDoms sDoms tDomsEqsDoms => do
                           if let some (newtDom, newsDom) := newtsDom? then
-                            dbg_trace s!"DBG[4]: TypeChecker.lean:1105 (after if let some (newtDom, newsDom) := newtsD…)"
                             let origDomVarsAbs := origDomVarsAbs.push (idt, ids)
                             let idnewt := ⟨← mkFreshId⟩
                             let idnews := ⟨← mkFreshId⟩
@@ -1132,12 +1142,12 @@ def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
             else
               cont tfT sfT
 
-          dbg_trace s!"DBG[3]: TypeChecker.lean:1127: tfT.toExpr={tfT.toExpr} {sfT.toExpr}"
           loop tfT.toExpr sfT.toExpr #[] #[] #[] #[] #[] default idx #[] #[] default default
-                
 
-        tBod := Expr.fvar tfVar.1 |>.toPExpr
-        sBod := Expr.fvar sfVar.1 |>.toPExpr
+        tBodFun := Expr.fvar tfVar.1 |>.toPExpr
+        sBodFun := Expr.fvar sfVar.1 |>.toPExpr
+        tBodArgs := #[]
+        sBodArgs := #[]
         tBodT := tfVar.2.2
         sBodT := sfVar.2.2
         taEqsas' := tfTAbsDomsEqsfTAbsDoms? ++ #[tfEqsf'?]
@@ -1182,13 +1192,17 @@ def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
       sVars := sVars.push sVar
       tArgsVars := tArgsVars.push tVar.1
       sArgsVars := sArgsVars.push sVar.1
+      tEtaVars := tEtaVars + 1
+      sEtaVars := sEtaVars + 1
 
       pure (Expr.fvar tVar.1 |>.toPExpr, Expr.fvar sVar.1 |>.toPExpr)
     else 
+      tEtaVars := 0
+      sEtaVars := 0
       pure (ta, sa)
 
-    tBod := tBod.toExpr.app tBoda |>.toPExpr
-    sBod := sBod.toExpr.app sBoda |>.toPExpr
+    tBodArgs := tBodArgs.push tBoda
+    sBodArgs := sBodArgs.push sBoda
 
     (tfT, sfT) ← match (← whnfPure tfT).toExpr, (← whnfPure sfT).toExpr with
       | .forallE _ _ tBody _, .forallE _ _ sBody _ =>
@@ -1200,7 +1214,7 @@ def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
         pure $ (tBody.instantiate1 tBoda |>.toPExpr, sBody.instantiate1 sBoda |>.toPExpr)
       | _, _ => unreachable!
 
-  let (tEqs?, _, _) ← mkAppEqProof' tVars sVars tArgs' sArgs' taEqsas' tBod sBod tBodT sBodT tArgs'.size
+  let (tEqs?, _, _) ← mkAppEqProof' tVars sVars tArgs' sArgs' taEqsas' tBodFun sBodFun tBodArgs sBodArgs tBodT sBodT tEtaVars sEtaVars tArgs'.size
   -- dbg_trace s!"DBG[6]: TypeChecker.lean:1190: tEqs?={tArgs'.size} {sArgs'.size} {tEqs?}"
   -- TODO(perf) restrict data collection to the case of `taEqsa?.isSome || ret?.isSome`
   return (true, (tEqs?.map fun tEqs => (tEqs, taEqsaDatas)))
