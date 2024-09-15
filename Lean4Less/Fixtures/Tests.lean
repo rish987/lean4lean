@@ -191,11 +191,13 @@ set_option pp.all true
 --   | .succ _ => (fun (x : T (test1 .zero)) => Bool) t
 -- end
 
-axiom G : P → Type
+axiom G : P → Prop
 axiom H : (p : P) → G p → Type
 axiom H.mk : (p : P) → (g : G p) → H p g
+axiom gq : G q
+axiom gp : G p
 
-noncomputable def pushTest : (g : G q) → H q g := fun (g : G p) => H.mk p g
+noncomputable def pushTest : H q gq := H.mk p gp
 
 -- #print BitVec.mul_def
 
