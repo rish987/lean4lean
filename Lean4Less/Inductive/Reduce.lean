@@ -1,26 +1,19 @@
 import Lean.Structure
 import Lean4Lean.Expr
 import Lean4Less.EExpr
+import Lean4Less.Ext
 
 namespace Lean4Less
 open Lean
 
 section
 
-structure ExtMethods (m : Type → Type u) where
-  isDefEq : PExpr → PExpr → m (Bool × Option EExpr)
-  isDefEqPure : PExpr → PExpr → m Bool
-  whnf  : PExpr → m (PExpr × Option EExpr)
-  inferTypePure : PExpr → m PExpr
-  withPure : {T : Type} → m T → m T
-  appPrfIrrelHEq : PExpr → PExpr → EExpr → PExpr → PExpr → m EExpr
-  appPrfIrrel : PExpr → PExpr →  PExpr → m EExpr
-  appHEqTrans? : PExpr → PExpr → PExpr → Option EExpr → Option EExpr → m (Option EExpr)
+structure ExtMethodsR (m : Type → Type u) extends ExtMethods m where
   isDefEqApp' : PExpr → PExpr → HashMap Nat (Option EExpr) → m (Bool × Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))
   isDefEqApp : PExpr → PExpr → HashMap Nat (Option EExpr) → m (Bool × Option EExpr)
 
 variable [Monad m] (env : Environment)
-  (meth : ExtMethods m)
+  (meth : ExtMethodsR m)
 
 def getFirstCtor (dName : Name) : Option Name := do
   let some (.inductInfo info) := env.find? dName | none
