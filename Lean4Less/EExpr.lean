@@ -38,6 +38,12 @@ aEqb : PExpr
 bEqa : PExpr
 deriving Inhabited
 
+structure SorryData where
+u    : Level
+A    : PExpr
+B    : PExpr
+deriving Inhabited
+
 
 
 structure LamABData (EExpr : Type) :=
@@ -249,6 +255,7 @@ inductive EExpr where
 | refl     : ReflData → EExpr
 | prfIrrel : PIData EExpr → EExpr
 | fvar     : FVarData → EExpr
+| sry      : SorryData → EExpr
 deriving Inhabited
 
 -- def EExpr.reverse : EExpr → EExpr
@@ -379,6 +386,9 @@ def PIData.toExpr : PIData EExpr → Expr
 def FVarData.toExpr : FVarData → Expr
 | {aEqb, ..} => aEqb
 
+def SorryData.toExpr : SorryData → Expr
+| {u, A, B} => Lean.mkAppN (.const `sorryAx [u]) #[A, B, .const `Bool.false []]
+
 def EExpr.toExpr : EExpr → Expr
 | .other e => e
 | .lam d
@@ -388,7 +398,8 @@ def EExpr.toExpr : EExpr → Expr
 | .symm d
 | .refl d
 | .prfIrrel d
-| .fvar d  => d.toExpr
+| .fvar d
+| .sry d  => d.toExpr
 
 end
 
@@ -465,6 +476,10 @@ def PIData.reverse : PIData EExpr → EExpr
     (.HEq {Q := P, hPQ := hPQ.reverse P Q (Expr.sort 0).toPExpr (Expr.sort 0).toPExpr 1}, Q)
   .prfIrrel {P := newP, p := q, q := p, extra := extra}
 
+def SorryData.reverse : SorryData → EExpr
+| {u, A, B} =>
+  .sry {u, A := B, B := A}
+
 def EExpr.reverse (t s tType sType : PExpr) (lvl : Level) : EExpr → EExpr
 | .other e => .symm {u := lvl, A := tType, B := sType, a := t, b := s, aEqb := .other e}
 | .lam d
@@ -473,7 +488,8 @@ def EExpr.reverse (t s tType sType : PExpr) (lvl : Level) : EExpr → EExpr
 | .trans d
 | .symm d
 | .refl d
-| .prfIrrel d  => d.reverse
+| .prfIrrel d
+| .sry d  => d.reverse
 | .fvar d  => .fvar d.reverse
 
 end

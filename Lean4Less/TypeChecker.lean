@@ -920,13 +920,22 @@ def reduceBinNatOp (op : Name) (f : Nat → Nat → Nat) (a b : PExpr) : RecM (O
   let (b', pb?) := (← whnf b)
   let some v1 := natLitExt? a' | return none
   let some v2 := natLitExt? b' | return none
-  let ret? ← if pa?.isSome || pb?.isSome then
+  let mut appEqapp'? ← if pa?.isSome || pb?.isSome then
       let pa ← pa?.getDM (mkHRefl (.succ .zero) (Expr.const `Nat []).toPExpr a')
       let pb ← pb?.getDM (mkHRefl (.succ .zero) (Expr.const `Nat []).toPExpr b')
       pure $ .some $ Lean.mkAppN (← getConst `L4L.appHEqBinNatFn []) #[.const `Nat [], .const `Nat [], .const op [], a, a', b, b', pa, pb] |>.toEExpr
     else
       pure none
-  return some <| ((Expr.lit <| .natVal <| f v1 v2).toPExpr, ret?)
+  let result := (Expr.lit <| .natVal <| f v1 v2).toPExpr
+  let app := Lean.mkAppN (.const op []) #[a, b] |>.toPExpr
+  let app' := Lean.mkAppN (.const op []) #[a', b'] |>.toPExpr
+  let sorryProof? ← if op == `Nat.gcd then
+      pure $ .some $ .sry {u := 0, A := a', B := b'}
+    else 
+      pure none
+  let ret? ← appHEqTrans? app app' result appEqapp'? sorryProof?
+
+  return some <| (result, ret?)
 
 /--
 Reduces the application `f a b` to a boolean expression if `a` and `b` can be
