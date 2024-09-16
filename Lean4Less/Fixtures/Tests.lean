@@ -197,7 +197,7 @@ axiom H.mk : (p : P) → (g : G p) → H p g
 axiom gq : G q
 axiom gp : G p
 
-noncomputable def pushTest : H q gq := H.mk p gp
+noncomputable def pushTest : (g : G q) → H q g := fun (g : G p) => H.mk p g
 
 -- #print BitVec.mul_def
 
