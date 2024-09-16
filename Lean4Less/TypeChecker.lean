@@ -449,20 +449,23 @@ def smartCast (tl tr e : PExpr) (p? : Option EExpr := none) : RecM PExpr := do
     if let some p := p? then
       pure $ .some p
     else
-      -- let rec lamCount (e tl tr : Expr) := do
-      --   match e, (← whnfPure tl.toPExpr).toExpr, (← whnfPure tr.toPExpr).toExpr with
-      --   | .lam _ _ b _, .forallE nl tdl tbl bil, .forallE nr tdr tbr bir =>
-      --     let idl := ⟨← mkFreshId⟩
-      --     let idr := ⟨← mkFreshId⟩
-      --     withLCtx ((← getLCtx).mkLocalDecl idl nl tdl bil) do
-      --       withLCtx ((← getLCtx).mkLocalDecl idr nr tdr bir) do
-      --         let (c, atbl, atbr) ← lamCount b (tbl.instantiate1 (.fvar idl)) (tbr.instantiate1 (.fvar idr))
-      --         pure $ (c + 1, (← getLCtx).mkForall #[(.fvar idl)] atbl, (← getLCtx).mkForall #[(.fvar idr)] atbr)
-      --   | _, tl, tr => pure (0, tl, tr)
-      -- let (nLams, tl, tr) ← lamCount e tl tr
-      -- let tl := tl.toPExpr
-      -- let tr := tr.toPExpr
+      let rec lamCount (e tl tr : Expr) := do
+        match e, (← whnfPure tl.toPExpr).toExpr, (← whnfPure tr.toPExpr).toExpr with
+        | .lam _ _ b _, .forallE nl tdl tbl bil, .forallE nr tdr tbr bir =>
+          let idl := ⟨← mkFreshId⟩
+          let idr := ⟨← mkFreshId⟩
+          withLCtx ((← getLCtx).mkLocalDecl idl nl tdl bil) do
+            withLCtx ((← getLCtx).mkLocalDecl idr nr tdr bir) do
+              let (c, atbl, atbr) ← lamCount b (tbl.instantiate1 (.fvar idl)) (tbr.instantiate1 (.fvar idr))
+              pure $ (c + 1, (← getLCtx).mkForall #[(.fvar idl)] atbl, (← getLCtx).mkForall #[(.fvar idr)] atbr)
+        | _, tl, tr => pure (0, tl, tr)
+      let (nLams, tl, tr) ← lamCount e tl tr
+      let tl := tl.toPExpr
+      let tr := tr.toPExpr
       let (ret, p?) ←
+        if nLams > 0 then
+          isDefEqForall tl tr nLams
+        else
           isDefEq tl tr 
       assert! ret == true
       pure p?
