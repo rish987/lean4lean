@@ -31,7 +31,8 @@ def primitives : NameSet := .ofList [
   ``Bool, ``Bool.false, ``Bool.true,
   ``Nat, ``Nat.zero, ``Nat.succ,
   ``Nat.add, ``Nat.pred, ``Nat.sub, ``Nat.mul, ``Nat.pow,
-  ``Nat.gcd, ``Nat.mod, ``Nat.div, ``Nat.beq, ``Nat.ble,
+  -- ``Nat.gcd, 
+  ``Nat.mod, ``Nat.div, ``Nat.beq, ``Nat.ble,
   ``String, ``String.mk]
 
 def checkName (env : Environment) (n : Name)

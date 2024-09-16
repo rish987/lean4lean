@@ -288,6 +288,7 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
         let aType ← inferType' a inferOnly
         let dType := fType.bindingDomain!
         if !(← isDefEq dType aType) then
+          dbg_trace s!"DBG[1]: TypeChecker.lean:291: e={e}"
           throw <| .appTypeMismatch (← getEnv) (← getLCtx) e fType aType
         pure <| fType.bindingBody!.instantiate1 a
     | .letE .. => inferLet e inferOnly
@@ -436,7 +437,7 @@ def reduceNat (e : Expr) : RecM (Option Expr) := do
     if f == ``Nat.sub then return ← reduceBinNatOp Nat.sub a b
     if f == ``Nat.mul then return ← reduceBinNatOp Nat.mul a b
     if f == ``Nat.pow then return ← reduceBinNatOp Nat.pow a b
-    if f == ``Nat.gcd then return ← reduceBinNatOp Nat.gcd a b
+    -- if f == ``Nat.gcd then return ← reduceBinNatOp Nat.gcd a b
     if f == ``Nat.mod then return ← reduceBinNatOp Nat.mod a b
     if f == ``Nat.div then return ← reduceBinNatOp Nat.div a b
     if f == ``Nat.beq then return ← reduceBinNatPred Nat.beq a b
