@@ -29,7 +29,7 @@ def mkAppEqProof? (aVars bVars : Array PExpr) (Uas Vbs : Array PExpr) (ds? : Arr
         let aVar := aVars[idx]!
         let bVar := bVars[idx]!
         let d? := ds?[idx]!
-        let A ← meth.inferTypePure aVar
+        let A ← meth.inferTypePure aVar 201
 
         let lctx ← getLCtx
 
@@ -48,7 +48,7 @@ def mkAppEqProof? (aVars bVars : Array PExpr) (Uas Vbs : Array PExpr) (ds? : Arr
         let (U, V) := ((Ua, aVar), (Vb, bVar))
 
         let extra ← if let .some (idaEqb, idbEqa, hAB) := d? then
-          let B ← meth.inferTypePure bVar
+          let B ← meth.inferTypePure bVar 202
 
           let some fEqg := fEqg? | unreachable!
           let some aEqb := aEqb? | unreachable!
@@ -116,14 +116,14 @@ def mkAppEqProof (T S : PExpr) (as bs : Array PExpr) (asEqbs? : Array (Option EE
       {name := bName, dom := B, info := bBi}) := (dA, dB)
 
     -- sanity check
-    let aType ← meth.inferTypePure a
-    let bType ← meth.inferTypePure b
+    let aType ← meth.inferTypePure a 203
+    let bType ← meth.inferTypePure b 204
     let .true ← meth.isDefEqPure A aType | do
       throw $ .other s!"expected: {A}\n inferred: {aType}"
     let .true ← meth.isDefEqPure B bType | do
-      let app := Lean.mkAppN g.toExpr (bs[:5].toArray.map PExpr.toExpr)
-      let appType ← meth.whnfPure $ ← meth.inferTypePure app.toPExpr
-      let .forallE _ _domType _ _ := appType.toExpr | unreachable!
+      -- let app := Lean.mkAppN g.toExpr (bs[:5].toArray.map PExpr.toExpr)
+      -- let appType ← meth.whnfPure $ ← meth.inferTypePure app.toPExpr 205
+      -- let .forallE _ _domType _ _ := appType.toExpr | unreachable!
       -- dbg_trace s!""
       -- dbg_trace s!"app: {appType}"
       -- dbg_trace s!"b: {bType}"
@@ -140,7 +140,7 @@ def mkAppEqProof (T S : PExpr) (as bs : Array PExpr) (asEqbs? : Array (Option EE
       pure AEqB?
     else pure (none)
 
-    let sort ← meth.inferTypePure A
+    let sort ← meth.inferTypePure A 206
     let .sort lvl := (← meth.ensureSortCorePure sort A).toExpr | throw $ .other "unreachable 5"
     let ida := ⟨← mkFreshId⟩
     withLCtx ((← getLCtx).mkLocalDecl ida aName A aBi) do
@@ -204,12 +204,12 @@ def forallAbs (max : Nat) (tfT sfT : Expr) : m
             depVars := depVars.push $ origDomVarsToNewDomVars.find! (tvar, svar)
             origDepVars := origDepVars.push $ (tvar, svar)
 
-        let tsort ← meth.ensureSortCorePure (← meth.inferTypePure tType.toPExpr) tType.toPExpr
+        let tsort ← meth.ensureSortCorePure (← meth.inferTypePure tType.toPExpr 207) tType.toPExpr
         let Mt := (← getLCtx).mkForall (depVars.map fun (tvar, _) => (Expr.fvar tvar)) tsort
         let MtNamePrefix := tName.getRoot.toString ++ "T" |>.toName
         let MtName := tName.replacePrefix (tName.getRoot) MtNamePrefix
         let MtVar := (⟨← mkFreshId⟩, MtName, Mt.toPExpr)
-        let ssort ← meth.ensureSortCorePure (← meth.inferTypePure sType.toPExpr) sType.toPExpr
+        let ssort ← meth.ensureSortCorePure (← meth.inferTypePure sType.toPExpr 208) sType.toPExpr
         let Ms := (← getLCtx).mkForall (depVars.map fun (_, svar) => (Expr.fvar svar)) ssort
         let MsNamePrefix := sName.getRoot.toString ++ "T" |>.toName
         let MsName := sName.replacePrefix (sName.getRoot) MsNamePrefix
@@ -280,7 +280,7 @@ def forallAbs (max : Nat) (tfT sfT : Expr) : m
               let ids := ⟨← mkFreshId⟩
               let idtEqs := ⟨← mkFreshId⟩
               let idsEqt := ⟨← mkFreshId⟩
-              let sort ← meth.inferTypePure tDom.toPExpr
+              let sort ← meth.inferTypePure tDom.toPExpr 209
               let .sort lvl := (← meth.ensureSortCorePure sort tDom).toExpr | unreachable!
               let teqsType := mkAppN (.const `HEq [lvl]) #[tDom, (.fvar idt), sDom, (.fvar ids)]
               let seqtType := mkAppN (.const `HEq [lvl]) #[sDom, (.fvar ids), tDom, (.fvar idt)]
@@ -334,8 +334,8 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
   let mut tEtaVars : Nat := 0 -- number of vars that can be eliminated from the lambda by eta reduction
   let mut sEtaVars : Nat := 0
   let mut absArgs : HashSet Nat := default
-  let mut tfT ← meth.inferTypePure tBodFun
-  let mut sfT ← meth.inferTypePure sBodFun
+  let mut tfT ← meth.inferTypePure tBodFun 210
+  let mut sfT ← meth.inferTypePure sBodFun 211
   let mut tBodT := tfT
   let mut sBodT := sfT
   let mut taEqsas' := #[]
@@ -467,8 +467,8 @@ def isDefEqApp''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
     taEqsas := taEqsas.push (p?.map (ta, sa, ·))
     idx := idx + 1
 
-  let mut tfT ← meth.inferTypePure tf
-  let mut sfT ← meth.inferTypePure sf
+  let mut tfT ← meth.inferTypePure tf 212
+  let mut sfT ← meth.inferTypePure sf 213
 
   let tEqs? ← mkAppEqProof meth tfT sfT tArgs sArgs (taEqsas.map (·.map (·.2.2))) tf sf _ret?
 

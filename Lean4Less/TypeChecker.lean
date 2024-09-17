@@ -76,7 +76,7 @@ structure Methods where
   whnf (e : PExpr) : MEE
   whnfPure (e : PExpr) : M PExpr
   inferType (e : Expr) : MPE
-  inferTypePure (e : PExpr) : M PExpr
+  inferTypePure (e : PExpr) (n : Nat) : M PExpr
 
 abbrev RecM := ReaderT Methods M
 abbrev RecPE := RecM (PExpr × (Option PExpr))
@@ -188,7 +188,9 @@ unnecessary checks in the case that `e` is already known to be well-typed.
 -/
 def inferType (e : Expr) : RecPE := fun m => m.inferType e
 
-def inferTypePure (e : PExpr) : RecM PExpr := fun m => m.inferTypePure e
+def inferTypePure (e : PExpr) (n : Nat) : RecM PExpr := fun m => do
+  let ret ← m.inferTypePure e n
+  pure ret
 
 def getConst (n : Name) (lvls : List Level) : RecM Expr := do
   pure $ .const n lvls
@@ -196,15 +198,15 @@ def getConst (n : Name) (lvls : List Level) : RecM Expr := do
 Gets the universe level of the sort that the type of `e` inhabits.
 -/
 def getTypeLevel (e : PExpr) : RecM (Level × PExpr) := do
-  let eType ← inferTypePure e
-  let eTypeSort ← inferTypePure eType
+  let eType ← inferTypePure e 1
+  let eTypeSort ← inferTypePure eType 2
   let (eTypeSort', es?) ← ensureSortCore eTypeSort eType
   assert 4 $ es? == none
   pure (eTypeSort'.toExpr.sortLevel!, eType)
 
 def appHEqSymm (t s : PExpr) (theqs : EExpr) : RecM EExpr := do
   let (lvl, tType) ← getTypeLevel t
-  let sType ← inferTypePure s
+  let sType ← inferTypePure s 3
   pure $ theqs.reverse t s tType sType lvl
 
 def appHEqSymm? (t s : PExpr) (theqs? : Option EExpr) : RecM (Option EExpr) := do
@@ -244,7 +246,7 @@ def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : P
       if !defEq then return (false, none)
       pure p?
     else pure none
-    let sort ← inferTypePure tDom
+    let sort ← inferTypePure tDom 4
     let .sort lvl := (← ensureSortCorePure sort tDom).toExpr | throw $ .other "unreachable 5"
     let idt := ⟨← mkFreshId⟩
     withLCtx ((← getLCtx).mkLocalDecl idt tName tDom tBi) do
@@ -299,8 +301,8 @@ def appHEqTrans? (t s r : PExpr) (theqs? sheqr? : Option EExpr) : RecM (Option E
   | none, none => return none
   | .some theqs, .some sheqr =>
     let (lvl, tType) ← getTypeLevel t
-    let sType ← inferTypePure s
-    let rType ← inferTypePure r
+    let sType ← inferTypePure s 5
+    let rType ← inferTypePure r 6
 
     return .some $ .trans {u := lvl, A := tType, B := sType, C := rType, a := t, b := s, c := r, aEqb := theqs, bEqc := sheqr}
   | none, .some sheqr => return sheqr
@@ -392,7 +394,7 @@ def isDefEqForall (t s : PExpr) (numBinds := 0) : RecB := do
           let (U, V) := ((Ua, a), (Vx, x))
 
           let extra ← if let .some (b, idaEqb, idbEqa, hAB) := d? then
-            let B ← inferTypePure b
+            let B ← inferTypePure b 7
             let aEqb := (Expr.fvar idaEqb).toPExpr
             let bEqa := (Expr.fvar idbEqa).toPExpr
             pure $ .AB {B, b, vaEqb := {aEqb, bEqa}, hAB}
@@ -408,7 +410,7 @@ def isDefEqForall (t s : PExpr) (numBinds := 0) : RecB := do
 
 def smartCast (tl tr e : PExpr) (p? : Option EExpr := none) : RecM PExpr := do
   let mkCast' n tl tr p e (prfVars prfVals : Array Expr) := do
-    let sort ← inferTypePure tr.toPExpr
+    let sort ← inferTypePure tr.toPExpr 8
     let sort' ← ensureSortCorePure sort tl.toPExpr
     let p := p.toExpr.replaceFVars prfVars prfVals
     let lvl := sort'.toExpr.sortLevel!
@@ -549,7 +551,7 @@ def inferApp (e : PExpr) : RecM PExpr := do
   e.toExpr.withApp fun f args => do
   let f := f.toPExpr
   let args := args.map (·.toPExpr)
-  let mut fType ← inferTypePure f
+  let mut fType ← inferTypePure f 9
   let mut j := 0
   for i in [:args.size] do
     match fType.toExpr with
@@ -627,7 +629,7 @@ def inferLet (e : Expr) : RecPE := loop #[] #[] false e where
 Checks if the type of `e` is definitionally equal to `Prop`.
 -/
 def isProp (e : PExpr) : RecB := do
-  let t ← inferTypePure e
+  let t ← inferTypePure e 10
   let (t', p?) ← whnf t
   return (t' == Expr.prop.toPExpr, p?)
 
@@ -763,9 +765,13 @@ def inferType' (e : Expr) : RecPE := do
 --   modify fun s => { s with inferTypeI := s.inferTypeI.insert e r }
 --   return r
 
-def inferTypePure' (e : PExpr) : RecM PExpr := do -- TODO make more efficient
-  let eT ← runLeanMinus $ Lean.TypeChecker.inferTypeCheck e.toExpr
-  pure eT.toPExpr
+def inferTypePure' (e : PExpr) (n : Nat) : RecM PExpr := do -- TODO make more efficient
+  try
+    let eT ← runLeanMinus $ Lean.TypeChecker.inferTypeCheck e.toExpr
+    pure eT.toPExpr
+  catch e =>
+    dbg_trace s!"DBG[3]: TypeChecker.lean:772 {n}"
+    throw e
 
 /--
 Reduces `e` to its weak-head normal form, without unfolding definitions. This
@@ -795,14 +801,14 @@ def whnfFVar (e : PExpr) (cheapRec cheapProj : Bool) : RecEE := do
 def appProjThm? (structName : Name) (projIdx : Nat) (struct structN : PExpr) (structEqstructN? : Option EExpr) : RecM (Option EExpr) := do
   structEqstructN?.mapM fun structEqstructN => do
     let env ← getEnv
-    let structType ← whnfPure (← inferTypePure struct)
+    let structType ← whnfPure (← inferTypePure struct 11)
     let .const typeC lvls := if structType.toExpr.isApp then structType.toExpr.withApp fun f _ => f else structType.toExpr | unreachable!
     let .inductInfo {ctors := [ctor], numParams, ..} ← env.get typeC | unreachable!
     let params := structType.toExpr.getAppArgs
     let ctorInfo ← env.get ctor
     let ctorType := ctorInfo.instantiateTypeLevelParams lvls |>.toPExpr
 
-    let structSort ← inferTypePure structType
+    let structSort ← inferTypePure structType 12
     let structLvl := structSort.toExpr.sortLevel!
     
     let ids := ⟨← mkFreshId⟩
@@ -824,7 +830,7 @@ def appProjThm? (structName : Name) (projIdx : Nat) (struct structN : PExpr) (st
 
       let U := ((← getLCtx).mkLambda #[s] projOutType).toPExpr
 
-      let projSort ← inferTypePure (Expr.app U structN).toPExpr
+      let projSort ← inferTypePure (Expr.app U structN).toPExpr 13
       let .sort projLvl := (← ensureSortCorePure projSort default).toExpr | throw $ .other "unreachable 4"
 
       let f := (← getLCtx).mkLambda #[s] (.proj structName projIdx s) |>.toPExpr
@@ -1019,11 +1025,11 @@ def isDefEqLambda (t s : PExpr) : RecB := do
         let u := ALvl
         let (UaLvl, Ua) ← getTypeLevel fa
         let v := UaLvl
-        let Vx ← inferTypePure gx
+        let Vx ← inferTypePure gx 14
         let faEqgx ← faEqgx?.getDM $ mkHRefl UaLvl Ua fa
         let (U, V) := ((Ua, a), (Vx, x))
         let extra ← if let some (b, idaEqb, idbEqa, hAB) := d? then
-          let B ← inferTypePure b
+          let B ← inferTypePure b 15
           let aEqb := (Expr.fvar idaEqb).toPExpr
           let bEqa := (Expr.fvar idbEqa).toPExpr
           pure $ .ABUV {B, b, hAB, vaEqb := {aEqb, bEqa}} {V}
@@ -1083,7 +1089,7 @@ Assuming that `s` has a function type `(x : A) -> B x`, it η-expands to
 -/
 def tryEtaExpansionCore (t s : PExpr) : RecB := do
   if t.toExpr.isLambda && !s.toExpr.isLambda then
-    let .forallE name ty _ bi := (← whnfPure (← inferTypePure s)).toExpr | return (false, none)
+    let .forallE name ty _ bi := (← whnfPure (← inferTypePure s 16)).toExpr | return (false, none)
     isDefEq t (Expr.lam name ty (.app s (.bvar 0)) bi).toPExpr -- NOTE: same proof should be okay because of eta-expansion when typechecking
   else return (false, none)
 
@@ -1110,7 +1116,7 @@ def tryEtaStructCore (t s : PExpr) : RecB := do
   let .ctorInfo fInfo ← env.get f | return (false, none)
   unless s.toExpr.getAppNumArgs == fInfo.numParams + fInfo.numFields do return (false, none)
   unless isStructureLike env fInfo.induct do return (false, none)
-  unless ← isDefEqPure (← inferTypePure t) (← inferTypePure s) do return (false, none)
+  unless ← isDefEqPure (← inferTypePure t 17) (← inferTypePure s 18) do return (false, none)
   let args := s.toExpr.getAppArgs
   let mut exptE := ctor
   for i in [:fInfo.numParams] do
@@ -1256,11 +1262,11 @@ Checks if `t` and `s` are definitionally equivalent according to proof irrelevan
 (that is, they are proofs of the same proposition).
 -/
 def isDefEqProofIrrel (t s : PExpr) : RecLB := do
-  let tType ← inferTypePure t
+  let tType ← inferTypePure t 19
   let (prop, pprop?) ← isProp tType
   assert 12 $ pprop? == none
   if !prop then return (.undef, none)
-  let sType ← inferTypePure s
+  let sType ← inferTypePure s 20
   let (ret, pt?) ← isDefEq tType sType
   if ret == .true then
     let p ← if let some pt := pt? then
@@ -1459,14 +1465,14 @@ with one constructor without any fields or indices).
 -- NOTE: It is okay for this to be a non-congruence-proving function,
 -- because any two instances of a unit type must be definitionally equal to a constructor application
 def isDefEqUnitLike (t s : PExpr) : RecB := do
-  let (tType, p?) ← whnf (← inferTypePure t)
+  let (tType, p?) ← whnf (← inferTypePure t 21)
   assert 13 $ p? == none
   let .const I _ := tType.toExpr.getAppFn | return (false, none)
   let env ← getEnv
   let .inductInfo { isRec := false, ctors := [c], numIndices := 0, .. } ← env.get I
     | return (false, none)
   let .ctorInfo { numFields := 0, .. } ← env.get c | return (false, none)
-  if ← isDefEqCorePure tType (← inferTypePure s) then
+  if ← isDefEqCorePure tType (← inferTypePure s 22) then
     return (true, none)
   else
     return (false, none)
@@ -1575,7 +1581,7 @@ def Methods.withFuel : Nat → Methods
       whnf := fun _ => throw .deepRecursion
       whnfPure := fun _ => throw .deepRecursion
       inferType := fun _ _ => throw .deepRecursion
-      inferTypePure := fun _ _ => throw .deepRecursion }
+      inferTypePure := fun _ _ _ => throw .deepRecursion }
   | n + 1 =>
     { isDefEqCore := fun t s => isDefEqCore' t s (withFuel n)
       isDefEqCorePure := fun t s => isDefEqCorePure' t s (withFuel n)
@@ -1583,7 +1589,7 @@ def Methods.withFuel : Nat → Methods
       whnf := fun e => whnf' e (withFuel n)
       whnfPure := fun e => whnfPure' e (withFuel n)
       inferType := fun e => inferType' e (withFuel n)
-      inferTypePure := fun e => inferTypePure' e (withFuel n) }
+      inferTypePure := fun e m => inferTypePure' e m (withFuel n) }
 
 /--
 Runs `x` with a limit on the recursion depth.
@@ -1609,7 +1615,7 @@ def check (e : Expr) (lps : List Name) : MPE := do
   
 
 def checkPure (e : Expr) (lps : List Name) : M PExpr :=
-  withReader ({ · with lparams := lps }) (inferTypePure e.toPExpr).run
+  withReader ({ · with lparams := lps }) (inferTypePure e.toPExpr 23).run
 
 @[inherit_doc whnf']
 def whnf (e : PExpr) (lps : List Name) : M PExpr := withReader ({ · with lparams := lps }) $ (Inner.whnfPure e).run
@@ -1620,7 +1626,9 @@ Infers the type of expression `e`. Note that this uses the optimization
 inference on terms that are known to be well-typed. To typecheck terms for the
 first time, use `check`.
 -/
-def inferType (e : PExpr) (lps : List Name) : M PExpr := withReader ({ · with lparams := lps }) $ (Inner.inferTypePure e).run
+def inferType (e : PExpr) (lps : List Name) : M PExpr := do
+  let ret ← withReader ({ · with lparams := lps }) $ (Inner.inferTypePure e 24).run
+  pure ret
 
 @[inherit_doc isDefEqCore]
 def isDefEq (t s : PExpr) (lps : List Name) : MB :=

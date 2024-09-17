@@ -36,7 +36,7 @@ it is definitionally equal to by proof irrelevance). Note that the indices of
 -/
 def toCtorWhenK (rval : RecursorVal) (e : PExpr) : m (PExpr × Option (EExpr) × (Option (Array (Option (PExpr × PExpr × EExpr))))) := do
   assert! rval.k
-  let (type, p?) ← meth.whnf (← meth.inferTypePure e)
+  let (type, p?) ← meth.whnf (← meth.inferTypePure e 101)
   assert! p? == none
   let .const typeI _ := type.toExpr.getAppFn | return (e, none, none)
   if typeI != rval.getInduct then return (e, none, none)
@@ -49,7 +49,7 @@ def toCtorWhenK (rval : RecursorVal) (e : PExpr) : m (PExpr × Option (EExpr) ×
     if ctorName == newCtorName then
       if let true ← meth.isDefEqPure e newCtorApp then
         return (e, none, none)
-  let appType ← meth.inferTypePure newCtorApp
+  let appType ← meth.inferTypePure newCtorApp 102
   -- check that the indices of types of `e` and `newCtorApp` match
   let (defEq, d?) ←
     if type.toExpr.isApp then meth.isDefEqApp' type appType default
@@ -88,10 +88,10 @@ eta).
 def toCtorWhenStruct (inductName : Name) (e : PExpr) : m (PExpr × Option EExpr) := do
   if !isStructureLike env inductName || (e.toExpr.isConstructorApp?' env).isSome then
     return (e, none)
-  let (eType, p?) ← meth.whnf (← meth.inferTypePure e)
+  let (eType, p?) ← meth.whnf (← meth.inferTypePure e 103)
   assert! p? == none
   if !eType.toExpr.getAppFn.isConstOf inductName then return (e, none)
-  if (← meth.whnf (← meth.inferTypePure eType)).1 == Expr.prop.toPExpr then return (e, none)
+  if (← meth.whnf (← meth.inferTypePure eType 104)).1 == Expr.prop.toPExpr then return (e, none)
   return expandEtaStruct env eType e
 
 def getRecRuleFor (rval : RecursorVal) (major : Expr) : Option RecursorRule := do

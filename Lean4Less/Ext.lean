@@ -12,7 +12,7 @@ structure ExtMethods (m : Type → Type u) where
   isDefEqPure : PExpr → PExpr → m Bool
   whnf  : PExpr → m (PExpr × Option EExpr)
   whnfPure  : PExpr → m PExpr
-  inferTypePure : PExpr → m PExpr
+  inferTypePure : PExpr → Nat → m PExpr
   withPure : {T : Type} → m T → m T
   mkHRefl : Level → PExpr → PExpr → m EExpr
   getTypeLevel : PExpr → m (Level × PExpr)
