@@ -16,8 +16,8 @@ structure ExtMethods (m : Type → Type u) where
   appPrfIrrelHEq : PExpr → PExpr → EExpr → PExpr → PExpr → m EExpr
   appPrfIrrel : PExpr → PExpr →  PExpr → m EExpr
   appHEqTrans? : PExpr → PExpr → PExpr → Option EExpr → Option EExpr → m (Option EExpr)
-  isDefEqApp' : PExpr → PExpr → HashMap Nat (Option EExpr) → m (Bool × Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))
-  isDefEqApp : PExpr → PExpr → HashMap Nat (Option EExpr) → m (Bool × Option EExpr)
+  isDefEqApp' : PExpr → PExpr → Nat → HashMap Nat (Option EExpr) → m (Bool × Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))
+  isDefEqApp : PExpr → PExpr → Nat → HashMap Nat (Option EExpr) → m (Bool × Option EExpr)
 
 variable [Monad m] (env : Environment)
   (meth : ExtMethods m)
@@ -59,7 +59,7 @@ def toCtorWhenK (rval : RecursorVal) (e : PExpr) : m (PExpr × Option (EExpr) ×
   let appType ← meth.inferTypePure newCtorApp
   -- check that the indices of types of `e` and `newCtorApp` match
   let (defEq, d?) ←
-    if type.toExpr.isApp then meth.isDefEqApp' type appType default
+    if type.toExpr.isApp then meth.isDefEqApp' type appType 101 default
     else
       pure (← meth.isDefEqPure type appType, none)
 
@@ -146,7 +146,7 @@ def inductiveReduceRec [Monad m] (env : Environment) (e : PExpr)
 
   let eNewMajor := mkAppN recFn newRecArgs |>.toPExpr
   -- (majorIdx, majorEqMajorMaybeCtor?)
-  let (.true, eEqeNewMajor?) ← meth.isDefEqApp e eNewMajor map | unreachable!
+  let (.true, eEqeNewMajor?) ← meth.isDefEqApp e eNewMajor 102 map | unreachable!
   let some rule := getRecRuleFor info majorMaybeCtor | return none
   let majorArgs := majorMaybeCtor.toExpr.getAppArgs
   if rule.nfields > majorArgs.size then return none
