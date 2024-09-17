@@ -34,38 +34,31 @@ it is definitionally equal to by proof irrelevance). Note that the indices of
 `e`'s type must match those of the constructor application (for instance,
 `e : Eq a b` cannot be converted if `a` and `b` are not defeq).
 -/
-def toCtorWhenK (rval : RecursorVal) (e : PExpr) : m (PExpr × Option (EExpr) × (Option (Array (Option (PExpr × PExpr × EExpr))))) := do
+def toCtorWhenK (rval : RecursorVal) (e : PExpr) : m (PExpr × Option (EExpr)) := do
   assert! rval.k
   let (type, p?) ← meth.whnf (← meth.inferTypePure e 101)
   assert! p? == none
-  let .const typeI _ := type.toExpr.getAppFn | return (e, none, none)
-  if typeI != rval.getInduct then return (e, none, none)
+  let .const typeI _ := type.toExpr.getAppFn | return (e, none)
+  if typeI != rval.getInduct then return (e, none)
   if type.toExpr.hasExprMVar then
     let typeArgs := type.toExpr.getAppArgs
     for h : i in [rval.numParams:typeArgs.size] do
-      if (typeArgs[i]'h.2).hasExprMVar then return (e, none, none)
-  let some (newCtorApp, newCtorName) := mkNullaryCtor env type rval.numParams | return (e, none, none)
+      if (typeArgs[i]'h.2).hasExprMVar then return (e, none)
+  let some (newCtorApp, newCtorName) := mkNullaryCtor env type rval.numParams | return (e, none)
   if let (.const ctorName _) := e.toExpr.getAppFn then
     if ctorName == newCtorName then
       if let true ← meth.isDefEqPure e newCtorApp then
-        return (e, none, none)
+        return (e, none)
   let appType ← meth.inferTypePure newCtorApp 102
   -- check that the indices of types of `e` and `newCtorApp` match
-  let (defEq, d?) ←
-    if type.toExpr.isApp then meth.isDefEqApp' type appType default
+  let (true, pt?) ← meth.isDefEq type appType | return (e, none)
+  let (prf?) ←
+    if let some pt := pt? then
+      pure (← meth.appPrfIrrelHEq type appType pt e newCtorApp)
     else
-      pure (← meth.isDefEqPure type appType, none)
+      pure (← meth.appPrfIrrel type e newCtorApp)
 
-  unless defEq do return (e, none, none)
-  let (prf?, indEqs?) ←
-    if let some (p, argEqs?) := d? then
-      for argEq? in argEqs?[:rval.numParams] do
-        assert! argEq? == none 
-      pure (← meth.appPrfIrrelHEq type appType p e newCtorApp, .some (argEqs?[rval.numParams:].toArray))
-    else
-      pure (← meth.appPrfIrrel type e newCtorApp, .some (List.replicate rval.numIndices none).toArray)
-
-  return (newCtorApp, prf?, indEqs?)
+  return (newCtorApp, prf?)
 
 def expandEtaStruct (eType e : PExpr) : (PExpr × Option EExpr) :=
   eType.toExpr.withApp fun I args => Id.run do
@@ -118,33 +111,49 @@ def inductiveReduceRec [Monad m] (env : Environment) (e : PExpr)
   let some major' := recArgs[majorIdx]? | return none
   let major := major'.toPExpr
   let (majorWhnf, majorEqmajorWhnf?) ← meth.whnf major
-  let (majorKWhnf, majorWhnfEqmajorKWhnf?, indEqs??) ← if info.k then toCtorWhenK env meth info majorWhnf else pure (majorWhnf, none, none)
+  let (majorKWhnf, majorWhnfEqmajorKWhnf?) ← if info.k then toCtorWhenK env meth info majorWhnf else pure (majorWhnf, none)
   let majorEqmajorKWhnf? ← meth.appHEqTrans? major majorWhnf majorKWhnf majorEqmajorWhnf? majorWhnfEqmajorKWhnf?
   let (majorMaybeCtor, majorKWhnfEqMajorMaybeCtor?) ← match majorKWhnf.toExpr with
     | .lit l => pure (l.toConstructor.toPExpr, none)
     | _ => toCtorWhenStruct env meth info.getInduct majorKWhnf
   let majorEqMajorMaybeCtor? ← meth.appHEqTrans? major majorKWhnf majorMaybeCtor majorEqmajorKWhnf? majorKWhnfEqMajorMaybeCtor?
-  let mut newRecArgs := recArgs.set! majorIdx majorMaybeCtor
-
-  let indicesStartIdx := info.numParams + info.numMotives + info.numMinors
-
-  let mut map := .insert default majorIdx majorEqMajorMaybeCtor?
-  if let some indEqs? := indEqs?? then do
-    for idx in [:indEqs?.size] do
-      let indEq? := indEqs?[idx]!
-      let indexIdx := indicesStartIdx + idx
-      map := map.insert indexIdx (indEq?.map (fun (_, _, p) => p))
-      if let some (_, e, _) := indEq? then
-        newRecArgs := newRecArgs.set! indexIdx e
-
-  let eNewMajor := mkAppN recFn newRecArgs |>.toPExpr
   -- (majorIdx, majorEqMajorMaybeCtor?)
-  let (.true, eEqeNewMajor?) ← meth.isDefEqApp e eNewMajor map | unreachable!
   let some rule := getRecRuleFor info majorMaybeCtor | return none
   let majorArgs := majorMaybeCtor.toExpr.getAppArgs
   if rule.nfields > majorArgs.size then return none
   if ls.length != info.levelParams.length then return none
   let mut rhs := rule.rhs.instantiateLevelParams info.levelParams ls
+
+  let type ← meth.inferTypePure major 105
+  let newType ← meth.inferTypePure majorMaybeCtor 106
+  let (defEq, d?) ←
+    if type.toExpr.isApp then meth.isDefEqApp' type newType default
+    else
+      pure (← meth.isDefEqPure type newType, none)
+
+  assert! defEq == true
+
+  let (indEqs?) ←
+    if let some (_, argEqs?) := d? then
+      for argEq? in argEqs?[:info.numParams] do
+        assert! argEq? == none 
+      pure argEqs?[info.numParams:].toArray
+    else
+      pure (List.replicate info.numIndices none).toArray
+
+  let mut newRecArgs := recArgs.set! majorIdx majorMaybeCtor
+
+  let indicesStartIdx := info.numParams + info.numMotives + info.numMinors
+
+  let mut map := .insert default majorIdx majorEqMajorMaybeCtor?
+  for idx in [:indEqs?.size] do
+    let indEq? := indEqs?[idx]!
+    let indexIdx := indicesStartIdx + idx
+    map := map.insert indexIdx (indEq?.map (fun (_, _, p) => p))
+    if let some (_, e, _) := indEq? then
+      newRecArgs := newRecArgs.set! indexIdx e
+
+  let eNewMajor := mkAppN recFn newRecArgs |>.toPExpr
   -- get parameters from recursor application (recursor rules don't need the indices,
   -- as these are determined by the constructor and its parameters/fields)
   rhs := mkAppRange rhs 0 info.getFirstIndexIdx newRecArgs
@@ -152,6 +161,7 @@ def inductiveReduceRec [Monad m] (env : Environment) (e : PExpr)
   rhs := mkAppRange rhs (majorArgs.size - rule.nfields) majorArgs.size majorArgs
   if majorIdx + 1 < newRecArgs.size then
     rhs := mkAppRange rhs (majorIdx + 1) newRecArgs.size newRecArgs
+  let (.true, eEqeNewMajor?) ← meth.isDefEqApp e eNewMajor map | unreachable!
   return .some (rhs.toPExpr, eEqeNewMajor?)
 
 end
