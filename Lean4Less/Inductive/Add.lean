@@ -83,7 +83,8 @@ def checkInductiveTypes
       -- checks that the parameters are valid, counts the number of indices,
       -- and gets the sort that this inductive inhabits
       let rec loop stats type i nindices fuel k : M α := match fuel with
-      | 0 => throw .deepRecursion
+      | 0 =>
+        throw .deepRecursion
       | fuel+1 => do
         if let .forallE name dom body bi := type.toExpr then
           if i < nparams then
@@ -191,7 +192,8 @@ def isValidIndApp? (stats : InductiveStats) (t : Expr) : Option Nat := do
 
 def isRecArg (stats : InductiveStats) (t : Expr) : M (Option Nat) := loop t 1000 where
   loop t
-  | 0 => throw .deepRecursion
+  | 0 =>
+    throw .deepRecursion
   | fuel+1 => do
     let t ← whnf t.toPExpr (← lparams)
     let .forallE name dom body bi := t.toExpr | return isValidIndApp? stats t
@@ -201,7 +203,8 @@ def isRecArg (stats : InductiveStats) (t : Expr) : M (Option Nat) := loop t 1000
 def checkPositivity (stats : InductiveStats) (t : Expr) (ctor : Name) (idx : Nat) :
     M Unit := loop t 1000 where
   loop t
-  | 0 => throw .deepRecursion
+  | 0 =>
+    throw .deepRecursion
   | fuel+1 => do
     let t ← whnf t.toPExpr (← lparams)
     if !hasIndOcc stats.indConsts t then return
@@ -237,7 +240,8 @@ def checkConstructors (indTypes : Array InductiveType)
       env.checkNoMVarNoFVar n t
       _ ← check t (← lparams)
       let rec loop t i
-      | 0 => throw .deepRecursion
+      | 0 =>
+        throw .deepRecursion
       | fuel+1 => do
         if let .forallE name dom body bi := t then
           if let some param := stats.params[i]? then
@@ -298,7 +302,8 @@ def isLargeEliminator (stats : InductiveStats) (indTypes : Array InductiveType) 
   | [] => return true
   | [ctor] =>
     let rec loop type i toCheck
-    | 0 => throw .deepRecursion
+    | 0 =>
+      throw .deepRecursion
     | fuel+1 => do
       if let .forallE name dom body bi := type then
         withLocalDecl name dom.consumeTypeAnnotations bi fun arg => do
@@ -350,7 +355,8 @@ namespace mkRecInfos
 
 def loopArgs1 (stats : InductiveStats) (type : Expr) (i : Nat) (indices : Array Expr)
     (fuel : Nat) (k : Array Expr → M α) : M α := match fuel with
-  | 0 => throw .deepRecursion
+  | 0 =>
+    throw .deepRecursion
   | fuel+1 => do
     if let .forallE name dom body bi := type then
       if i < stats.params.size then
@@ -386,7 +392,8 @@ def loopCtorArgs (t : Expr) (k : Expr → Array Expr → Array Expr → M α) : 
   loop t 0 #[] #[] 1000
 where
   loop t i bu u
-  | 0 => throw .deepRecursion
+  | 0 =>
+    throw .deepRecursion
   | fuel+1 => do
     if let .forallE name dom body bi := t then
       if let some param := stats.params[i]? then
@@ -402,7 +409,8 @@ def loopUArgs (ui : Expr) (k : Expr → Array Expr → M α) : M α := do
   loop (← whnf (← inferType ui.toPExpr (← lparams)) (← lparams)) #[] 1000
 where
   loop uiTy xs
-  | 0 => throw .deepRecursion
+  | 0 =>
+    throw .deepRecursion
   | fuel+1 => do
     if let .forallE name dom body bi := uiTy.toExpr then
       withLocalDecl name dom.consumeTypeAnnotations bi fun arg => do

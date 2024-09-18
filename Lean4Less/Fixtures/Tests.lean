@@ -166,7 +166,7 @@ noncomputable def lamTest1 : L' (Q p) (Q q) fun _qp qq => M1 qq := l1
 noncomputable def lamTest2 : L' (Q p) (Q q) fun qp qq => M2 qp qq := l2
 
 -- #print Eq.rec
-set_option pp.all true
+set_option pp.explicit true
 -- #print if_pos.match_1
 -- #check_only lamTest
 -- #check_l4l ex
@@ -210,6 +210,12 @@ b : Bool
 n : Nat
 t : T
 f : F b n
+
+theorem size_toUTF8 (s : String) : s.toUTF8.size = s.utf8ByteSize := by
+  simp [String.toUTF8, ByteArray.size, Array.size, String.utf8ByteSize, List.bind]
+  induction s.data <;> simp [List.map, List.join, String.utf8ByteSize.go, Nat.add_comm, *]
+-- #print size_toUTF8
+-- #check_off size_toUTF8
 
 axiom B : Bool → Type
 

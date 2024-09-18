@@ -770,7 +770,7 @@ def inferTypePure' (e : PExpr) (n : Nat) : RecM PExpr := do -- TODO make more ef
     let eT ← runLeanMinus $ Lean.TypeChecker.inferTypeCheck e.toExpr
     pure eT.toPExpr
   catch e =>
-    dbg_trace s!"DBG[3]: TypeChecker.lean:772 {n}"
+    dbg_trace s!"inferTypePure error: {n}"
     throw e
 
 /--
@@ -1575,13 +1575,20 @@ open Inner
 
 def Methods.withFuel : Nat → Methods
   | 0 =>
-    { isDefEqCore := fun _ _ => throw .deepRecursion
-      isDefEqCorePure := fun _ _ => throw .deepRecursion
-      whnfCore := fun _ _ _ => throw .deepRecursion
-      whnf := fun _ => throw .deepRecursion
-      whnfPure := fun _ => throw .deepRecursion
-      inferType := fun _ _ => throw .deepRecursion
-      inferTypePure := fun _ _ _ => throw .deepRecursion }
+    { isDefEqCore := fun _ _ =>
+      throw .deepRecursion
+      isDefEqCorePure := fun _ _ =>
+      throw .deepRecursion
+      whnfCore := fun _ _ _ =>
+      throw .deepRecursion
+      whnf := fun _ =>
+      throw .deepRecursion
+      whnfPure := fun _ =>
+      throw .deepRecursion
+      inferType := fun _ _ =>
+      throw .deepRecursion
+      inferTypePure := fun _ _ _ =>
+      throw .deepRecursion }
   | n + 1 =>
     { isDefEqCore := fun t s => isDefEqCore' t s (withFuel n)
       isDefEqCorePure := fun t s => isDefEqCorePure' t s (withFuel n)
