@@ -106,6 +106,7 @@ def inductiveReduceRec [Monad m] (env : Environment) (e : PExpr)
   let recFn := e.toExpr.getAppFn
   let .const recFnName ls := recFn | return none
   let some (.recInfo info) := env.find? recFnName | return none
+  let recType := info.type
   let recArgs := e.toExpr.getAppArgs
   let majorIdx := info.getMajorIdx
   let some major' := recArgs[majorIdx]? | return none
@@ -133,25 +134,61 @@ def inductiveReduceRec [Monad m] (env : Environment) (e : PExpr)
 
   assert! defEq == true
 
-  let (indEqs?) ←
+  let (paramEqs?, indEqs?) ←
     if let some (_, argEqs?) := d? then
-      for argEq? in argEqs?[:info.numParams] do
-        assert! argEq? == none 
-      pure argEqs?[info.numParams:].toArray
+      pure (argEqs?[:info.numParams].toArray, argEqs?[info.numParams:].toArray)
     else
-      pure (List.replicate info.numIndices none).toArray
+      pure ((List.replicate (info.numParams) none).toArray, (List.replicate (info.numIndices) none).toArray)
+
+  let motiveMinorsEqs? : Array (Option (PExpr × PExpr × EExpr)) ← do
+    if paramEqs?.any (·.isSome) then
+      let rec loop1 (type origType : Expr) (n : Nat) := do
+        match (← meth.whnfPure type.toPExpr 101).toExpr, (← meth.whnfPure origType.toPExpr 102).toExpr, n with
+      | .forallE _ _ body _, .forallE _ _ origBody _, m + 1 => 
+        let idx := info.numParams - n
+        let origParam := recArgs[idx]! -- FIXME why doesn't pattern matching work in the lambda?
+        let param := paramEqs?[idx]!.map (fun (_, s, _) => s.toExpr) |>.getD origParam -- FIXME why doesn't pattern matching work in the lambda?
+        loop1 (body.instantiate1 param) (origBody.instantiate1 origParam) m
+      | body, origBody, _=>
+        pure (body, origBody)
+      let (type', origType') ← loop1 recType recType info.numParams
+
+      let rec loop2 (type origType : Expr) (n : Nat) (ret : (Array (Option (PExpr × PExpr × EExpr)))) := do
+        match (← meth.whnfPure type.toPExpr 103).toExpr, (← meth.whnfPure origType.toPExpr 104).toExpr, n with
+        | .forallE _ dom body _, .forallE _ origDom origBody _, m + 1 => 
+          let (true, origDomEqdom?) ← meth.isDefEq origDom.toPExpr dom.toPExpr | unreachable!
+          sorry
+        | body, origBody, _ =>
+          pure ret
+
+      loop2 type' origType' (info.numMotives + info.numMinors) #[]
+    else
+      pure (List.replicate (info.numMotives + info.numMinors) (none : Option (PExpr × PExpr × EExpr))).toArray
 
   let mut newRecArgs := recArgs.set! majorIdx majorMaybeCtor
+  let mut map := .insert default majorIdx majorEqMajorMaybeCtor?
+
+  for idx in [:paramEqs?.size] do
+    let indEq? := paramEqs?[idx]!
+    map := map.insert idx (indEq?.map (fun (_, _, p) => p))
+    if let some (_, e, _) := indEq? then
+      newRecArgs := newRecArgs.set! idx e
+
+  let motivesStartIdx := info.numParams
+  for idx in [:motiveMinorsEqs?.size] do
+    let indEq? := motiveMinorsEqs?[idx]!
+    let recIdx := motivesStartIdx + idx
+    map := map.insert recIdx (indEq?.map (fun (_, _, p) => p))
+    if let some (_, e, _) := indEq? then
+      newRecArgs := newRecArgs.set! recIdx e
 
   let indicesStartIdx := info.numParams + info.numMotives + info.numMinors
-
-  let mut map := .insert default majorIdx majorEqMajorMaybeCtor?
   for idx in [:indEqs?.size] do
     let indEq? := indEqs?[idx]!
-    let indexIdx := indicesStartIdx + idx
-    map := map.insert indexIdx (indEq?.map (fun (_, _, p) => p))
+    let recIdx := indicesStartIdx + idx
+    map := map.insert recIdx (indEq?.map (fun (_, _, p) => p))
     if let some (_, e, _) := indEq? then
-      newRecArgs := newRecArgs.set! indexIdx e
+      newRecArgs := newRecArgs.set! recIdx e
 
   let eNewMajor := mkAppN recFn newRecArgs |>.toPExpr
   -- get parameters from recursor application (recursor rules don't need the indices,

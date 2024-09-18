@@ -42,7 +42,7 @@ def mkAppEqProof? (aVars bVars : Array PExpr) (Uas Vbs : Array PExpr) (ds? : Arr
         assert! defEq
 
         let (UaTypeLvl, UaType) ← meth.getTypeLevel Ua
-        let UaType ← meth.whnfPure UaType
+        let UaType ← meth.whnfPure UaType 201
         let v := UaType.toExpr.sortLevel!
 
         let (U, V) := ((Ua, aVar), (Vb, bVar))
@@ -89,8 +89,8 @@ def mkAppEqProof? (aVars bVars : Array PExpr) (Uas Vbs : Array PExpr) (ds? : Arr
       else
         pure none
 
-    f ← meth.whnfPure (f.toExpr.app a |>.toPExpr)
-    g ← meth.whnfPure (g.toExpr.app b |>.toPExpr)
+    f ← meth.whnfPure (f.toExpr.app a |>.toPExpr) 202
+    g ← meth.whnfPure (g.toExpr.app b |>.toPExpr) 203
   pure fEqg?
 
 structure BinderData where
@@ -101,7 +101,7 @@ deriving Inhabited
 
 def mkAppEqProof (T S : PExpr) (as bs : Array PExpr) (asEqbs? : Array (Option EExpr)) (f g : PExpr) (fEqg? : Option EExpr := none) : m (Option EExpr) := do
   let rec loop idx T S aVars bVars Uas Vbs ds? : m (Option EExpr) := do
-    let (T', dA, S', dB) ← match (← meth.whnfPure T).toExpr, (← meth.whnfPure S).toExpr with
+    let (T', dA, S', dB) ← match (← meth.whnfPure T 204).toExpr, (← meth.whnfPure S 205).toExpr with
       | .forallE tName tDom tBody tBi, .forallE sName sDom sBody sBi =>
         pure $ (tBody, ({name := tName, dom := tDom.toPExpr, info := tBi} : BinderData), sBody, ({name := sName, dom := sDom.toPExpr, info := sBi} : BinderData))
       | tBody, sBody => unreachable!
@@ -119,8 +119,12 @@ def mkAppEqProof (T S : PExpr) (as bs : Array PExpr) (asEqbs? : Array (Option EE
     let aType ← meth.inferTypePure a 203
     let bType ← meth.inferTypePure b 204
     let .true ← meth.isDefEqPure A aType | do
+      dbg_trace s!"{f}"
+      dbg_trace s!"{g}"
       throw $ .other s!"expected: {A}\n inferred: {aType}"
     let .true ← meth.isDefEqPure B bType | do
+      dbg_trace s!"{f}"
+      dbg_trace s!"{g}"
       -- let app := Lean.mkAppN g.toExpr (bs[:5].toArray.map PExpr.toExpr)
       -- let appType ← meth.whnfPure $ ← meth.inferTypePure app.toPExpr 205
       -- let .forallE _ _domType _ _ := appType.toExpr | unreachable!
@@ -241,7 +245,7 @@ def forallAbs (max : Nat) (tfT sfT : Expr) : m
         pure ((← getLCtx).mkForall (newDomVars.map (fun ((tvar, _) : FVarId × FVarId) => .fvar tvar)) newtBod |>.toPExpr, tDomsVars, tDoms, (← getLCtx).mkForall (newDomVars.map (fun ((_, svar) : FVarId × FVarId) => .fvar svar)) newsBod |>.toPExpr, sDomsVars, sDoms, tDomsEqsDoms, absArgs')
 
     if idx' < max then
-      match (← meth.whnfPure tfT.toPExpr).toExpr, (← meth.whnfPure sfT.toPExpr).toExpr with
+      match (← meth.whnfPure tfT.toPExpr 206).toExpr, (← meth.whnfPure sfT.toPExpr 207).toExpr with
         | .forallE tName tDom tBod tBi, .forallE sName sDom sBod sBi =>
           let mut refs := default
           for (tvar, svar) in origDomVars do
@@ -348,8 +352,8 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
         if idx == 0 && tfEqsf?.isSome then
           pure none
         else
-          let tBodT' ← meth.whnfPure tBodT
-          let sBodT' ← meth.whnfPure sBodT
+          let tBodT' ← meth.whnfPure tBodT 208
+          let sBodT' ← meth.whnfPure sBodT 209
           match tBodT'.toExpr, sBodT'.toExpr with
             | .forallE tDomName tDom _ _, .forallE sDomName sDom _ _ =>
               if tArgsVars.any fun id => tDom.containsFVar id || sArgsVars.any fun id => sDom.containsFVar id then
@@ -391,8 +395,8 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
         sEtaVars := 0
         absArgs := absArgs'
 
-        let tBodT' ← meth.whnfPure tBodT
-        let sBodT' ← meth.whnfPure sBodT
+        let tBodT' ← meth.whnfPure tBodT 210
+        let sBodT' ← meth.whnfPure sBodT 211
         match tBodT'.toExpr, sBodT'.toExpr with
           | .forallE tDomName tDom _ _, .forallE sDomName sDom _ _ =>
             pure $ (tDom.toPExpr, tDomName, sDom.toPExpr, sDomName)
@@ -434,12 +438,12 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
     tBodArgs := tBodArgs.push tBoda
     sBodArgs := sBodArgs.push sBoda
 
-    (tfT, sfT) ← match (← meth.whnfPure tfT).toExpr, (← meth.whnfPure sfT).toExpr with
+    (tfT, sfT) ← match (← meth.whnfPure tfT 212).toExpr, (← meth.whnfPure sfT 213).toExpr with
       | .forallE _ _ tBody _, .forallE _ _ sBody _ =>
         pure $ (tBody.instantiate1 ta |>.toPExpr, sBody.instantiate1 sa |>.toPExpr)
       | _, _ => unreachable!
 
-    (tBodT, sBodT) ← match (← meth.whnfPure tBodT).toExpr, (← meth.whnfPure sBodT).toExpr with
+    (tBodT, sBodT) ← match (← meth.whnfPure tBodT 214).toExpr, (← meth.whnfPure sBodT 215).toExpr with
       | .forallE _ _ tBody _, .forallE _ _ sBody _ =>
         pure $ (tBody.instantiate1 tBoda |>.toPExpr, sBody.instantiate1 sBoda |>.toPExpr)
       | _, _ => unreachable!

@@ -74,7 +74,7 @@ structure Methods where
   isDefEqCorePure : PExpr → PExpr → M Bool
   whnfCore (e : PExpr) (cheapRec := false) (cheapProj := false) : MEE
   whnf (e : PExpr) : MEE
-  whnfPure (e : PExpr) : M PExpr
+  whnfPure (e : PExpr) (n : Nat) : M PExpr
   inferType (e : Expr) : MPE
   inferTypePure (e : PExpr) (n : Nat) : M PExpr
 
@@ -86,6 +86,9 @@ abbrev RecLB := RecM (LBool × (Option EExpr))
 
 def runLeanMinus (M : Lean.TypeChecker.M T) : RecM T := do
   Lean.TypeChecker.M.run' (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := false, proofIrrelevance := false}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams) (ngen := (← get).ngen) M
+
+def runLean (M : Lean.TypeChecker.M T) : RecM T := do
+  Lean.TypeChecker.M.run' (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := true, proofIrrelevance := true}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams) (ngen := (← get).ngen) M
 
 inductive ReductionStatus where
   | continue (nltn nlsn : PExpr) (pltnEqnltn? plsnEqnlsn? : Option EExpr)
@@ -101,7 +104,7 @@ Reduces `e` to its weak-head normal form.
 -/
 def whnf (e : PExpr) : RecEE := fun m => m.whnf e
 
-def whnfPure (e : PExpr) : RecM PExpr := fun m => m.whnfPure e
+def whnfPure (e : PExpr) (n : Nat) : RecM PExpr := fun m => m.whnfPure e n
 
 @[inline] def withPure [MonadWithReaderOf Context m] (x : m α) : m α :=
   withReader (fun l => {l with pure := true}) x
@@ -142,7 +145,7 @@ def ensureForallCore (e : PExpr) (s : Expr) : RecEE := do
 @[inherit_doc ensureForallCore]
 def ensureForallPure (e : PExpr) (s : Expr) : RecM PExpr := do
   if Expr.isForall e then return e
-  let e ← whnfPure e
+  let e ← whnfPure e 1
   if e.toExpr.isForall then return e
   throw <| .funExpected (← getEnv) (← getLCtx) s
 
@@ -288,7 +291,11 @@ def mkHRefl (lvl : Level) (T : PExpr) (t : PExpr) : RecM EExpr := do
   pure $ .refl {u := lvl, A := T, a := t}
 
 def isDefEqPure (t s : PExpr) : RecM Bool := do
-  runLeanMinus $ Lean.TypeChecker.isDefEq t s
+  try
+    runLeanMinus $ Lean.TypeChecker.isDefEq t s
+  catch e =>
+    dbg_trace s!"isDefEqPure error: {0}"
+    throw e
 
 def appPrfIrrelHEq (P Q : PExpr) (hPQ : EExpr) (p q : PExpr) : RecM EExpr := do
   return .prfIrrel {P, p, q, extra := .HEq {Q, hPQ}}
@@ -383,7 +390,7 @@ def isDefEqForall (t s : PExpr) (numBinds := 0) : RecB := do
 
         if d?.isSome || UaEqVx?.isSome then
           let (UaTypeLvl, UaType) ← getTypeLevel Ua
-          let UaType ← whnfPure UaType
+          let UaType ← whnfPure UaType 2
           let UaLvl := UaType.toExpr.sortLevel!
 
           let (ALvl, A) ← getTypeLevel a
@@ -452,7 +459,7 @@ def smartCast (tl tr e : PExpr) (p? : Option EExpr := none) : RecM PExpr := do
       pure $ .some p
     else
       let rec lamCount (e tl tr : Expr) := do
-        match e, (← whnfPure tl.toPExpr).toExpr, (← whnfPure tr.toPExpr).toExpr with
+        match e, (← whnfPure tl.toPExpr 3).toExpr, (← whnfPure tr.toPExpr 4).toExpr with
         | .lam _ _ b _, .forallE nl tdl tbl bil, .forallE nr tdr tbr bir =>
           let idl := ⟨← mkFreshId⟩
           let idr := ⟨← mkFreshId⟩
@@ -801,7 +808,7 @@ def whnfFVar (e : PExpr) (cheapRec cheapProj : Bool) : RecEE := do
 def appProjThm? (structName : Name) (projIdx : Nat) (struct structN : PExpr) (structEqstructN? : Option EExpr) : RecM (Option EExpr) := do
   structEqstructN?.mapM fun structEqstructN => do
     let env ← getEnv
-    let structType ← whnfPure (← inferTypePure struct 11)
+    let structType ← whnfPure (← inferTypePure struct 11) 5
     let .const typeC lvls := if structType.toExpr.isApp then structType.toExpr.withApp fun f _ => f else structType.toExpr | unreachable!
     let .inductInfo {ctors := [ctor], numParams, ..} ← env.get typeC | unreachable!
     let params := structType.toExpr.getAppArgs
@@ -1089,7 +1096,7 @@ Assuming that `s` has a function type `(x : A) -> B x`, it η-expands to
 -/
 def tryEtaExpansionCore (t s : PExpr) : RecB := do
   if t.toExpr.isLambda && !s.toExpr.isLambda then
-    let .forallE name ty _ bi := (← whnfPure (← inferTypePure s 16)).toExpr | return (false, none)
+    let .forallE name ty _ bi := (← whnfPure (← inferTypePure s 16) 6).toExpr | return (false, none)
     isDefEq t (Expr.lam name ty (.app s (.bvar 0)) bi).toPExpr -- NOTE: same proof should be okay because of eta-expansion when typechecking
   else return (false, none)
 
@@ -1253,9 +1260,13 @@ private def _whnf' (e' : Expr) : RecEE := do
 @[inherit_doc whnf]
 def whnf' (e : PExpr) : RecEE := _whnf' e
 
-def whnfPure' (e : PExpr) : RecM PExpr := do
-  let leanMinusWhnf ← runLeanMinus $ Lean.TypeChecker.whnf e.toExpr
-  pure leanMinusWhnf.toPExpr
+def whnfPure' (e : PExpr) (n : Nat) : RecM PExpr := do
+  try
+    let leanMinusWhnf ← runLeanMinus $ Lean.TypeChecker.whnf e.toExpr
+    pure leanMinusWhnf.toPExpr
+  catch e =>
+    dbg_trace s!"whnfPure error: {n}"
+    throw e
 
 /--
 Checks if `t` and `s` are definitionally equivalent according to proof irrelevance
@@ -1479,7 +1490,12 @@ def isDefEqUnitLike (t s : PExpr) : RecB := do
 
 @[inherit_doc isDefEqCore]
 def isDefEqCore' (t s : PExpr) : RecB := do
-  let leanMinusDefEq ← runLeanMinus $ Lean.TypeChecker.isDefEq t.toExpr s.toExpr
+  let leanMinusDefEq ← try
+    runLeanMinus $ Lean.TypeChecker.isDefEq t.toExpr s.toExpr
+  catch e =>
+    match e with
+    | .deepRecursion => pure false -- proof irrelevance may be needed to avoid deep recursion (e.g. String.size_toUTF8)
+    | _ => throw e
   if leanMinusDefEq then
     return (true, none)
   let (r, pteqs?) ← quickIsDefEq t s (useHash := true)
@@ -1583,7 +1599,7 @@ def Methods.withFuel : Nat → Methods
       throw .deepRecursion
       whnf := fun _ =>
       throw .deepRecursion
-      whnfPure := fun _ =>
+      whnfPure := fun _ _ =>
       throw .deepRecursion
       inferType := fun _ _ =>
       throw .deepRecursion
@@ -1594,7 +1610,7 @@ def Methods.withFuel : Nat → Methods
       isDefEqCorePure := fun t s => isDefEqCorePure' t s (withFuel n)
       whnfCore := fun e r p => whnfCore' e r p (withFuel n)
       whnf := fun e => whnf' e (withFuel n)
-      whnfPure := fun e => whnfPure' e (withFuel n)
+      whnfPure := fun e m => whnfPure' e m (withFuel n)
       inferType := fun e => inferType' e (withFuel n)
       inferTypePure := fun e m => inferTypePure' e m (withFuel n) }
 
@@ -1625,7 +1641,7 @@ def checkPure (e : Expr) (lps : List Name) : M PExpr :=
   withReader ({ · with lparams := lps }) (inferTypePure e.toPExpr 23).run
 
 @[inherit_doc whnf']
-def whnf (e : PExpr) (lps : List Name) : M PExpr := withReader ({ · with lparams := lps }) $ (Inner.whnfPure e).run
+def whnf (e : PExpr) (lps : List Name) : M PExpr := withReader ({ · with lparams := lps }) $ (Inner.whnfPure e 7).run
 
 /--
 Infers the type of expression `e`. Note that this uses the optimization
