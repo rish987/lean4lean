@@ -207,9 +207,11 @@ def getTypeLevel (e : PExpr) : RecM (Level × PExpr) := do
   assert 4 $ es? == none
   pure (eTypeSort'.toExpr.sortLevel!, eType)
 
-def appHEqSymm (t s : PExpr) (theqs : EExpr) : RecM EExpr := do
-  let (lvl, tType) ← getTypeLevel t
-  let sType ← inferTypePure s 3
+def appHEqSymm (t s : PExpr) (theqs : EExpr) (info : Option (Level × PExpr × PExpr) := none) : RecM EExpr := do
+  let (lvl, tType, sType) ← info.getDM do
+    let (lvl, tType) ← getTypeLevel t
+    let sType ← inferTypePure s 3
+    pure (lvl, tType, sType)
   pure $ theqs.reverse t s tType sType lvl
 
 def appHEqSymm? (t s : PExpr) (theqs? : Option EExpr) : RecM (Option EExpr) := do
@@ -336,12 +338,6 @@ def methsA : ExtMethodsA RecM := {
     opt := true
   }
 
-def methsR : ExtMethodsR RecM := {
-    meths with
-    isDefEqApp := fun t s m => isDefEqApp methsA t s (targsEqsargs? := m)
-    isDefEqApp' := fun t s m => isDefEqApp' methsA t s (targsEqsargs? := m)
-  }
-
 def isDefEqForallOpt' (t s : PExpr) : RecB := do
   let (tAbsType, tAbsDomsVars, tAbsDoms, sAbsType, sAbsDomsVars, sAbsDoms, tAbsDomsEqsAbsDoms?, _) ← forallAbs methsA 2000 t s
 
@@ -416,20 +412,20 @@ def isDefEqForall (t s : PExpr) (numBinds := 0) : RecB := do
       pure $ UaEqVx?
 
 def smartCast (tl tr e : PExpr) (p? : Option EExpr := none) : RecM PExpr := do
+  let mkCast'' n tl tr p e (prfVars prfVals : Array Expr) (lvl : Level) := do
+    let p := p.toExpr.replaceFVars prfVars prfVals
+    pure $ Lean.mkAppN (← getConst n [lvl]) #[tl, tr, p, e]
+
   let mkCast' n tl tr p e (prfVars prfVals : Array Expr) := do
     let sort ← inferTypePure tr.toPExpr 8
     let sort' ← ensureSortCorePure sort tl.toPExpr
-    let p := p.toExpr.replaceFVars prfVars prfVals
     let lvl := sort'.toExpr.sortLevel!
-    pure $ Lean.mkAppN (← getConst n [lvl]) #[tl, tr, p, e]
-
-  let mkCast tl tr p e (prfVars prfVals : Array Expr) := do
-    mkCast' `L4L.castHEq tl tr p e prfVars prfVals
+    mkCast'' n tl tr p e prfVars prfVals lvl
 
   let rec loop e tl tr (lamVars prfVars prfVals : Array Expr) p : RecM Expr := do
     match e, tl, tr, p with
     | .lam n _ b bi, .forallE _ _ tbl .., .forallE _ tdr tbr .., .forallE forallData =>
-      let {A, a, UaEqVx, extra, ..} := forallData
+      let {A, a, UaEqVx, extra, u, ..} := forallData
       let id := ⟨← mkFreshId⟩
       withLCtx ((← getLCtx).mkLocalDecl id n tdr bi) do
         let v := .fvar id
@@ -437,9 +433,9 @@ def smartCast (tl tr e : PExpr) (p? : Option EExpr := none) : RecM PExpr := do
         let (newPrfVars, newPrfVals, vCast) ←
           match extra with
           | .AB {B, b, vaEqb, hAB} =>
-            let hBA ← appHEqSymm A B hAB
-            let vCast ← mkCast B.toExpr A.toExpr hBA v prfVars prfVals
-            let vCastEqv ← mkCast' `L4L.castOrigHEq B.toExpr A.toExpr hBA v prfVars prfVals
+            let hBA ← appHEqSymm A B hAB (info := .some (u, (Expr.sort (.succ u)).toPExpr, (Expr.sort (.succ u)).toPExpr))
+            let vCast ← mkCast'' `L4L.castHEq B.toExpr A.toExpr hBA v prfVars prfVals u
+            let vCastEqv ← mkCast'' `L4L.castOrigHEq B.toExpr A.toExpr hBA v prfVars prfVals u
             pure (#[a.toExpr, b.toExpr, vaEqb.aEqb], #[vCast, v, vCastEqv], vCast)
           | _ => 
             pure (#[a.toExpr], #[v], v)
@@ -452,7 +448,7 @@ def smartCast (tl tr e : PExpr) (p? : Option EExpr := none) : RecM PExpr := do
         let tbr := tbr.instantiate1 v
         loop b tbl tbr lamVars prfVars prfVals UaEqVx
     | _, _, _, _ =>
-      let cast ← mkCast tl tr p e prfVars prfVals
+      let cast ← mkCast' `L4L.castHEq tl tr p e prfVars prfVals
       pure $ (← getLCtx).mkLambda lamVars cast
   let p? ←
     if let some p := p? then
@@ -482,6 +478,13 @@ def smartCast (tl tr e : PExpr) (p? : Option EExpr := none) : RecM PExpr := do
 
 def maybeCast (p? : Option EExpr) (typLhs typRhs e : PExpr) : RecM PExpr := do
   pure $ (← p?.mapM (fun (p : EExpr) => do smartCast typLhs typRhs e p)).getD e
+
+def methsR : ExtMethodsR RecM := {
+    meths with
+    smartCast := smartCast
+    isDefEqApp := fun t s m => isDefEqApp methsA t s (targsEqsargs? := m)
+    isDefEqApp' := fun t s m => isDefEqApp' methsA t s (targsEqsargs? := m)
+  }
 
 /--
 Infers the type of lambda expression `e`.

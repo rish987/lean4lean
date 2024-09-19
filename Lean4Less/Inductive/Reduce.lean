@@ -11,6 +11,7 @@ section
 structure ExtMethodsR (m : Type → Type u) extends ExtMethods m where
   isDefEqApp' : PExpr → PExpr → HashMap Nat (Option EExpr) → m (Bool × Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))
   isDefEqApp : PExpr → PExpr → HashMap Nat (Option EExpr) → m (Bool × Option EExpr)
+  smartCast : PExpr → PExpr → PExpr → m PExpr
 
 variable [Monad m] (env : Environment)
   (meth : ExtMethodsR m)
@@ -106,7 +107,7 @@ def inductiveReduceRec [Monad m] (env : Environment) (e : PExpr)
   let recFn := e.toExpr.getAppFn
   let .const recFnName ls := recFn | return none
   let some (.recInfo info) := env.find? recFnName | return none
-  let recType := info.type
+  let recType := info.type.instantiateLevelParams info.levelParams ls
   let recArgs := e.toExpr.getAppArgs
   let majorIdx := info.getMajorIdx
   let some major' := recArgs[majorIdx]? | return none
@@ -140,28 +141,35 @@ def inductiveReduceRec [Monad m] (env : Environment) (e : PExpr)
     else
       pure ((List.replicate (info.numParams) none).toArray, (List.replicate (info.numIndices) none).toArray)
 
-  let motiveMinorsEqs? : Array (Option (PExpr × PExpr × EExpr)) ← do
+  let motivesMinorsEqs? : Array (Option (PExpr × PExpr × EExpr)) ← do
     if paramEqs?.any (·.isSome) then
       let rec loop1 (type origType : Expr) (n : Nat) := do
         match (← meth.whnfPure type.toPExpr 101).toExpr, (← meth.whnfPure origType.toPExpr 102).toExpr, n with
       | .forallE _ _ body _, .forallE _ _ origBody _, m + 1 => 
         let idx := info.numParams - n
-        let origParam := recArgs[idx]! -- FIXME why doesn't pattern matching work in the lambda?
-        let param := paramEqs?[idx]!.map (fun (_, s, _) => s.toExpr) |>.getD origParam -- FIXME why doesn't pattern matching work in the lambda?
+        let origParam := recArgs[idx]!
+        let param := paramEqs?[idx]!.map (fun (_, s, _) => s.toExpr) |>.getD origParam
         loop1 (body.instantiate1 param) (origBody.instantiate1 origParam) m
-      | body, origBody, _=>
+      | body, origBody, m =>
+        assert! m == 0
         pure (body, origBody)
       let (type', origType') ← loop1 recType recType info.numParams
 
       let rec loop2 (type origType : Expr) (n : Nat) (ret : (Array (Option (PExpr × PExpr × EExpr)))) := do
         match (← meth.whnfPure type.toPExpr 103).toExpr, (← meth.whnfPure origType.toPExpr 104).toExpr, n with
         | .forallE _ dom body _, .forallE _ origDom origBody _, m + 1 => 
-          let (true, origDomEqdom?) ← meth.isDefEq origDom.toPExpr dom.toPExpr | unreachable!
-          sorry
-        | body, origBody, _ =>
+          let idx := (info.numMotives + info.numMinors) - n + info.numParams
+          let origMotiveMinor := recArgs[idx]!.toPExpr
+          let newMotiveMinor ← meth.smartCast origDom.toPExpr dom.toPExpr origMotiveMinor
+          let (true, origMotiveMinorEqnewMotiveMinor?) ← meth.isDefEq origMotiveMinor newMotiveMinor | unreachable!
+          let ret := ret.push (origMotiveMinorEqnewMotiveMinor?.map fun p => (origMotiveMinor, newMotiveMinor, p))
+          loop2 (body.instantiate1 newMotiveMinor) (origBody.instantiate1 origMotiveMinor) m ret
+        | _, _, m =>
+          assert! m == 0
           pure ret
 
-      loop2 type' origType' (info.numMotives + info.numMinors) #[]
+      let ret ← loop2 type' origType' (info.numMotives + info.numMinors) #[]
+      pure ret
     else
       pure (List.replicate (info.numMotives + info.numMinors) (none : Option (PExpr × PExpr × EExpr))).toArray
 
@@ -175,8 +183,8 @@ def inductiveReduceRec [Monad m] (env : Environment) (e : PExpr)
       newRecArgs := newRecArgs.set! idx e
 
   let motivesStartIdx := info.numParams
-  for idx in [:motiveMinorsEqs?.size] do
-    let indEq? := motiveMinorsEqs?[idx]!
+  for idx in [:motivesMinorsEqs?.size] do
+    let indEq? := motivesMinorsEqs?[idx]!
     let recIdx := motivesStartIdx + idx
     map := map.insert recIdx (indEq?.map (fun (_, _, p) => p))
     if let some (_, e, _) := indEq? then
