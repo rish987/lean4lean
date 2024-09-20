@@ -119,12 +119,10 @@ def mkAppEqProof (T S : PExpr) (as bs : Array PExpr) (asEqbs? : Array (Option EE
     let aType ← meth.inferTypePure a 203
     let bType ← meth.inferTypePure b 204
     let .true ← meth.isDefEqPure A aType | do
-      dbg_trace s!"{f}"
-      dbg_trace s!"{g}"
+      dbg_trace s!"DBG[1]: App.lean:121 (after let .true ← meth.isDefEqPure A aType |…)"
       throw $ .other s!"expected: {A}\n inferred: {aType}"
     let .true ← meth.isDefEqPure B bType | do
-      dbg_trace s!"{f}"
-      dbg_trace s!"{g}"
+      dbg_trace s!"DBG[2]: App.lean:124 (after let .true ← meth.isDefEqPure B bType |…)"
       -- let app := Lean.mkAppN g.toExpr (bs[:5].toArray.map PExpr.toExpr)
       -- let appType ← meth.whnfPure $ ← meth.inferTypePure app.toPExpr 205
       -- let .forallE _ _domType _ _ := appType.toExpr | unreachable!

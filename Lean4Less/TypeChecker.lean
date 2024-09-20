@@ -809,44 +809,41 @@ def whnfFVar (e : PExpr) (cheapRec cheapProj : Bool) : RecEE := do
   return (e, none)
 
 def appProjThm? (structName : Name) (projIdx : Nat) (struct structN : PExpr) (structEqstructN? : Option EExpr) : RecM (Option EExpr) := do
-  structEqstructN?.mapM fun structEqstructN => do
+  structEqstructN?.mapM fun _ => do
     let env ← getEnv
-    let structType ← whnfPure (← inferTypePure struct 11) 5
+    let structNType ← whnfPure (← inferTypePure structN 11) 5
+    let structType ← whnfPure (← inferTypePure struct 12) 5
     let .const typeC lvls := if structType.toExpr.isApp then structType.toExpr.withApp fun f _ => f else structType.toExpr | unreachable!
-    let .inductInfo {ctors := [ctor], numParams, ..} ← env.get typeC | unreachable!
+    let .inductInfo {ctors := [ctor], numParams, numIndices, ..} ← env.get typeC | unreachable!
+    assert! numIndices == 0
+    let paramsN := structNType.toExpr.getAppArgs
     let params := structType.toExpr.getAppArgs
     let ctorInfo ← env.get ctor
     let ctorType := ctorInfo.instantiateTypeLevelParams lvls |>.toPExpr
 
-    let structSort ← inferTypePure structType 12
-    let structLvl := structSort.toExpr.sortLevel!
-    
-    let ids := ⟨← mkFreshId⟩
-    withLCtx ((← getLCtx).mkLocalDecl ids default structType default) do
-      let s := (Expr.fvar ids).toPExpr
+    let rec loop remCtorType (paramVars : Array Expr) n := do
+      match (← whnfPure remCtorType.toPExpr 8).toExpr, n with
+      | .forallE n d b i, m + 1 =>
+        let idr := ⟨← mkFreshId⟩
+        withLCtx ((← getLCtx).mkLocalDecl idr n d i) do
+          let rVar := (.fvar idr)
+          let remCtorType := b.instantiate1 rVar
+          let paramVars := paramVars.push rVar
+          loop remCtorType paramVars m
+      | structType, 0 =>
+        let ids := ⟨← mkFreshId⟩
+        withLCtx ((← getLCtx).mkLocalDecl ids default structType default) do
+          let s := Expr.fvar ids
 
-      let mut remCtorType := ctorType.toExpr
-      for idx in [:projIdx + numParams] do
-        if let .forallE _ _ b _ := remCtorType then
-          let inst :=
-            if idx >= numParams then
-              .proj structName (idx - numParams) s
-            else
-              params[idx]!
-          remCtorType := b.instantiate1 inst
-        else
-          unreachable!
-      let .forallE _ projOutType _ _ := remCtorType | unreachable!
+          let f := (← getLCtx).mkLambda (paramVars ++ #[s]) (.proj structName projIdx s) |>.toPExpr
+          let mut targsEqsargs? := default
+          targsEqsargs? := targsEqsargs?.insert numParams structEqstructN?
+          let (true, ret?) ← isDefEqApp methsA (Lean.mkAppN f (params ++ #[struct.toExpr])).toPExpr (Lean.mkAppN f (paramsN ++ #[structN.toExpr])).toPExpr targsEqsargs? | unreachable!
 
-      let U := ((← getLCtx).mkLambda #[s] projOutType).toPExpr
+          pure $ ret?.get!
+      | _, _ => unreachable!
 
-      let projSort ← inferTypePure (Expr.app U structN).toPExpr 13
-      let .sort projLvl := (← ensureSortCorePure projSort default).toExpr | throw $ .other "unreachable 4"
-
-      let f := (← getLCtx).mkLambda #[s] (.proj structName projIdx s) |>.toPExpr
-
-      let ret := .app {u := structLvl, v := projLvl, A := structType, U := (projOutType.toPExpr, s), f, a := struct, extra := .Arg {b := structN, aEqb := structEqstructN}, lctx := (← getLCtx)}
-      pure ret
+    loop ctorType.toExpr #[] numParams
 
 /--
 Reduces a projection of `struct` at index `idx` (when `struct` is reducible to a
