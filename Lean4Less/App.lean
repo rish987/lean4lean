@@ -490,7 +490,7 @@ Checks if applications `t` and `s` (should be WHNF) are defeq on account of
 their function heads and arguments being defeq.
 -/
 def isDefEqApp' (t s : PExpr)
-   (targsEqsargs? : HashMap Nat (Option EExpr) := default) : m (Bool × (Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))) := do
+   (targsEqsargs? : HashMap Nat (Option EExpr) := default) (tfEqsf? : Option (Option EExpr) := none) : m (Bool × (Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))) := do
   unless t.toExpr.isApp && s.toExpr.isApp do return (false, none)
   t.toExpr.withApp fun tf tArgs =>
   s.toExpr.withApp fun sf sArgs => 
@@ -498,8 +498,8 @@ def isDefEqApp' (t s : PExpr)
     let sf := sf.toPExpr
     let tArgs := tArgs.map (·.toPExpr)
     let sArgs := sArgs.map (·.toPExpr)
-    isDefEqApp'' meth tf sf tArgs sArgs targsEqsargs?
+    isDefEqApp'' meth tf sf tArgs sArgs targsEqsargs? tfEqsf?
 
-def isDefEqApp (t s : PExpr) (targsEqsargs? : HashMap Nat (Option EExpr) := default) : m (Bool × Option EExpr) := do
-  let (isDefEq, data?) ← isDefEqApp' meth t s targsEqsargs?
+def isDefEqApp (t s : PExpr) (targsEqsargs? : HashMap Nat (Option EExpr) := default) (tfEqsf? : Option (Option EExpr) := none) : m (Bool × Option EExpr) := do
+  let (isDefEq, data?) ← isDefEqApp' meth t s targsEqsargs? tfEqsf?
   pure (isDefEq, data?.map (·.1))

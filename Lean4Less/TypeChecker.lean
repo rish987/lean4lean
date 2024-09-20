@@ -813,16 +813,16 @@ def appProjThm? (structName : Name) (projIdx : Nat) (struct structN : PExpr) (st
     let env ← getEnv
     let structNType ← whnfPure (← inferTypePure structN 11) 5
     let structType ← whnfPure (← inferTypePure struct 12) 5
-    let .const typeC lvls := if structType.toExpr.isApp then structType.toExpr.withApp fun f _ => f else structType.toExpr | unreachable!
-    let .inductInfo {ctors := [ctor], numParams, numIndices, ..} ← env.get typeC | unreachable!
+    let structTypeC := if structType.toExpr.isApp then structType.toExpr.withApp fun f _ => f else structType.toExpr
+    let .const typeC lvls := structTypeC | unreachable!
+    let .inductInfo {numParams, numIndices, type, levelParams, ..} ← env.get typeC | unreachable!
+    let type := type.instantiateLevelParams levelParams lvls
     assert! numIndices == 0
     let paramsN := structNType.toExpr.getAppArgs
     let params := structType.toExpr.getAppArgs
-    let ctorInfo ← env.get ctor
-    let ctorType := ctorInfo.instantiateTypeLevelParams lvls |>.toPExpr
 
-    let rec loop remCtorType (paramVars : Array Expr) n := do
-      match (← whnfPure remCtorType.toPExpr 8).toExpr, n with
+    let rec loop remType (paramVars : Array Expr) n := do
+      match (← whnfPure remType.toPExpr 8).toExpr, n with
       | .forallE n d b i, m + 1 =>
         let idr := ⟨← mkFreshId⟩
         withLCtx ((← getLCtx).mkLocalDecl idr n d i) do
@@ -830,7 +830,8 @@ def appProjThm? (structName : Name) (projIdx : Nat) (struct structN : PExpr) (st
           let remCtorType := b.instantiate1 rVar
           let paramVars := paramVars.push rVar
           loop remCtorType paramVars m
-      | structType, 0 =>
+      | _, 0 =>
+        let structType := Lean.mkAppN structTypeC paramVars
         let ids := ⟨← mkFreshId⟩
         withLCtx ((← getLCtx).mkLocalDecl ids default structType default) do
           let s := Expr.fvar ids
@@ -838,12 +839,12 @@ def appProjThm? (structName : Name) (projIdx : Nat) (struct structN : PExpr) (st
           let f := (← getLCtx).mkLambda (paramVars ++ #[s]) (.proj structName projIdx s) |>.toPExpr
           let mut targsEqsargs? := default
           targsEqsargs? := targsEqsargs?.insert numParams structEqstructN?
-          let (true, ret?) ← isDefEqApp methsA (Lean.mkAppN f (params ++ #[struct.toExpr])).toPExpr (Lean.mkAppN f (paramsN ++ #[structN.toExpr])).toPExpr targsEqsargs? | unreachable!
+          let (true, ret?) ← isDefEqApp methsA (Lean.mkAppN f (params ++ #[struct.toExpr])).toPExpr (Lean.mkAppN f (paramsN ++ #[structN.toExpr])).toPExpr targsEqsargs? (some none) | unreachable!
 
           pure $ ret?.get!
       | _, _ => unreachable!
 
-    loop ctorType.toExpr #[] numParams
+    loop type #[] numParams
 
 /--
 Reduces a projection of `struct` at index `idx` (when `struct` is reducible to a
