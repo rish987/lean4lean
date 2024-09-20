@@ -40,7 +40,8 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
           _ ← Lean4Less.checkL4L (onlyConsts.map (·.toName)) env
       else
         replayFromFresh' Lean4Less.addDecl `patch.PatchTheoremsAx (onlyConsts? := Lean4Less.patchConsts) (op := "patch") fun env =>
-          replayFromInit Lean4Less.addDecl m env (op := "patch")
+          replayFromInit' Lean4Less.addDecl m env (op := "patch") fun env' =>
+            replayFromEnv Lean4Lean.addDecl m env' (op := "typecheck") (opts := {proofIrrelevance := false, kLikeReduction := false})
   return 0
 
 unsafe def transCmd : Cmd := `[Cli|
