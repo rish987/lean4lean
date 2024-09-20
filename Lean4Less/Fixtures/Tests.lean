@@ -54,6 +54,48 @@ axiom QQ : Nat → P → P → Prop
 axiom QQp : QQ 0 p p
 axiom QQq : QQ 0 q q
 
+namespace Demo
+axiom A : P → Nat → Nat → Nat → Nat → Nat → Nat → Prop
+axiom Aq : A q 0 0 0 0 0 0
+
+theorem absDemoA : A p 0 0 0 0 0 0 := Aq
+
+inductive I : Type where
+| left  : P → I
+| right : P → I
+
+def IT : I → Type
+| .left _  => Unit
+| .right _ => Bool
+
+axiom B : (i : I) → Nat → Nat → Nat → IT i → Nat → Nat → Nat → Prop
+axiom Bq : B (.left q) 0 0 0 () 0 0 0
+
+theorem absDemoB : B (.left p) 0 0 0 () 0 0 0 := Bq
+
+def ITC : I → Type
+| .left _  => Nat → Nat → Nat → Prop
+| .right _ => Bool
+
+axiom C : (i : I) → Nat → Nat → Nat → ITC i
+axiom Cq : C (.left q) 0 0 0 0 0 0
+
+theorem absDemoC : C (.left p) 0 0 0 0 0 0 := Cq
+
+axiom Q : P → Prop
+axiom Qp : Q p
+axiom Qq : Q q
+
+def ITD : I → Type
+| .left x  => Nat → Q x → Nat → Prop
+| .right _ => Bool
+
+axiom D : (i : I) → Nat → Nat → Nat → ITD i
+axiom Dq : D (.left q) 0 0 0 0 Qq 0
+
+theorem absDemoD : D (.left p) 0 0 0 0 Qp 0 := Dq
+end Demo
+
 -- def IT : I → Type
 -- | .left x  => Q x → P → P → P → P → P → P → Prop
 -- | .right _ => Bool

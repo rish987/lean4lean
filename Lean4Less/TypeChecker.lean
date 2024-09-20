@@ -944,6 +944,7 @@ def reduceBinNatOp (op : Name) (f : Nat → Nat → Nat) (a b : PExpr) : RecM (O
   let app := Lean.mkAppN (.const op []) #[a, b] |>.toPExpr
   let app' := Lean.mkAppN (.const op []) #[a', b'] |>.toPExpr
   let sorryProof? ← if op == `Nat.gcd then
+      dbg_trace s!"DBG[9]: TypeChecker.lean:946 {v1} {v2}"
       pure $ .some $ .sry {u := 0, A := a', B := b'}
     else 
       pure none
