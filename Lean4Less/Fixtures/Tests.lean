@@ -15,12 +15,12 @@ def forallEx : Q q → Q q := fun (qp : Q p) => X p qp
 
 def forallEx' : Q q → Q q :=
 @L4L.castHEq (Q p → Q p) (Q q → Q q)
-  (@L4L.forallHEqAB (Q p) (Q q) (Q p) (Q q) (@L4L.appArgHEq P Prop Q p q (L4L.prfIrrel P p q))
-    (@L4L.appArgHEq P Prop Q p q (L4L.prfIrrel P p q)))
+  (@L4L.forallHEqAB (Q p) (Q q) (Q p) (Q q) (@L4L.appArgHEq P Prop Q p q (L4L.prfIrrel p q))
+    (@L4L.appArgHEq P Prop Q p q (L4L.prfIrrel p q)))
   fun (qp : Q p) => X p qp
 def forallEx'' : Q q → Q q :=
-  fun (qq : Q q) => @L4L.castHEq (Q p) (Q q) (@L4L.appArgHEq P Prop Q p q (L4L.prfIrrel P p q))
-                      (X p (@L4L.castHEq (Q q) (Q p) (@L4L.appArgHEq P Prop Q q p (L4L.prfIrrel P q p)) qq)) 
+  fun (qq : Q q) => @L4L.castHEq (Q p) (Q q) (@L4L.appArgHEq P Prop Q p q (L4L.prfIrrel p q))
+                      (X p (@L4L.castHEq (Q q) (Q p) (@L4L.appArgHEq P Prop Q q p (L4L.prfIrrel q p)) qq)) 
 #check_off forallEx''
 
 axiom Qp : Q p
@@ -53,6 +53,18 @@ def absTest : M (.right p) (.left p) true p p p p p p 0 Qp Np := mq
 axiom QQ : Nat → P → P → Prop
 axiom QQp : QQ 0 p p
 axiom QQq : QQ 0 q q
+
+theorem appArgHEq' {A : Sort u} {U : A → Sort v}
+  (f : (a : A) → U a)
+  (a b : A) (hab : Eq a b)
+  : HEq (f a) (f b) := sorry
+
+theorem eq_of_heq' {A : Sort u} {a a' : A} (h : HEq a a') : Eq a a' :=
+  have (A B : Sort u) (a : A) (b : B) (h₁ : HEq a b) : (h : Eq A B) → Eq (cast h a) b :=
+    h₁.rec (fun _ => rfl)
+  this A A a a' h rfl
+
+#check_l4l eq_of_heq'
 
 namespace Demo
 axiom A : P → Nat → Nat → Nat → Nat → Nat → Nat → Prop
@@ -183,8 +195,8 @@ axiom ax' : n → Prop
 -- axiom ax' (α : Sort u) (a : α) : BK true → (a' : α) → cast (axh α α) a = a'
 axiom Ty : Type
 axiom ty : Ty
-noncomputable def eq_of_heq' : Prop :=
-  ax' ax 
+-- noncomputable def eq_of_heq' : Prop :=
+--   ax' ax 
 -- #check_l4l eq_of_heq'
 -- set_option pp.explicit true in
 -- #print eq_of_heq'
