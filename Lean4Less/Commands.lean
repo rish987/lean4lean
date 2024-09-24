@@ -72,6 +72,7 @@ def patchConsts : List Name := [
 `L4L.lambdaHEqABUV',
 
 `L4L.appHEqBinNatFn,
+`sorryAx, --FIXME
 ]
 
 def transL4L' (ns : Array Name) (env : Environment) (pp := false) : IO Environment := do

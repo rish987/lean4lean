@@ -53,16 +53,17 @@ def patchDefinition (env : Environment) (v : DefinitionVal) :
       -- dbg_trace s!"DBG[34]: Environment.lean:52 (after checkNoMVarNoFVar env v.name v.value)"
       let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
       -- dbg_trace s!"DBG[98]: Environment.lean:54: valueType={valueType}"
-      -- dbg_trace s!"DBG[100]: Environment.lean:51: type={type}"
       let value' := value'?.getD v.value.toPExpr
       -- dbg_trace s!"DBG[33]: Environment.lean:54 (after let value := value?.getD v.value.toPExpr)"
       let (defEq, _) ← isDefEq valueType type v.levelParams
+      -- dbg_trace s!"DBG[13]: Environment.lean:58 (after let (defEq, _) ← isDefEq valueType typ…)"
       -- dbg_trace s!"DBG[31]: Environment.lean:57: valueTypeEqtype?={valueTypeEqtype?}"
 
       if !defEq then
         throw <| .declTypeMismatch env (.defnDecl v) valueType
 
       let value ← smartCast valueType type value' v.levelParams
+      -- dbg_trace s!"DBG[15]: Environment.lean:65 (after let value ← smartCast valueType type v…)"
       let v := {v with type, value}
       -- dbg_trace s!"DBG[35]: Environment.lean:64 (after let v := v with type, value)"
       return (.defnInfo v)

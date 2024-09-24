@@ -359,8 +359,11 @@ def isDefEqForallOpt' (t s : PExpr) : RecB := do
     tAbsDomsEqsAbsDomsMap := tAbsDomsEqsAbsDomsMap.insert idx tAbsDomsEqsAbsDom?
     idx := idx + 1
 
-  let (ret, dat?) ← isDefEqApp'' methsA tf'.toPExpr sf'.toPExpr tAbsDoms sAbsDoms tAbsDomsEqsAbsDomsMap
-  pure (ret, dat?.map (·.1))
+  if tAbsDoms.size == 0 then
+    pure (true, none)
+  else
+    let (ret, dat?) ← isDefEqApp'' methsA tf'.toPExpr sf'.toPExpr tAbsDoms sAbsDoms tAbsDomsEqsAbsDomsMap
+    pure (ret, dat?.map (·.1))
 
 /--
 If `t` and `s` are for-all expressions, checks that their domains are defeq and
@@ -370,6 +373,7 @@ parameter). Otherwise, does a normal defeq check.
 -/
 def isDefEqForall (t s : PExpr) (numBinds := 0) : RecB := do
   if numBinds == 0 then
+    -- dbg_trace s!"DBG[12]: TypeChecker.lean:372 (after if numBinds == 0 then)"
     isDefEqForallOpt' t s
   else
     let rec getData t s n := do
@@ -381,6 +385,7 @@ def isDefEqForall (t s : PExpr) (numBinds := 0) : RecB := do
         pure (#[], tBody.toPExpr, sBody.toPExpr)
     let (datas, tBody, sBody) ← getData t.toExpr s.toExpr numBinds
     let ret ← isDefEqBinder datas tBody sBody fun Ua Vx UaEqVx? as ds => do
+      -- dbg_trace s!"DBG[10]: TypeChecker.lean:383 (after let ret ← isDefEqBinder datas tBody sB…)"
       let mut UaEqVx? := UaEqVx?
       let mut Ua := Ua
       let mut Vx := Vx
@@ -415,6 +420,7 @@ def isDefEqForall (t s : PExpr) (numBinds := 0) : RecB := do
 
         Ua := (← getLCtx).mkForall #[a] Ua |>.toPExpr
         Vx := (← getLCtx).mkForall #[x] Vx |>.toPExpr
+        -- dbg_trace s!"DBG[11]: TypeChecker.lean:418 (after Vx := (← getLCtx).mkForall #[x] Vx |>.…)"
 
       pure $ UaEqVx?
     pure ret
@@ -902,10 +908,11 @@ def reduceBinNatOp (op : Name) (f : Nat → Nat → Nat) (a b : PExpr) : RecM (O
   let (b', pb?) := (← whnf b)
   let some v1 := natLitExt? a' | return none
   let some v2 := natLitExt? b' | return none
+  let nat := (Expr.const `Nat []).toPExpr
   let mut appEqapp'? ← if pa?.isSome || pb?.isSome then
-      let pa ← pa?.getDM (mkHRefl (.succ .zero) (Expr.const `Nat []).toPExpr a')
-      let pb ← pb?.getDM (mkHRefl (.succ .zero) (Expr.const `Nat []).toPExpr b')
-      pure $ .some $ Lean.mkAppN (← getConst `L4L.appHEqBinNatFn []) #[.const `Nat [], .const `Nat [], .const op [], a, a', b, b', pa, pb] |>.toEExpr
+      let pa ← pa?.getDM (mkHRefl (.succ .zero) nat a')
+      let pb ← pb?.getDM (mkHRefl (.succ .zero) nat b')
+      pure $ .some $ Lean.mkAppN (← getConst `L4L.appHEqBinNatFn []) #[nat, nat, .const op [], a, a', b, b', pa, pb] |>.toEExpr
     else
       pure none
   let result := (Expr.lit <| .natVal <| f v1 v2).toPExpr
@@ -913,7 +920,7 @@ def reduceBinNatOp (op : Name) (f : Nat → Nat → Nat) (a b : PExpr) : RecM (O
   let app' := Lean.mkAppN (.const op []) #[a', b'] |>.toPExpr
   let sorryProof? ← if op == `Nat.gcd then
       dbg_trace s!"DBG: GCD used: {v1} {v2}"
-      pure $ .some $ .sry {u := 0, A := a', B := b'}
+      pure $ .some $ .sry {u := 1, A := nat, a := a', B := nat, b := b'}
     else 
       pure none
   let ret? ← appHEqTrans? app app' result appEqapp'? sorryProof?
@@ -969,7 +976,9 @@ def reduceNat (e : PExpr) : RecM (Option (PExpr × Option EExpr)) := do
     if f == ``Nat.sub then return ← reduceBinNatOp ``Nat.sub Nat.sub a.toPExpr b.toPExpr
     if f == ``Nat.mul then return ← reduceBinNatOp ``Nat.mul Nat.mul a.toPExpr b.toPExpr
     if f == ``Nat.pow then return ← reduceBinNatOp ``Nat.pow Nat.pow a.toPExpr b.toPExpr
-    if f == ``Nat.gcd then return ← reduceBinNatOp ``Nat.gcd Nat.gcd a.toPExpr b.toPExpr
+    if f == ``Nat.gcd then 
+      dbg_trace s!"DBG: GCD averted: {natLitExt? (← whnf a.toPExpr).1} {natLitExt? (← whnf a.toPExpr).1}"
+      -- return ← reduceBinNatOp ``Nat.gcd Nat.gcd a.toPExpr b.toPExpr
     if f == ``Nat.mod then return ← reduceBinNatOp ``Nat.mod Nat.mod a.toPExpr b.toPExpr
     if f == ``Nat.div then return ← reduceBinNatOp ``Nat.div Nat.div a.toPExpr b.toPExpr
     if f == ``Nat.beq then return ← reduceBinNatPred ``Nat.beq Nat.beq a.toPExpr b.toPExpr
@@ -1463,15 +1472,15 @@ def isDefEqUnitLike (t s : PExpr) : RecB := do
 
 @[inherit_doc isDefEqCore]
 def isDefEqCore' (t s : PExpr) : RecB := do
-  let leanMinusDefEq ← try
-    runLeanMinus $ Lean.TypeChecker.isDefEq t.toExpr s.toExpr
-  catch e =>
-    match e with
-    | .deepRecursion =>
-      pure false -- proof irrelevance may be needed to avoid deep recursion (e.g. String.size_toUTF8)
-    | _ => throw e
-  if leanMinusDefEq then
-    return (true, none)
+  -- let leanMinusDefEq ← try
+  --   runLeanMinus $ Lean.TypeChecker.isDefEq t.toExpr s.toExpr
+  -- catch e =>
+  --   match e with
+  --   | .deepRecursion =>
+  --     pure false -- proof irrelevance may be needed to avoid deep recursion (e.g. String.size_toUTF8)
+  --   | _ => throw e
+  -- if leanMinusDefEq then
+  --   return (true, none)
   let (r, pteqs?) ← quickIsDefEq t s (useHash := true)
   if r != .undef then return (r == .true, pteqs?)
 

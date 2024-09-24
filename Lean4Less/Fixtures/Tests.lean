@@ -184,8 +184,17 @@ theorem HashMapTest' {α : Type u} {β : α → Type v} [inst : BEq α] [inst_1 
         sorry))
     (@rfl (Option (β a)) (@Std.DHashMap.get? α β inst inst_1 inst_2 (@Std.DHashMap.empty α β inst inst_1 c) a))
 
+axiom tP : Prop
+def tempaux (_ : Nat) := tP
+axiom ta : tP
+set_option pp.all true
+def temp (x : Nat) : tempaux x = tP := rfl
+
+
 -- def HashMapTest {α : Type u} {β : α → Type v} [BEq α] [Hashable α] [LawfulBEq α] {a : α}
 --   {c : Nat} : Std.DHashMap.Internal.Raw₀.get? ⟨(Std.DHashMap.empty c : Std.DHashMap α β).val, sorry⟩ a = Std.DHashMap.Internal.Raw₀.get? (Subtype.mk (Subtype.val (Std.DHashMap.empty c)) (@Std.DHashMap.Internal.Raw₀.empty.proof_1 α β c)) a := rfl
+-- #print Nat.succ_le_succ.match_1
+-- #check_off Nat.succ_le_succ.match_1
 
 theorem HashMapTest {α : Type u} {β : α → Type v} [BEq α] [Hashable α] [LawfulBEq α] {a : α}
   {c : Nat} : (Std.DHashMap.empty c : Std.DHashMap α β).get? a = (Std.DHashMap.Internal.Raw₀.empty c).get? a := rfl

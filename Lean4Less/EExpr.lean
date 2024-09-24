@@ -41,7 +41,9 @@ deriving Inhabited
 structure SorryData where
 u    : Level
 A    : PExpr
+a    : PExpr
 B    : PExpr
+b    : PExpr
 deriving Inhabited
 
 
@@ -387,7 +389,7 @@ def FVarData.toExpr : FVarData → Expr
 | {aEqb, ..} => aEqb
 
 def SorryData.toExpr : SorryData → Expr
-| {u, A, B} => Lean.mkAppN (.const `sorryAx [u]) #[A, B, .const `Bool.false []]
+| {u, A, a, B, b} => Lean.mkAppN (.const `sorryAx [0]) #[Lean.mkAppN (.const ``HEq [u]) #[A, a, B, b], .const `Bool.false []]
 
 def EExpr.toExpr : EExpr → Expr
 | .other e => e
@@ -477,8 +479,8 @@ def PIData.reverse : PIData EExpr → EExpr
   .prfIrrel {P := newP, p := q, q := p, extra := extra}
 
 def SorryData.reverse : SorryData → EExpr
-| {u, A, B} =>
-  .sry {u, A := B, B := A}
+| {u, a, A, b, B} =>
+  .sry {u, A := B, a := b, B := A, b := a}
 
 def EExpr.reverse (t s tType sType : PExpr) (lvl : Level) : EExpr → EExpr
 | .other e => .symm {u := lvl, A := tType, B := sType, a := t, b := s, aEqb := .other e}
