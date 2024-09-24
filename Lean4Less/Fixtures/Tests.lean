@@ -54,17 +54,17 @@ axiom QQ : Nat → P → P → Prop
 axiom QQp : QQ 0 p p
 axiom QQq : QQ 0 q q
 
-theorem appArgHEq' {A : Sort u} {U : A → Sort v}
-  (f : (a : A) → U a)
-  (a b : A) (hab : Eq a b)
-  : HEq (f a) (f b) := sorry
+-- theorem appArgHEq' {A : Sort u} {U : A → Sort v}
+--   (f : (a : A) → U a)
+--   (a b : A) (hab : Eq a b)
+--   : HEq (f a) (f b) := sorry
 
 theorem eq_of_heq' {A : Sort u} {a a' : A} (h : HEq a a') : Eq a a' :=
   have (A B : Sort u) (a : A) (b : B) (h₁ : HEq a b) : (h : Eq A B) → Eq (cast h a) b :=
     h₁.rec (fun _ => rfl)
   this A A a a' h rfl
 
-#check_l4l eq_of_heq'
+-- #check_l4l eq_of_heq'
 
 namespace Demo
 axiom A : P → Nat → Nat → Nat → Nat → Nat → Nat → Prop

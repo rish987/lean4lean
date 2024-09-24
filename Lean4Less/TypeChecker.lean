@@ -15,8 +15,8 @@ import Lean4Less.App
 namespace Lean4Less
 open Lean
 
-abbrev InferCache := HashMap Expr (PExpr × Option PExpr)
-abbrev InferCacheP := HashMap Expr (PExpr)
+abbrev InferCache := Std.HashMap Expr (PExpr × Option PExpr)
+abbrev InferCacheP := Std.HashMap Expr (PExpr)
 
 structure TypeChecker.State where
   ngen : NameGenerator := { namePrefix := `_kernel_fresh, idx := 0 }
@@ -25,7 +25,7 @@ structure TypeChecker.State where
   whnfCoreCache : ExprMap (PExpr × Option EExpr) := {}
   whnfCache : ExprMap (PExpr × Option EExpr) := {}
   eqvManager : EquivManager := {}
-  failure : HashSet (Expr × Expr) := {}
+  failure : Std.HashSet (Expr × Expr) := {}
 
 structure TypeChecker.Context where
   env : Environment
@@ -37,7 +37,7 @@ structure TypeChecker.Context where
   Mapping from free variables to proofs of their equality,
   introduced by isDefEqLambda.
   -/
-  eqFVars : HashMap (FVarId × FVarId) (FVarId × FVarId) := {}
+  eqFVars : Std.HashMap (FVarId × FVarId) (FVarId × FVarId) := {}
   safety : DefinitionSafety := .safe
   lparams : List Name := []
 
@@ -66,7 +66,7 @@ instance [Monad m] : MonadNameGenerator (StateT State m) where
 instance (priority := low) : MonadWithReaderOf LocalContext M where
   withReader f := withReader fun s => { s with lctx := f s.lctx }
 
-instance (priority := low) : MonadWithReaderOf (HashMap (FVarId × FVarId) (FVarId × FVarId)) M where
+instance (priority := low) : MonadWithReaderOf (Std.HashMap (FVarId × FVarId) (FVarId × FVarId)) M where
   withReader f := withReader fun s => { s with eqFVars := f s.eqFVars }
 
 structure Methods where
@@ -702,7 +702,7 @@ def inferType' (e : Expr) : RecPE := do
         }replace them with free variables before invoking it"
   assert 5 $ !e.hasLooseBVars
   let state ← get
-  if let some r := state.inferTypeC.find? e then
+  if let some r := state.inferTypeC[e]? then
     -- if (← readThe Context).const == `eq_of_heq' then
     --   dbg_trace s!"finished e={e}"
     return r
@@ -1055,10 +1055,10 @@ def isDefEqLambda (t s : PExpr) : RecB := do
     pure faEqgx?
 
 def isDefEqFVar (idt ids : FVarId) : RecLB := do
-  if let some (idtEqs, idsEqt) := (← readThe Context).eqFVars.find? (idt, ids) then
+  if let some (idtEqs, idsEqt) := (← readThe Context).eqFVars.get? (idt, ids) then
     let p := .fvar {aEqb := Expr.fvar idtEqs |>.toPExpr, bEqa := Expr.fvar idsEqt |>.toPExpr}
     return (.true, some p)
-  else if let some (idsEqt, idtEqs) := (← readThe Context).eqFVars.find? (ids, idt) then
+  else if let some (idsEqt, idtEqs) := (← readThe Context).eqFVars.get? (ids, idt) then
     let p := .fvar {aEqb := Expr.fvar idtEqs |>.toPExpr, bEqa := Expr.fvar idsEqt |>.toPExpr}
     return (.true, .some p)
   return (.undef, none)
@@ -1149,7 +1149,7 @@ def tryEtaStruct (t s : PExpr) : RecB := do
 def reduceRecursor (e : PExpr) (cheapRec cheapProj : Bool) : RecM (Option (PExpr × Option EExpr)) := do
   let env ← getEnv
   if env.header.quotInit then
-    if let some r ← quotReduceRec e whnf (fun x y tup => isDefEqApp methsA x y (targsEqsargs? := HashMap.insert default tup.1 tup.2)) then
+    if let some r ← quotReduceRec e whnf (fun x y tup => isDefEqApp methsA x y (targsEqsargs? := Std.HashMap.insert default tup.1 tup.2)) then
       return r
   let whnf' e := if cheapRec then whnfCore e cheapRec cheapProj else whnf e
   let meths := {methsR with whnf := whnf'}
@@ -1167,7 +1167,7 @@ private def _whnfCore' (e' : Expr) (cheapRec := false) (cheapProj := false) : Re
   | .mdata _ e => return ← _whnfCore' e cheapRec cheapProj
   | .fvar id => if !isLetFVar (← getLCtx) id then return (e, none)
   | .app .. | .letE .. | .proj .. => pure ()
-  if let some r := (← get).whnfCoreCache.find? e then
+  if let some r := (← get).whnfCoreCache.get? e then
     return r
   let rec save r := do
     if !cheapRec && !cheapProj then
@@ -1289,7 +1289,7 @@ def isDefEqProofIrrel (t s : PExpr) : RecLB := do
     return (.true, .some p)
   pure (.undef, none)
 
-def failedBefore (failure : HashSet (Expr × Expr)) (t s : Expr) : Bool :=
+def failedBefore (failure : Std.HashSet (Expr × Expr)) (t s : Expr) : Bool :=
   if t.hash < s.hash then
     failure.contains (t, s)
   else if t.hash > s.hash then

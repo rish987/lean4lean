@@ -11,7 +11,7 @@ namespace Lean4Less.TypeChecker.Inner
 structure ExtMethodsA (m : Type → Type u) extends ExtMethods m where
   opt : Bool := true
 
-variable [Monad m] [MonadLCtx m] [MonadExcept KernelException m] [MonadNameGenerator m] [MonadWithReaderOf LocalContext m] [MonadWithReaderOf (HashMap (FVarId × FVarId) (FVarId × FVarId)) m] (env : Environment)
+variable [Monad m] [MonadLCtx m] [MonadExcept KernelException m] [MonadNameGenerator m] [MonadWithReaderOf LocalContext m] [MonadWithReaderOf (Std.HashMap (FVarId × FVarId) (FVarId × FVarId)) m] (env : Environment)
   (meth : ExtMethodsA m)
 
 def mkAppEqProof? (aVars bVars : Array PExpr) (Uas Vbs : Array PExpr) (ds? : Array (Option (FVarId × FVarId × EExpr))) (as bs : Array PExpr) (asEqbs? : Array (Option EExpr)) (f g : PExpr) (fEqg? : Option EExpr := none)
@@ -187,23 +187,23 @@ def mkAppEqProof (T S : PExpr) (as bs : Array PExpr) (asEqbs? : Array (Option EE
 def forallAbs (max : Nat) (tfT sfT : Expr) : m
     (PExpr × Array (FVarId × Name × PExpr) × Array PExpr ×
      PExpr × Array (FVarId × Name × PExpr) × Array PExpr ×
-     Array (Option EExpr) × HashSet Nat) := do
-  let rec loop tfT sfT tDomsVars tDoms sDomsVars sDoms tDomsEqsDoms (absArgs' : HashSet Nat) idx' (origDomVars origDomVarsAbs : Array (FVarId × FVarId)) (origDomVarsRefs : HashMap (FVarId × FVarId) (HashSet (FVarId × FVarId))) (origDomVarsToNewDomVars : HashMap (FVarId × FVarId) (FVarId × FVarId)) := do
+     Array (Option EExpr) × Std.HashSet Nat) := do
+  let rec loop tfT sfT tDomsVars tDoms sDomsVars sDoms tDomsEqsDoms (absArgs' : Std.HashSet Nat) idx' (origDomVars origDomVarsAbs : Array (FVarId × FVarId)) (origDomVarsRefs : Std.HashMap (FVarId × FVarId) (Std.HashSet (FVarId × FVarId))) (origDomVarsToNewDomVars : Std.HashMap (FVarId × FVarId) (FVarId × FVarId)) := do
 
     let withMaybeAbs tType sType tTypeEqsType? f (tName := `tT) (sName := `sT) (tBi := default) (sBi := default) := do 
       if tTypeEqsType?.isSome || origDomVarsAbs.any (tType.containsFVar ·.1) || origDomVarsAbs.any (sType.containsFVar ·.2) then
         let mut depVars := #[]
         let mut origDepVars := #[]
-        let mut origDepVarsSet : HashSet (FVarId × FVarId) := default
+        let mut origDepVarsSet : Std.HashSet (FVarId × FVarId) := default
         for (tvar, svar) in origDomVars do
           if tType.containsFVar tvar || sType.containsFVar svar then
             origDepVarsSet := origDepVarsSet.insert (tvar, svar)
-            for (tvar', svar') in origDomVarsRefs.find! (tvar, svar) do
+            for (tvar', svar') in origDomVarsRefs.get! (tvar, svar) do
               origDepVarsSet := origDepVarsSet.insert (tvar', svar')
 
         for (tvar, svar) in origDomVars do
           if origDepVarsSet.contains (tvar, svar) then
-            depVars := depVars.push $ origDomVarsToNewDomVars.find! (tvar, svar)
+            depVars := depVars.push $ origDomVarsToNewDomVars.get! (tvar, svar)
             origDepVars := origDepVars.push $ (tvar, svar)
 
         let tsort ← meth.ensureSortCorePure (← meth.inferTypePure tType.toPExpr 207) tType.toPExpr
@@ -239,7 +239,7 @@ def forallAbs (max : Nat) (tfT sfT : Expr) : m
         let (newtBod, newsBod) := newtsBod?.getD (tBod, sBod)
         let mut newDomVars := #[]
         for tsvar in origDomVars do
-          newDomVars := newDomVars.push (origDomVarsToNewDomVars.find! tsvar)
+          newDomVars := newDomVars.push (origDomVarsToNewDomVars.get! tsvar)
         pure ((← getLCtx).mkForall (newDomVars.map (fun ((tvar, _) : FVarId × FVarId) => .fvar tvar)) newtBod |>.toPExpr, tDomsVars, tDoms, (← getLCtx).mkForall (newDomVars.map (fun ((_, svar) : FVarId × FVarId) => .fvar svar)) newsBod |>.toPExpr, sDomsVars, sDoms, tDomsEqsDoms, absArgs')
 
     if idx' < max then
@@ -249,7 +249,7 @@ def forallAbs (max : Nat) (tfT sfT : Expr) : m
           for (tvar, svar) in origDomVars do
             if tDom.containsFVar tvar || sDom.containsFVar svar then
               refs := refs.insert (tvar, svar)
-              for (tvar', svar') in origDomVarsRefs.find! (tvar, svar) do
+              for (tvar', svar') in origDomVarsRefs.get! (tvar, svar) do
                 refs := refs.insert (tvar', svar')
 
           let idt := ⟨← mkFreshId⟩
@@ -301,7 +301,7 @@ def forallAbs (max : Nat) (tfT sfT : Expr) : m
 
 
 def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
-   (targsEqsargs? : HashMap Nat (Option EExpr) := default) (tfEqsf? : Option (Option EExpr) := none) : m (Bool × (Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))) := do
+   (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default) (tfEqsf? : Option (Option EExpr) := none) : m (Bool × (Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))) := do
   unless tArgs.size == sArgs.size do return (false, none)
 
   let (.true, tfEqsf?) ← if tfEqsf?.isSome then pure (.true, tfEqsf?.get!)
@@ -335,7 +335,7 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
   let mut sArgsVars : Array FVarId := #[]
   let mut tEtaVars : Nat := 0 -- number of vars that can be eliminated from the lambda by eta reduction
   let mut sEtaVars : Nat := 0
-  let mut absArgs : HashSet Nat := default
+  let mut absArgs : Std.HashSet Nat := default
   let mut tfT ← meth.inferTypePure tBodFun 210
   let mut sfT ← meth.inferTypePure sBodFun 211
   let mut tBodT := tfT
@@ -404,7 +404,7 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
     let sa := sArgs[idx]!
 
     let mut taEqsa? := none
-    if let some _p? := targsEqsargs?.find? idx then
+    if let some _p? := targsEqsargs?.get? idx then
       taEqsa? := _p?
     else
       let (.true, _p?) ← meth.isDefEq ta sa | return (false, none)
@@ -451,7 +451,7 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
   return (true, (tEqs?.map fun tEqs => (tEqs, taEqsaDatas)))
 
 def isDefEqApp''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
-   (targsEqsargs? : HashMap Nat (Option EExpr) := default) (tfEqsf? : Option (Option EExpr) := none) : m (Bool × (Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))) := do
+   (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default) (tfEqsf? : Option (Option EExpr) := none) : m (Bool × (Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))) := do
   unless tArgs.size == sArgs.size do return (false, none)
 
   let (.true, _ret?) ← if tfEqsf?.isSome then pure (.true, tfEqsf?.get!)
@@ -461,7 +461,7 @@ def isDefEqApp''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
   let mut idx := 0
   for ta in tArgs, sa in sArgs do
     let mut p? := none
-    if let some _p? := targsEqsargs?.find? idx then
+    if let some _p? := targsEqsargs?[idx]? then
       p? := _p?
     else
       let (.true, _p?) ← meth.isDefEq ta sa | return (false, none)
@@ -478,7 +478,7 @@ def isDefEqApp''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
   return (true, (tEqs?.map fun tEqs => (tEqs, taEqsas)))
 
 def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
-   (targsEqsargs? : HashMap Nat (Option EExpr) := default) (tfEqsf? : Option (Option EExpr) := none) : m (Bool × (Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))) := do
+   (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default) (tfEqsf? : Option (Option EExpr) := none) : m (Bool × (Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))) := do
 
   if meth.opt then
     isDefEqAppOpt''' meth tf sf tArgs sArgs targsEqsargs? tfEqsf?
@@ -490,7 +490,7 @@ Checks if applications `t` and `s` (should be WHNF) are defeq on account of
 their function heads and arguments being defeq.
 -/
 def isDefEqApp' (t s : PExpr)
-   (targsEqsargs? : HashMap Nat (Option EExpr) := default) (tfEqsf? : Option (Option EExpr) := none) : m (Bool × (Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))) := do
+   (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default) (tfEqsf? : Option (Option EExpr) := none) : m (Bool × (Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))) := do
   unless t.toExpr.isApp && s.toExpr.isApp do return (false, none)
   t.toExpr.withApp fun tf tArgs =>
   s.toExpr.withApp fun sf sArgs => 
@@ -500,6 +500,6 @@ def isDefEqApp' (t s : PExpr)
     let sArgs := sArgs.map (·.toPExpr)
     isDefEqApp'' meth tf sf tArgs sArgs targsEqsargs? tfEqsf?
 
-def isDefEqApp (t s : PExpr) (targsEqsargs? : HashMap Nat (Option EExpr) := default) (tfEqsf? : Option (Option EExpr) := none) : m (Bool × Option EExpr) := do
+def isDefEqApp (t s : PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default) (tfEqsf? : Option (Option EExpr) := none) : m (Bool × Option EExpr) := do
   let (isDefEq, data?) ← isDefEqApp' meth t s targsEqsargs? tfEqsf?
   pure (isDefEq, data?.map (·.1))

@@ -9,8 +9,8 @@ open Lean
 section
 
 structure ExtMethodsR (m : Type → Type u) extends ExtMethods m where
-  isDefEqApp' : PExpr → PExpr → HashMap Nat (Option EExpr) → m (Bool × Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))
-  isDefEqApp : PExpr → PExpr → HashMap Nat (Option EExpr) → m (Bool × Option EExpr)
+  isDefEqApp' : PExpr → PExpr → Std.HashMap Nat (Option EExpr) → m (Bool × Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))
+  isDefEqApp : PExpr → PExpr → Std.HashMap Nat (Option EExpr) → m (Bool × Option EExpr)
   smartCast : PExpr → PExpr → PExpr → m PExpr
 
 variable [Monad m] (env : Environment)

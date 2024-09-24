@@ -23,11 +23,11 @@ structure ExtMethods (m : Type → Type u) where
 
 namespace TypeChecker
 
-variable [Monad m] [MonadLCtx m] [MonadExcept KernelException m] [MonadNameGenerator m] [MonadWithReaderOf LocalContext m] [MonadWithReaderOf (HashMap (FVarId × FVarId) (FVarId × FVarId)) m] (env : Environment)
+variable [Monad m] [MonadLCtx m] [MonadExcept KernelException m] [MonadNameGenerator m] [MonadWithReaderOf LocalContext m] [MonadWithReaderOf (Std.HashMap (FVarId × FVarId) (FVarId × FVarId)) m] (env : Environment)
   (meth : ExtMethods m)
 
 @[inline] def withLCtx [MonadWithReaderOf LocalContext m] (lctx : LocalContext) (x : m α) : m α :=
   withReader (fun _ => lctx) x
 
-@[inline] def withEqFVar [MonadWithReaderOf (HashMap (FVarId × FVarId) (FVarId × FVarId)) m] (idt ids : FVarId) (eq : (FVarId × FVarId)) (x : m α) : m α :=
+@[inline] def withEqFVar [MonadWithReaderOf (Std.HashMap (FVarId × FVarId) (FVarId × FVarId)) m] (idt ids : FVarId) (eq : (FVarId × FVarId)) (x : m α) : m α :=
   withReader (fun l => l.insert (idt, ids) eq) x
