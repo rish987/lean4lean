@@ -126,10 +126,11 @@ def inductiveReduceRec [Monad m] (env : Environment) (e : PExpr)
   if ls.length != info.levelParams.length then return none
   let mut rhs := rule.rhs.instantiateLevelParams info.levelParams ls
 
-  let type ← meth.inferTypePure major 105
-  let newType ← meth.inferTypePure majorMaybeCtor 106
+  let type ← meth.whnfPure (← meth.inferTypePure major 105) 105
+  let newType ← meth.whnfPure (← meth.inferTypePure majorMaybeCtor 106) 106
   let (defEq, d?) ←
-    if type.toExpr.isApp then meth.isDefEqApp' type newType default
+    if type.toExpr.isApp then
+      meth.isDefEqApp' type newType default
     else
       pure (← meth.isDefEqPure type newType, none)
 
