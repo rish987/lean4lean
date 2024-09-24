@@ -119,10 +119,8 @@ def mkAppEqProof (T S : PExpr) (as bs : Array PExpr) (asEqbs? : Array (Option EE
     let aType ← meth.inferTypePure a 203
     let bType ← meth.inferTypePure b 204
     let .true ← meth.isDefEqPure A aType | do
-      dbg_trace s!"DBG[1]: App.lean:121 (after let .true ← meth.isDefEqPure A aType |…)"
       throw $ .other s!"expected: {A}\n inferred: {aType}"
     let .true ← meth.isDefEqPure B bType | do
-      dbg_trace s!"DBG[2]: App.lean:124 (after let .true ← meth.isDefEqPure B bType |…)"
       -- let app := Lean.mkAppN g.toExpr (bs[:5].toArray.map PExpr.toExpr)
       -- let appType ← meth.whnfPure $ ← meth.inferTypePure app.toPExpr 205
       -- let .forallE _ _domType _ _ := appType.toExpr | unreachable!
@@ -342,6 +340,21 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
   let mut sBodT := sfT
   let mut taEqsas' := #[]
 
+  let cond := if let .const `Eq _ := tf.toExpr then if let .const `Eq _ := sf.toExpr then
+    if tArgs.size == 3 then
+      let tArg := tArgs[2]!
+      let sArg := sArgs[2]!
+      if tArg.toExpr.isApp then if let .const `Std.DHashMap.get? _ := tArg.toExpr.withApp fun k _ => k then
+        if sArg.toExpr.isApp then if let .const `Std.DHashMap.Internal.Raw₀.get? _ := sArg.toExpr.withApp fun k _ => k then
+          true
+        else false
+        else false
+        else false
+        else false
+      else false
+    else false
+  else false
+
   -- assert! tfEqsf?.isNone -- FIXME
 
   for idx in [:tArgs.size] do
@@ -399,7 +412,6 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
           | .forallE tDomName tDom _ _, .forallE sDomName sDom _ _ =>
             pure $ (tDom.toPExpr, tDomName, sDom.toPExpr, sDomName)
           | _, _ => unreachable!
-
     let ta := tArgs[idx]!
     let sa := sArgs[idx]!
 

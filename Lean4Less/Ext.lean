@@ -5,6 +5,29 @@ import Lean4Less.EExpr
 namespace Lean4Less
 open Lean
 
+def cond : Expr → Expr → Bool
+| .forallE _ _ tbod _, .forallE _ _ sbod _ => cond tbod sbod
+| tbod, sbod=> 
+  let tf := tbod.getAppFn
+  let sf := sbod.getAppFn
+  let tArgs := tbod.getAppArgs
+  let sArgs := sbod.getAppArgs
+
+  if let .const `Eq _ := tf then if let .const `Eq _ := sf then
+    if tArgs.size == 3 then
+      let tArg := tArgs[2]!
+      let sArg := sArgs[2]!
+      if tArg.isApp then if let .const `Std.DHashMap.get? _ := tArg.withApp fun k _ => k then
+        if sArg.isApp then if let .const `Std.DHashMap.Internal.Raw₀.get? _ := sArg.withApp fun k _ => k then
+          true
+        else false
+        else false
+        else false
+        else false
+      else false
+    else false
+  else false
+
 section
 
 structure ExtMethods (m : Type → Type u) where

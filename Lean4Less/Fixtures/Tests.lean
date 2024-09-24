@@ -156,6 +156,39 @@ abbrev gcd (m : @& Nat) : Nat :=
 --          (@instWellFoundedRelationOfSizeOf Nat instSizeOfNat)).1 :=
 --    (@invImage ((_ : Nat) ×' Nat) Nat (fun x => @PSigma.casesOn Nat (fun m => Nat) (fun _x => Nat) x fun m n => m)
 --        (@instWellFoundedRelationOfSizeOf Nat instSizeOfNat)).2
+def h1 := forall {α : Type u} {β : α -> Type v} [A : BEq.{u} α] [B : Hashable α] [C : @LawfulBEq α A] {a : α} {c : Nat}, 
+  @Eq (Option.{v} (β a)) (@Std.DHashMap.get?.{u, v} α β A B C (@Std.DHashMap.empty.{u, v} α β A B c) a)
+    (@Std.DHashMap.get?.{u, v} α β A B C (@Std.DHashMap.empty.{u, v} α β A B c) a)
+
+def h2 := forall {α : Type u} {β : α -> Type v} [A : BEq.{u} α] [B : Hashable α] [C : @LawfulBEq α A] {a : α} {c : Nat}, 
+  @Eq (Option.{v} (β a)) (@Std.DHashMap.get?.{u, v} α β A B C (@Std.DHashMap.empty.{u, v} α β A B c) a)
+    (@Std.DHashMap.Internal.Raw₀.get?.{u, v} α β A C B (@Std.DHashMap.Internal.Raw₀.empty.{u, v} α β c) a)
+
+theorem HashMapTest' {α : Type u} {β : α → Type v} [inst : BEq α] [inst_1 : Hashable α] [inst_2 : @LawfulBEq α inst] {a : α} {c : Nat} :
+  @Eq (Option (β a)) (@Std.DHashMap.get? α β inst inst_1 inst_2 (@Std.DHashMap.empty α β inst inst_1 c) a)
+    (@Std.DHashMap.Internal.Raw₀.get? α β inst inst_2 inst_1 (@Std.DHashMap.Internal.Raw₀.empty α β c) a) :=
+  @L4L.castHEq _ _
+    (@L4L.appArgHEq _ Prop
+      (@Eq _ (@Std.DHashMap.get? α β inst inst_1 inst_2 (@Std.DHashMap.empty α β inst inst_1 c) a)) _ _
+      (@L4L.appArgHEq (Std.DHashMap.Internal.Raw₀ α β) (Option (β a))
+        (fun (m : Std.DHashMap.Internal.Raw₀ α β) => @Std.DHashMap.Internal.Raw₀.get? α β inst inst_2 inst_1 m a)
+        (@Subtype.mk (Std.DHashMap.Raw α β)
+          (fun (m : Std.DHashMap.Raw α β) =>
+            @LT.lt Nat instLTNat 0
+              (@Array.size (Std.DHashMap.Internal.AssocList α β) (@Std.DHashMap.Raw.buckets α β m)))
+          (@Subtype.val (Std.DHashMap.Raw α β)
+            (fun (m : Std.DHashMap.Raw α β) => @Std.DHashMap.Raw.WF α β inst inst_1 m)
+            (@Std.DHashMap.empty α β inst inst_1 c))
+          (@Std.DHashMap.get?.proof_1 α β inst inst_1 (@Std.DHashMap.empty α β inst inst_1 c)))
+        (@Std.DHashMap.Internal.Raw₀.empty α β c)
+        sorry))
+    (@rfl (Option (β a)) (@Std.DHashMap.get? α β inst inst_1 inst_2 (@Std.DHashMap.empty α β inst inst_1 c) a))
+
+-- def HashMapTest {α : Type u} {β : α → Type v} [BEq α] [Hashable α] [LawfulBEq α] {a : α}
+--   {c : Nat} : Std.DHashMap.Internal.Raw₀.get? ⟨(Std.DHashMap.empty c : Std.DHashMap α β).val, sorry⟩ a = Std.DHashMap.Internal.Raw₀.get? (Subtype.mk (Subtype.val (Std.DHashMap.empty c)) (@Std.DHashMap.Internal.Raw₀.empty.proof_1 α β c)) a := rfl
+
+theorem HashMapTest {α : Type u} {β : α → Type v} [BEq α] [Hashable α] [LawfulBEq α] {a : α}
+  {c : Nat} : (Std.DHashMap.empty c : Std.DHashMap α β).get? a = (Std.DHashMap.Internal.Raw₀.empty c).get? a := rfl
 
 set_option pp.explicit true
 -- #print PProd

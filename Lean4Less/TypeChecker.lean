@@ -236,6 +236,11 @@ def isDefEqCorePure (t s : PExpr) : RecM Bool := fun m => m.isDefEqCorePure t s
 @[inherit_doc isDefEqCore]
 def isDefEq (t s : PExpr) : RecB := do
   let r ← isDefEqCore t s
+  let (result, p?) := r
+  if result && p?.isNone then
+    modify fun st => { st with eqvManager := st.eqvManager.addEquiv t s }
+  -- else if result && p?.isSome then
+  --   dbg_trace s!"DBG[2]: TypeChecker.lean:242 {t} {s}"
   pure r
 
 def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : PExpr)
@@ -267,9 +272,11 @@ def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : P
         else
           let tBody := tBody.instantiateRev tvars
           let sBody := sBody.instantiateRev svars
+
           let (defEq, ptbodEqsbod?) ← isDefEq tBody sBody
           if !defEq then return (false, none)
-          pure (true, ← f tBody sBody ptbodEqsbod? tvars.reverse ds.reverse) -- FIXME can iterate backwards instead of reversing lists?
+          let ret ← f tBody sBody ptbodEqsbod? tvars.reverse ds.reverse
+          pure (true, ret) -- FIXME can iterate backwards instead of reversing lists?
 
       if let some p := p? then
         let ids := ⟨← mkFreshId⟩
@@ -373,7 +380,7 @@ def isDefEqForall (t s : PExpr) (numBinds := 0) : RecB := do
       | _, tBody, sBody =>
         pure (#[], tBody.toPExpr, sBody.toPExpr)
     let (datas, tBody, sBody) ← getData t.toExpr s.toExpr numBinds
-    isDefEqBinder datas tBody sBody fun Ua Vx UaEqVx? as ds => do
+    let ret ← isDefEqBinder datas tBody sBody fun Ua Vx UaEqVx? as ds => do
       let mut UaEqVx? := UaEqVx?
       let mut Ua := Ua
       let mut Vx := Vx
@@ -410,6 +417,7 @@ def isDefEqForall (t s : PExpr) (numBinds := 0) : RecB := do
         Vx := (← getLCtx).mkForall #[x] Vx |>.toPExpr
 
       pure $ UaEqVx?
+    pure ret
 
 def smartCast (tl tr e : PExpr) (p? : Option EExpr := none) : RecM PExpr := do
   let mkCast'' n tl tr p e (prfVars prfVals : Array Expr) (lvl : Level) := do
@@ -519,8 +527,6 @@ def inferLambda (e : Expr) : RecPE := loop #[] false e where
     -- TODO only return .some if any of the fvars had domains that were patched, or if e'? := some e'
     return (( (← getLCtx).mkForall fvars r').toPExpr, patch)
 
--- def inferLambdaPure (e : PExpr) : RecM PExpr := sorry
-
 /--
 Infers the type of for-all expression `e`.
 -/
@@ -551,8 +557,6 @@ def inferForall (e : Expr) : RecPE := loop #[] #[] false e where
       else
         pure none
     return ((Expr.sort <| us.foldr mkLevelIMax' lvl ).toPExpr, patch?)
-
--- def inferForallPure (e : PExpr) : RecM PExpr := sorry
 
 /--
 Infers the type of application `e`, assuming that `e` is already well-typed.
@@ -633,8 +637,6 @@ def inferLet (e : Expr) : RecPE := loop #[] #[] false e where
         pure none
     return ((← getLCtx).mkForall fvars r |>.toPExpr, patch?)
 
--- def inferLetPure (e : PExpr) : RecM PExpr := sorry
-
 /--
 Checks if the type of `e` is definitionally equal to `Prop`.
 -/
@@ -690,8 +692,6 @@ def inferProj (typeName : Name) (idx : Nat) (struct : PExpr) (patched : Bool) (s
   let patch := if patched then some (Expr.proj typeName idx struct).toPExpr else none
   return (dom.toPExpr, patch)
 
--- def inferProjPure (typeName : Name) (idx : Nat) (struct : Expr) (structType : Expr) (structp? : Option Expr) : RecM PExpr := sorry
-
 @[inherit_doc inferType]
 def inferType' (e : Expr) : RecPE := do
   -- if (← readThe Context).const == `eq_of_heq' then
@@ -703,8 +703,6 @@ def inferType' (e : Expr) : RecPE := do
   assert 5 $ !e.hasLooseBVars
   let state ← get
   if let some r := state.inferTypeC[e]? then
-    -- if (← readThe Context).const == `eq_of_heq' then
-    --   dbg_trace s!"finished e={e}"
     return r
   let (r, ep?) ← match e with
     | .lit l => pure (l.type.toPExpr, none)
@@ -743,37 +741,7 @@ def inferType' (e : Expr) : RecPE := do
         throw <| .appTypeMismatch (← getEnv) (← getLCtx) e fType' aType
     | .letE .. => inferLet e
   modify fun s => { s with inferTypeC := s.inferTypeC.insert e (r, ep?) }
-  -- if (← readThe Context).const == `eq_of_heq' then
-  --   dbg_trace s!"finished e={e}"
   return (r, ep?)
-
--- def _inferTypePure' (e : Expr) : RecM PExpr := do
---   if e.isBVar then
---     throw <| .other
---       s!"type checker does not support loose bound variables, {""
---         }replace them with free variables before invoking it"
---   assert 1 $ !e.hasLooseBVars
---   let state ← get
---   if let some r := state.inferTypeI.find? e then
---     return r
---   let r ← match e with
---     | .lit l => pure l.type.toPExpr
---     | .mdata _ e' => _inferTypePure' e'
---     | .proj s idx e =>
---       let t ← _inferTypePure' e.toPExpr
---       inferProjPure s idx e t .none
---     | .fvar n => inferFVar (← readThe Context) n
---     | .mvar _ => throw <| .other "kernel type checker does not support meta variables"
---     | .bvar _ => throw $ .other "unreachable"
---     | .sort l =>
---       pure <| (Expr.sort (.succ l)).toPExpr
---     | .const c ls => inferConstant (← readThe Context) c ls true
---     | .lam .. => inferLambdaPure e.toPExpr
---     | .forallE .. => inferForallPure e.toPExpr
---     | .app .. => inferApp e.toPExpr
---     | .letE .. => inferLetPure e.toPExpr
---   modify fun s => { s with inferTypeI := s.inferTypeI.insert e r }
---   return r
 
 def inferTypePure' (e : PExpr) (n : Nat) : RecM PExpr := do -- TODO make more efficient
   try
@@ -1245,9 +1213,9 @@ private def _whnf' (e' : Expr) : RecEE := do
     if !isLetFVar (← getLCtx) id then
       return (e, none)
   | .lam .. | .app .. | .const .. | .letE .. | .proj .. => pure ()
-  -- check cache FIXME re-enable
-  -- if let some r := (← get).whnfCache.find? e then
-  --   return r
+  -- check cache
+  if let some r := (← get).whnfCache.get? e then
+    return r
   let rec loop le eEqle?
   | 0 => throw .deterministicTimeout
   | fuel+1 => do
@@ -1499,7 +1467,8 @@ def isDefEqCore' (t s : PExpr) : RecB := do
     runLeanMinus $ Lean.TypeChecker.isDefEq t.toExpr s.toExpr
   catch e =>
     match e with
-    | .deepRecursion => pure false -- proof irrelevance may be needed to avoid deep recursion (e.g. String.size_toUTF8)
+    | .deepRecursion =>
+      pure false -- proof irrelevance may be needed to avoid deep recursion (e.g. String.size_toUTF8)
     | _ => throw e
   if leanMinusDefEq then
     return (true, none)
@@ -1611,13 +1580,21 @@ def Methods.withFuel : Nat → Methods
       inferTypePure := fun _ _ _ =>
       throw .deepRecursion }
   | n + 1 =>
-    { isDefEqCore := fun t s => isDefEqCore' t s (withFuel n)
-      isDefEqCorePure := fun t s => isDefEqCorePure' t s (withFuel n)
-      whnfCore := fun e r p => whnfCore' e r p (withFuel n)
-      whnf := fun e => whnf' e (withFuel n)
-      whnfPure := fun e m => whnfPure' e m (withFuel n)
-      inferType := fun e => inferType' e (withFuel n)
-      inferTypePure := fun e m => inferTypePure' e m (withFuel n) }
+    { isDefEqCore := fun t s => do
+        let ret ← isDefEqCore' t s (withFuel n)
+        pure ret
+      isDefEqCorePure := fun t s =>
+        isDefEqCorePure' t s (withFuel n)
+      whnfCore := fun e r p =>
+        whnfCore' e r p (withFuel n)
+      whnf := fun e =>
+        whnf' e (withFuel n)
+      whnfPure := fun e m =>
+        whnfPure' e m (withFuel n)
+      inferType := fun e =>
+        inferType' e (withFuel n)
+      inferTypePure := fun e m =>
+        inferTypePure' e m (withFuel n) }
 
 /--
 Runs `x` with a limit on the recursion depth.
