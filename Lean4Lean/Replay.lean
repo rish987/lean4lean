@@ -6,7 +6,7 @@ open Lean
 
 namespace Lean
 
-def HashMap.keyNameSet (m : HashMap Name α) : NameSet :=
+def HashMap.keyNameSet (m : Std.HashMap Name α) : NameSet :=
   m.fold (fun s n _ => s.insert n) {}
 
 namespace Environment
@@ -61,7 +61,7 @@ namespace Lean4Lean
 
 structure Context where
   opts : TypeCheckerOpts := {}
-  newConstants : HashMap Name ConstantInfo
+  newConstants : Std.HashMap Name ConstantInfo
   verbose := false
   compare := false
 
@@ -163,13 +163,13 @@ deriving instance BEq for RecursorVal
 
 mutual
 
-partial def getDepConsts (newConstants : HashMap Name ConstantInfo) (names : List Name) : IO NameSet := do
+partial def getDepConsts (newConstants : Std.HashMap Name ConstantInfo) (names : List Name) : IO NameSet := do
   let rec loop ret names := do
     let mut ret := ret
     for name in names do
       if let none := ret.find? name then
         let acc' := ret.insert name
-        let some ci := newConstants.find? name | unreachable!
+        let some ci := newConstants[name]? | unreachable!
         ret ← loop acc' ci.getUsedConstants.toList
     pure ret
   loop default names
@@ -196,7 +196,7 @@ partial def replayConstant (name : Name) (addDeclFn' : Declaration → M Unit) (
   if ← isTodo name then
     -- dbg_trace s!"Processing deps: {name}"
 
-    let some ci := (← read).newConstants.find? name | unreachable!
+    let some ci := (← read).newConstants[name]? | unreachable!
     replayConstants ci.getUsedConstants addDeclFn' printProgress? (op := op)
     -- Check that this name is still pending: a mutual block may have taken care of it.
     if (← get).pending.contains name then
@@ -212,7 +212,7 @@ partial def replayConstant (name : Name) (addDeclFn' : Declaration → M Unit) (
       | .inductInfo info =>
         let lparams := info.levelParams
         let nparams := info.numParams
-        let all ← info.all.mapM fun n => do pure <| ((← read).newConstants.find! n)
+        let all ← info.all.mapM fun n => do pure <| ((← read).newConstants.get! n)
         for o in all do
           -- There is exactly one awkward special case here:
           -- `String` is a primitive type, which depends on `Char.ofNat` to exist
@@ -224,7 +224,7 @@ partial def replayConstant (name : Name) (addDeclFn' : Declaration → M Unit) (
             { s with remaining := s.remaining.erase o.name, pending := s.pending.erase o.name }
         let ctorInfo ← all.mapM fun ci => do
           pure (ci, ← ci.inductiveVal!.ctors.mapM fun n => do
-            pure ((← read).newConstants.find! n))
+            pure ((← read).newConstants.get! n))
         -- Make sure we are really finished with the constructors.
         for (_, ctors) in ctorInfo do
           for ctor in ctors do
@@ -260,7 +260,7 @@ when we replayed the inductives.
 -/
 def checkPostponedConstructors : M Unit := do
   for ctor in (← get).postponedConstructors do
-    match (← get).env.constants.find? ctor, (← read).newConstants.find? ctor with
+    match (← get).env.constants.find? ctor, (← read).newConstants.get? ctor with
     | some (.ctorInfo info), some (.ctorInfo info') =>
       if ! (info == info') then throw <| IO.userError s!"Invalid constructor {ctor}"
     | _, _ => throw <| IO.userError s!"No such constructor {ctor}"
@@ -271,7 +271,7 @@ when we replayed the inductives.
 -/
 def checkPostponedRecursors : M Unit := do
   for ctor in (← get).postponedRecursors do
-    match (← get).env.constants.find? ctor, (← read).newConstants.find? ctor with
+    match (← get).env.constants.find? ctor, (← read).newConstants.get? ctor with
     | some (.recInfo info), some (.recInfo info') =>
       if ! (info == info') then throw <| IO.userError s!"Invalid recursor {ctor}"
     | _, _ => throw <| IO.userError s!"No such recursor {ctor}"
@@ -334,7 +334,7 @@ unsafe def replayFromImports (module : Name) (verbose := false) (compare := fals
   env'.freeRegions
   region.free
 
-unsafe def replayFromInit'' (module : Name) (initEnv : Environment) (newConstants : HashMap Name ConstantInfo) (f : Environment → IO Unit) (onlyConsts? : Option (List Name) := none) (op : String := "typecheck")
+unsafe def replayFromInit'' (module : Name) (initEnv : Environment) (newConstants : Std.HashMap Name ConstantInfo) (f : Environment → IO Unit) (onlyConsts? : Option (List Name) := none) (op : String := "typecheck")
     (verbose := false) (compare := false) (decl : Option Name := none) (opts : TypeCheckerOpts := {}) : IO Unit := do
     let ctx := { newConstants, verbose, compare, opts }
     let env ← replay addDeclFn ctx (initEnv.setMainModule module) (onlyConsts? := onlyConsts?) (op := op) (decl := decl) (printProgress := true)
@@ -344,7 +344,7 @@ unsafe def replayFromInit' (module : Name) (initEnv : Environment) (f : Environm
     (verbose := false) (compare := false) (decl : Option Name := none) (opts : TypeCheckerOpts := {}) : IO Unit := do
   Lean.withImportModules #[{module}] {} 0 fun env => do
     let mut newConstants := initEnv.constants.fold (init := env.constants.map₁) fun acc const _info =>
-      if let some _info' := acc.find? const then
+      if let some _info' := acc[const]? then
         -- assert! _info == _info' --TODO sanity check; need to derive BEq?
         acc.erase const
       else acc
