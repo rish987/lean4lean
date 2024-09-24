@@ -944,7 +944,7 @@ def reduceBinNatOp (op : Name) (f : Nat → Nat → Nat) (a b : PExpr) : RecM (O
   let app := Lean.mkAppN (.const op []) #[a, b] |>.toPExpr
   let app' := Lean.mkAppN (.const op []) #[a', b'] |>.toPExpr
   let sorryProof? ← if op == `Nat.gcd then
-      dbg_trace s!"DBG[9]: TypeChecker.lean:946 {v1} {v2}"
+      dbg_trace s!"DBG: GCD used: {v1} {v2}"
       pure $ .some $ .sry {u := 0, A := a', B := b'}
     else 
       pure none
@@ -973,8 +973,11 @@ def reduceBinNatPred (op : Name) (f : Nat → Nat → Bool) (a b : PExpr) : RecM
 
 def mkNatSuccAppArgHEq? (p? : Option EExpr) (t s : PExpr) : RecM (Option EExpr) := do
   p?.mapM fun p => do
-    pure $ (mkAppN (← getConst `appArgHEq [.succ .zero, .succ .zero]) #[.const `Nat [], --FIXME
-    .const `Nat [], .const `Nat.succ [], t, s, p.toExpr]).toEExpr
+    let extra := .Arg {b := s, aEqb := p}
+    let N := Expr.const `Nat [] |>.toPExpr
+    pure $ .app {u := .succ .zero, v := .succ .zero, A := N, U := (N, (Expr.fvar default).toPExpr), f := (Expr.const `Nat.succ []).toPExpr, a := t, extra, lctx := ← getLCtx}
+    -- pure $ (mkAppN (← getConst `L4L.appArgHEq [.succ .zero, .succ .zero]) #[.const `Nat [], --FIXME
+    -- .const `Nat [], .const `Nat.succ [], t, s, p.toExpr]).toEExpr
 
 /--
 Reduces `e` to a natural number literal if possible, where binary operations

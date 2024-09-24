@@ -181,7 +181,7 @@ structure AppData (EExpr : Type) where
 u     : Level
 v     : Level
 A     : PExpr
-U     : PExpr × PExpr
+U     : PExpr × PExpr -- TODO make fvar arg optional
 f     : PExpr
 a     : PExpr
 extra : AppDataExtra EExpr
