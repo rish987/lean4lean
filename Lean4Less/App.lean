@@ -340,21 +340,6 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
   let mut sBodT := sfT
   let mut taEqsas' := #[]
 
-  let cond := if let .const `Eq _ := tf.toExpr then if let .const `Eq _ := sf.toExpr then
-    if tArgs.size == 3 then
-      let tArg := tArgs[2]!
-      let sArg := sArgs[2]!
-      if tArg.toExpr.isApp then if let .const `Std.DHashMap.get? _ := tArg.toExpr.withApp fun k _ => k then
-        if sArg.toExpr.isApp then if let .const `Std.DHashMap.Internal.Raw₀.get? _ := sArg.toExpr.withApp fun k _ => k then
-          true
-        else false
-        else false
-        else false
-        else false
-      else false
-    else false
-  else false
-
   for idx in [:tArgs.size] do
     let (tBodDom, tDomName, sBodDom, sDomName) ← do
       let ok? ←

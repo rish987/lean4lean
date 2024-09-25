@@ -20,6 +20,24 @@ def cond : Expr → Expr → Bool
     else false
   else false
 
+def cond' (ta sa : Expr) : Bool :=
+  if let .lam .. := ta.getAppFn then if let .const `S.b _ := sa.getAppFn then
+      if ta.getAppArgs.size == 1 then
+        let tArgs := ta.getAppArgs
+        let sArgs := sa.getAppArgs
+        let tArg := tArgs[0]!
+        let sArg := sArgs[0]!
+        if tArg.isApp then if let .const `K.rec _ := tArg.withApp fun k _ => k then
+          if sArg.isApp then if let .const `K.rec _ := sArg.withApp fun k _ => k then
+            true
+          else false
+          else false
+          else false
+          else false
+        else false
+      else false
+    else false
+
 section
 
 structure ExtMethods (m : Type → Type u) where

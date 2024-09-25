@@ -25,8 +25,8 @@ structure TypeChecker.State where
   ngen : NameGenerator := { namePrefix := `_kernel_fresh, idx := 0 }
   inferTypeI : InferCacheP := {}
   inferTypeC : InferCache := {}
-  whnfCoreCache : ExprMap (PExpr × Option EExpr) := {}
-  whnfCache : ExprMap (PExpr × Option EExpr) := {}
+  whnfCoreCache : Std.HashMap (PExpr × Bool × Bool) (PExpr × Option EExpr) := {}
+  whnfCache : Std.HashMap (PExpr × Bool) (PExpr × Option EExpr) := {}
   eqvManager : EquivManager := {}
   failure : Std.HashSet (Expr × Expr) := {}
 
@@ -42,6 +42,7 @@ structure TypeChecker.Context where
   -/
   eqFVars : Std.HashMap (FVarId × FVarId) (FVarId × FVarId) := {}
   safety : DefinitionSafety := .safe
+  cheapK := false
   lparams : List Name := []
 
 namespace TypeChecker
@@ -76,7 +77,7 @@ structure Methods where
   isDefEqCore : PExpr → PExpr → MB
   isDefEqCorePure : PExpr → PExpr → M Bool
   whnfCore (e : PExpr) (cheapRec := false) (cheapProj := false) : MEE
-  whnf (e : PExpr) : MEE
+  whnf (e : PExpr) (cheapK : Bool) : MEE
   whnfPure (e : PExpr) (n : Nat) : M PExpr
   inferType (e : Expr) : MPE
   inferTypePure (e : PExpr) (n : Nat) : M PExpr
@@ -105,12 +106,15 @@ namespace Inner
 /--
 Reduces `e` to its weak-head normal form.
 -/
-def whnf (e : PExpr) : RecEE := fun m => m.whnf e
+def whnf (e : PExpr) (cheapK := false) : RecEE := fun m => m.whnf e (cheapK := cheapK)
 
 def whnfPure (e : PExpr) (n : Nat) : RecM PExpr := fun m => m.whnfPure e n
 
 @[inline] def withPure [MonadWithReaderOf Context m] (x : m α) : m α :=
   withReader (fun l => {l with pure := true}) x
+
+@[inline] def withCheapK [MonadWithReaderOf Context m] (x : m α) : m α :=
+  withReader (fun l => {l with cheapK := true}) x
 
 @[inline] def withForallOpt [MonadWithReaderOf Context m] (x : m α) : m α :=
   withReader (fun l => {l with forallOpt := true}) x
@@ -836,8 +840,8 @@ def appProjThm? (structName : Name) (projIdx : Nat) (struct structN : PExpr) (st
 Reduces a projection of `struct` at index `idx` (when `struct` is reducible to a
 constructor application).
 -/
-def reduceProj (structName : Name) (projIdx : Nat) (struct : PExpr) (cheapRec cheapProj : Bool) : RecM (Option (PExpr × Option EExpr)) := do
-  let mut (structN, structEqc?) ← (if cheapProj then whnfCore struct cheapRec cheapProj else whnf struct)
+def reduceProj (structName : Name) (projIdx : Nat) (struct : PExpr) (cheapK cheapProj : Bool) : RecM (Option (PExpr × Option EExpr)) := do
+  let mut (structN, structEqc?) ← (if cheapProj then whnfCore struct cheapK cheapProj else whnf struct (cheapK := cheapK))
 
   -- -- TODO is this necessary? can we assume the type of c and struct are the same?
   -- -- if not, we will need to use a different patch theorem
@@ -1139,14 +1143,14 @@ def tryEtaStruct (t s : PExpr) : RecB := do
     let (true, sEqt?) ← tryEtaStructCore s t | return (false, none)
     return (true, ← appHEqSymm? s t sEqt?)
 
-def reduceRecursor (e : PExpr) (cheapRec cheapProj : Bool) : RecM (Option (PExpr × Option EExpr)) := do
+def reduceRecursor (e : PExpr) (cheapK cheapProj : Bool) : RecM (Option (PExpr × Option EExpr)) := do
   let env ← getEnv
   if env.header.quotInit then
     if let some r ← quotReduceRec e whnf (fun x y tup => isDefEqApp methsA x y (targsEqsargs? := Std.HashMap.insert default tup.1 tup.2)) then
       return r
-  let whnf' e := whnf e
+  let whnf' e := whnf e (cheapK := cheapK)
   let meths := {methsR with whnf := whnf'}
-  let recReduced? ← inductiveReduceRec meths
+  let recReduced? ← inductiveReduceRec meths (cheapK := cheapK)
     env e
   if let some r := recReduced? then
     return r
@@ -1160,11 +1164,10 @@ private def _whnfCore' (e' : Expr) (cheapRec := false) (cheapProj := false) : Re
   | .mdata _ e => return ← _whnfCore' e cheapRec cheapProj
   | .fvar id => if !isLetFVar (← getLCtx) id then return (e, none)
   | .app .. | .letE .. | .proj .. => pure ()
-  if let some r := (← get).whnfCoreCache.get? e then
+  if let some r := (← get).whnfCoreCache.get? (e, cheapRec, cheapProj) then
     return r
   let rec save r := do
-    if !cheapRec && !cheapProj then
-      modify fun s => { s with whnfCoreCache := s.whnfCoreCache.insert e r }
+    modify fun s => { s with whnfCoreCache := s.whnfCoreCache.insert (e, cheapRec, cheapProj) r }
     return r
   match e' with
   | .bvar .. | .sort .. | .mvar .. | .forallE .. | .const .. | .lam .. | .lit ..
@@ -1200,13 +1203,10 @@ private def _whnfCore' (e' : Expr) (cheapRec := false) (cheapProj := false) : Re
         else cont
       loop 1 body
     else if f == f0 then
-      if not cheapRec then -- FIXME want to combine with condition below
-        if let some (r, eEqr?) ← reduceRecursor e cheapRec cheapProj then
-          let (r', rEqr'?) ← whnfCore r cheapRec cheapProj
-          let eEqr'? ← appHEqTrans? e r r' eEqr? rEqr'?
-          pure (r', eEqr'?)
-        else
-          pure (e, none)
+      if let some (r, eEqr?) ← reduceRecursor e cheapRec cheapProj then
+        let (r', rEqr'?) ← whnfCore r cheapRec cheapProj
+        let eEqr'? ← appHEqTrans? e r r' eEqr? rEqr'?
+        pure (r', eEqr'?)
       else
         pure (e, none)
     else
@@ -1225,38 +1225,38 @@ private def _whnfCore' (e' : Expr) (cheapRec := false) (cheapProj := false) : Re
       save (e, none)
 
 @[inherit_doc whnfCore]
-def whnfCore' (e : PExpr) (cheapRec := false) (cheapProj := false) : RecEE := _whnfCore' e cheapRec cheapProj
+def whnfCore' (e : PExpr) (cheapK := false) (cheapProj := false) : RecEE := _whnfCore' e cheapK cheapProj
 
 @[inherit_doc whnf]
-private def _whnf' (e' : Expr) : RecEE := do
+private def _whnf' (e' : Expr) (cheapK := false) : RecEE := do
   let e := e'.toPExpr
   -- Do not cache easy cases
   match e' with
   | .bvar .. | .sort .. | .mvar .. | .forallE .. | .lit .. => return (e, none)
-  | .mdata _ e => return ← _whnf' e
+  | .mdata _ e => return ← _whnf' e (cheapK := cheapK)
   | .fvar id =>
     if !isLetFVar (← getLCtx) id then
       return (e, none)
   | .lam .. | .app .. | .const .. | .letE .. | .proj .. => pure ()
   -- check cache
-  if let some r := (← get).whnfCache.get? e then
+  if let some r := (← get).whnfCache.get? (e, cheapK) then
     return r
   let rec loop le eEqle?
   | 0 => throw .deterministicTimeout
   | fuel+1 => do
     let env ← getEnv
-    let (ler, leEqler?) ← whnfCore' le
+    let (ler, leEqler?) ← whnfCore' le (cheapK := cheapK)
     let eEqler? ← appHEqTrans? e le ler eEqle? leEqler?
     if let some (ler', lerEqler'?) ← reduceNative env ler then return (ler', ← appHEqTrans? e ler ler' eEqler? lerEqler'?)
     if let some (ler', lerEqler'?) ← reduceNat ler then return (ler', ← appHEqTrans? e ler ler' eEqler? lerEqler'?)
     let some leru := unfoldDefinition env ler | return (ler, eEqler?)
     loop leru eEqler? fuel
   let r ← loop e none 1000
-  modify fun s => { s with whnfCache := s.whnfCache.insert e r }
+  modify fun s => { s with whnfCache := s.whnfCache.insert (e, cheapK) r }
   return r
 
 @[inherit_doc whnf]
-def whnf' (e : PExpr) : RecEE := _whnf' e
+def whnf' (e : PExpr) (cheapK := false) : RecEE := _whnf' e (cheapK := cheapK)
 
 def whnfPure' (e : PExpr) (n : Nat) : RecM PExpr := do
   try
@@ -1595,7 +1595,7 @@ def Methods.withFuel : Nat → Methods
       throw .deepRecursion
       whnfCore := fun _ _ _ =>
       throw .deepRecursion
-      whnf := fun _ =>
+      whnf := fun _ _ =>
       throw .deepRecursion
       whnfPure := fun _ _ =>
       throw .deepRecursion
@@ -1611,8 +1611,8 @@ def Methods.withFuel : Nat → Methods
         isDefEqCorePure' t s (withFuel n)
       whnfCore := fun e r p =>
         whnfCore' e r p (withFuel n)
-      whnf := fun e =>
-        whnf' e (withFuel n)
+      whnf := fun e k =>
+        whnf' e (cheapK := k) (withFuel n)
       whnfPure := fun e m =>
         whnfPure' e m (withFuel n)
       inferType := fun e =>

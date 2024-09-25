@@ -97,7 +97,7 @@ constructor application). The reduction is done by applying the
 `RecursorRule.rhs` associated with the constructor to the parameters from the
 recursor application and the fields of the constructor application.
 -/
-def inductiveReduceRec [Monad m] (env : Environment) (e : PExpr)
+def inductiveReduceRec [Monad m] (env : Environment) (e : PExpr) (cheapK : Bool := false)
     : m (Option (PExpr × Option EExpr)) := do
   let recFn := e.toExpr.getAppFn
   let .const recFnName ls := recFn | return none
@@ -108,7 +108,7 @@ def inductiveReduceRec [Monad m] (env : Environment) (e : PExpr)
   let some major' := recArgs[majorIdx]? | return none
   let major := major'.toPExpr
   let (majorWhnf, majorEqmajorWhnf?) ← meth.whnf major
-  let (majorKWhnf, majorWhnfEqmajorKWhnf?) ← if info.k then toCtorWhenK env meth info majorWhnf else pure (majorWhnf, none)
+  let (majorKWhnf, majorWhnfEqmajorKWhnf?) ← if info.k && not cheapK then toCtorWhenK env meth info majorWhnf else pure (majorWhnf, none)
   let majorEqmajorKWhnf? ← meth.appHEqTrans? major majorWhnf majorKWhnf majorEqmajorWhnf? majorWhnfEqmajorKWhnf?
   let (majorMaybeCtor, majorKWhnfEqMajorMaybeCtor?) ← match majorKWhnf.toExpr with
     | .lit l => pure (l.toConstructor.toPExpr, none)
