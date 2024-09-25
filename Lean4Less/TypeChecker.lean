@@ -760,6 +760,7 @@ def inferType' (e : Expr) : RecPE := do
         pure ((Expr.bindingBody! fType').instantiate1 a' |>.toPExpr, patch)
       else
         -- if e'.isApp then if let .const `Bool.casesOn _ := e'.withApp fun f _ => f then
+        dbg_trace s!"DBG[15]: TypeChecker.lean:762 {e}, {fType}, {aType}"
         throw <| .appTypeMismatch (← getEnv) (← getLCtx) e fType' aType
     | .letE .. => inferLet e
   modify fun s => { s with inferTypeC := s.inferTypeC.insert e (r, ep?) }
@@ -1540,14 +1541,23 @@ def isDefEqCore' (t s : PExpr) : RecB := do
       if r then
         let ret := (true, ← appProjThm? tTypeName ti te.toPExpr se.toPExpr teEqse?)
         return ret
-  | _, _ => pure ()
+  | .app .., .app .. =>
+    let tf := tn'.toExpr.getAppFn
+    let sf := sn'.toExpr.getAppFn
+    if let .const tn _ := tf then
+      if let .const sn _ := sf then
+        if tn == sn then
+          if let some (.recInfo info) := (← getEnv).find? tn then
+            if info.k then
+              -- optimized by above functions using `cheapRec = true`
+              match ← isDefEqApp methsA tn' sn' with
+              | (true, tn'Eqsn'?) =>
+                return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)
+              | _ =>
+                pure ()
+              
 
-  -- optimized by above functions using `cheapRec = true`
-  match ← isDefEqApp methsA tn' sn' with
-  | (true, tn'Eqsn'?) =>
-    return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)
-  | _ =>
-    pure ()
+  | _, _ => pure ()
 
   -- above functions used `cheapProj = true`, `cheapRec = true`, so we may not have a complete WHNF
   let (tn'', tn'Eqtn''?) ← whnfCore tn'
@@ -1558,6 +1568,13 @@ def isDefEqCore' (t s : PExpr) : RecB := do
     let sEqsn''? ← appHEqTrans? s sn' sn'' sEqsn'? sn'Eqsn''?
     let (true, tn''Eqsn''?) ← isDefEqCore tn'' sn'' | return (false, none)
     return (true, ← mktEqs? tn'' sn'' tEqtn''? sEqsn''? tn''Eqsn''?)
+
+  -- optimized by above functions using `cheapRec = true`
+  match ← isDefEqApp methsA tn' sn' with
+  | (true, tn'Eqsn'?) =>
+    return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)
+  | _ =>
+    pure ()
 
   match ← tryEtaExpansion tn' sn' with
   | (true, tn'Eqsn'?) => return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)
