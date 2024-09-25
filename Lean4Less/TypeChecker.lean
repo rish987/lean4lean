@@ -308,9 +308,9 @@ def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : P
 def mkHRefl (lvl : Level) (T : PExpr) (t : PExpr) : RecM EExpr := do
   pure $ .refl {u := lvl, A := T, a := t}
 
-def isDefEqPure (t s : PExpr) : RecM Bool := do
+def isDefEqPure (t s : PExpr) (fuel := 1000) : RecM Bool := do
   try
-    runLeanMinus $ Lean.TypeChecker.isDefEq t s
+    runLeanMinus $ Lean.TypeChecker.isDefEq t s fuel
   catch e =>
     match e with
     | .deepRecursion =>
@@ -1485,15 +1485,8 @@ def isDefEqUnitLike (t s : PExpr) : RecB := do
 
 @[inherit_doc isDefEqCore]
 def isDefEqCore' (t s : PExpr) : RecB := do
-  -- let leanMinusDefEq ← try
-  --   runLeanMinus $ Lean.TypeChecker.isDefEq t.toExpr s.toExpr
-  -- catch e =>
-  --   match e with
-  --   | .deepRecursion =>
-  --     pure false -- proof irrelevance may be needed to avoid deep recursion (e.g. String.size_toUTF8)
-  --   | _ => throw e
-  -- if leanMinusDefEq then
-  --   return (true, none)
+  if ← isDefEqPure t s 50 then -- NOTE: this is a tradeoff between runtime and output size
+    return (true, none)
   let (r, pteqs?) ← quickIsDefEq t s (useHash := true)
   if r != .undef then return (r == .true, pteqs?)
 

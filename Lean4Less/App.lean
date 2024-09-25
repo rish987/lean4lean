@@ -133,12 +133,19 @@ def mkAppEqProof (T S : PExpr) (as bs : Array PExpr) (asEqbs? : Array (Option EE
       -- dbg_trace s!""
       throw $ .other s!"expected: {B}\n inferred: {bType}"
 
-    let AEqB? ← if A != B then
-      let (defEq, AEqB?) ← meth.isDefEq A B
-      -- if idx == 0 then
-      assert! defEq
-      pure AEqB?
-    else pure (none)
+    let AEqB? ←
+      if A != B then
+        let (defEq, AEqB?) ← meth.isDefEq A B
+        assert! defEq
+        if AEqB?.isSome then
+          if asEqbs?[idx]!.isSome then
+            -- if idx == 0 then
+            pure AEqB?
+          else
+            assert! ← meth.isDefEqPure A B
+            pure none
+        else pure none
+      else pure none
 
     let sort ← meth.inferTypePure A 206
     let .sort lvl := (← meth.ensureSortCorePure sort A).toExpr | throw $ .other "unreachable 5"
