@@ -12,6 +12,7 @@ structure ExtMethodsR (m : Type → Type u) extends ExtMethods m where
   isDefEqApp' : PExpr → PExpr → Std.HashMap Nat (Option EExpr) → m (Bool × Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))
   isDefEqApp : PExpr → PExpr → Std.HashMap Nat (Option EExpr) → m (Bool × Option EExpr)
   smartCast : PExpr → PExpr → PExpr → m PExpr
+  isDefEqProofIrrel' : PExpr → PExpr → PExpr → PExpr → Option EExpr → m (Option EExpr)
 
 variable [Monad m] (env : Environment)
   (meth : ExtMethodsR m)
@@ -52,11 +53,7 @@ def toCtorWhenK (rval : RecursorVal) (e : PExpr) : m (PExpr × Option (EExpr)) :
   let appType ← meth.inferTypePure newCtorApp 102
   -- check that the indices of types of `e` and `newCtorApp` match
   let (true, pt?) ← meth.isDefEq type appType | return (e, none)
-  let (prf?) ←
-    if let some pt := pt? then
-      pure (← meth.appPrfIrrelHEq type appType pt e newCtorApp)
-    else
-      pure (← meth.appPrfIrrel type e newCtorApp)
+  let prf? ← meth.isDefEqProofIrrel' e newCtorApp type appType pt?
 
   return (newCtorApp, prf?)
 
