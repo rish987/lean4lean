@@ -761,6 +761,8 @@ def inferTypeCheck (e : Expr) : M Expr := (Inner.inferType e (inferOnly := false
 
 def isDefEq (t s : Expr) : M Bool := (Inner.isDefEq t s).run
 
+def isDefEqCore (t s : Expr) : M Bool := (Inner.isDefEqCore t s).run
+
 def isProp (t : Expr) : M Bool := (Inner.isProp t).run
 
 def ensureSort (t : Expr) (s := t) : M Expr := (ensureSortCore t s).run
