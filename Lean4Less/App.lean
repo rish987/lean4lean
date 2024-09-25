@@ -355,8 +355,6 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
     else false
   else false
 
-  -- assert! tfEqsf?.isNone -- FIXME
-
   for idx in [:tArgs.size] do
     let (tBodDom, tDomName, sBodDom, sDomName) ← do
       let ok? ←

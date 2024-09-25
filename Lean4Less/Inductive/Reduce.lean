@@ -37,8 +37,7 @@ it is definitionally equal to by proof irrelevance). Note that the indices of
 -/
 def toCtorWhenK (rval : RecursorVal) (e : PExpr) : m (PExpr × Option (EExpr)) := do
   assert! rval.k
-  let (type, p?) ← meth.whnf (← meth.inferTypePure e 101)
-  assert! p? == none
+  let type ← meth.whnfPure (← meth.inferTypePure e 101) 107
   let .const typeI _ := type.toExpr.getAppFn | return (e, none)
   if typeI != rval.getInduct then return (e, none)
   if type.toExpr.hasExprMVar then
@@ -82,8 +81,7 @@ eta).
 def toCtorWhenStruct (inductName : Name) (e : PExpr) : m (PExpr × Option EExpr) := do
   if !isStructureLike env inductName || (e.toExpr.isConstructorApp?' env).isSome then
     return (e, none)
-  let (eType, p?) ← meth.whnf (← meth.inferTypePure e 103)
-  assert! p? == none
+  let eType ← meth.whnfPure (← meth.inferTypePure e 103) 108
   if !eType.toExpr.getAppFn.isConstOf inductName then return (e, none)
   if (← meth.whnf (← meth.inferTypePure eType 104)).1 == Expr.prop.toPExpr then return (e, none)
   return expandEtaStruct env eType e

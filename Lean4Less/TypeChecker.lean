@@ -12,6 +12,9 @@ import Lean4Lean.TypeChecker
 
 import Lean4Less.App
 
+-- inferTypePure 26
+-- whnfPure 14
+
 namespace Lean4Less
 open Lean
 
@@ -127,9 +130,11 @@ def assert (n : Nat) (b : Bool) : RecM Unit := do if not b then throw $ .other s
 
 @[inherit_doc ensureSortCore]
 def ensureSortCorePure (e : PExpr) (s : Expr) : RecM PExpr := do
-  let (s, p?) ← (ensureSortCore e s)
-  assert 1 $ p? == none
-  return s
+  try
+    let res ← runLeanMinus $ Lean.TypeChecker.ensureSort e.toExpr s
+    pure res.toPExpr
+  catch e =>
+    throw e
 
 /--
 Ensures that `e` is defeq to some `e' := .forallE ..`, returning `e'`. If not,
@@ -143,11 +148,12 @@ def ensureForallCore (e : PExpr) (s : Expr) : RecEE := do
   throw <| .funExpected (← getEnv) (← getLCtx) s
 
 @[inherit_doc ensureForallCore]
-def ensureForallPure (e : PExpr) (s : Expr) : RecM PExpr := do
-  if Expr.isForall e then return e
-  let e ← whnfPure e 1
-  if e.toExpr.isForall then return e
-  throw <| .funExpected (← getEnv) (← getLCtx) s
+def ensureForallCorePure (e : PExpr) (s : Expr) : RecM PExpr := do
+  try
+    let res ← runLeanMinus $ Lean.TypeChecker.ensureForall e.toExpr s
+    pure res.toPExpr
+  catch e =>
+    throw e
 
 /--
 Checks that `l` does not contain any level parameters not found in the context `tc`.
@@ -203,8 +209,7 @@ Gets the universe level of the sort that the type of `e` inhabits.
 def getTypeLevel (e : PExpr) : RecM (Level × PExpr) := do
   let eType ← inferTypePure e 1
   let eTypeSort ← inferTypePure eType 2
-  let (eTypeSort', es?) ← ensureSortCore eTypeSort eType
-  assert 4 $ es? == none
+  let eTypeSort' ← ensureSortCorePure eTypeSort eType
   pure (eTypeSort'.toExpr.sortLevel!, eType)
 
 def appHEqSymm (t s : PExpr) (theqs : EExpr) (info : Option (Level × PExpr × PExpr) := none) : RecM EExpr := do
@@ -303,8 +308,12 @@ def isDefEqPure (t s : PExpr) : RecM Bool := do
   try
     runLeanMinus $ Lean.TypeChecker.isDefEq t s
   catch e =>
-    dbg_trace s!"isDefEqPure error: {0}"
-    throw e
+    match e with
+    | .deepRecursion =>
+      pure false -- proof irrelevance may be needed to avoid deep recursion (e.g. String.size_toUTF8)
+    | _ => 
+      dbg_trace s!"isDefEqPure error: {0}"
+      throw e
 
 def appPrfIrrelHEq (P Q : PExpr) (hPQ : EExpr) (p q : PExpr) : RecM EExpr := do
   return .prfIrrel {P, p, q, extra := .HEq {Q, hPQ}}
@@ -520,9 +529,8 @@ def inferLambda (e : Expr) : RecPE := loop #[] false e where
     let (r, e'?) ← inferType e
     let e' := e'?.getD e.toPExpr
     let r := r.toExpr.cheapBetaReduce |>.toPExpr
-    let (rSort, r'?) ← inferType r
+    let (rSort) ← inferTypePure r 25
     let (rSort', p?) ← ensureSortCore rSort r -- TODO need to test this
-    assert 2 $ r'? == none
     let r' ← maybeCast p? rSort rSort' r
 
     let patch ←
@@ -579,8 +587,7 @@ def inferApp (e : PExpr) : RecM PExpr := do
       fType := body.toPExpr
     | _ =>
       fType := fType.toExpr.instantiateRevRange j i args |>.toPExpr
-      let (fType', p?) ← ensureForallCore fType e
-      assert 3 $ p? == none -- sanity check; f should already have been cast as necessary
+      let fType' ← ensureForallCorePure fType e
       fType := fType'.toExpr.bindingBody!.toPExpr -- TODO ask on zulip about how to avoid this kind of double-casting
       j := i
   return fType.toExpr.instantiateRevRange j args.size args |>.toPExpr
@@ -646,10 +653,10 @@ def inferLet (e : Expr) : RecPE := loop #[] #[] false e where
 /--
 Checks if the type of `e` is definitionally equal to `Prop`.
 -/
-def isProp (e : PExpr) : RecB := do
+def isPropPure (e : PExpr) : RecM Bool := do
   let t ← inferTypePure e 10
-  let (t', p?) ← whnf t
-  return (t' == Expr.prop.toPExpr, p?)
+  let t' ← whnfPure t 10
+  return t' == Expr.prop.toPExpr
 
 /--
 Infers the type of structure projection `e`.
@@ -673,26 +680,20 @@ def inferProj (typeName : Name) (idx : Nat) (struct : PExpr) (patched : Bool) (s
   let c_info ← env.get c
   let mut r := c_info.instantiateTypeLevelParams I_levels |>.toPExpr
   for i in [:I_val.numParams] do
-    let (.mk (.forallE _ _ b _), p?) ← whnf r | fail -- FIXME use ensureForall?
-    assert 0 $ p? == none -- FIXME can we guarantee this? if so should remove whnf, if not need to "cast" `c` in Inductive.add
+    let .mk (.forallE _ _ b _) ← whnfPure r 11 | fail -- FIXME use ensureForall?
     r := b.instantiate1 args[i]! |>.toPExpr
-  let (isPropType, p?) := ← isProp type
-  assert 0 $ p? == none
+  let isPropType := ← isPropPure type
   for i in [:idx] do
-    let (.mk (.forallE _ dom b _), p?) ← whnf r | fail -- FIXME use ensureForall?
-    assert 0 $ p? == none -- FIXME
+    let .mk (.forallE _ dom b _) ← whnfPure r 12 | fail -- FIXME use ensureForall?
     if b.hasLooseBVars then
       -- prop structs cannot have non-prop dependent fields
-      let (isPropDom, p?) := ← isProp dom.toPExpr
-      assert 0 $ p? == none
+      let isPropDom ← isPropPure dom.toPExpr
       if isPropType then if !isPropDom then fail
       r := b.instantiate1 (.proj I_name i struct) |>.toPExpr
     else
       r := b.toPExpr
-  let (.mk (.forallE _ dom _ _), p?) ← whnf r | fail -- FIXME use ensureForall?
-  assert 0 $ p? == none -- FIXME
-  let (isPropDom, p?) := ← isProp dom.toPExpr
-  assert 0 $ p? == none -- FIXME
+  let (.mk (.forallE _ dom _ _)) ← whnfPure r 13 | fail -- FIXME use ensureForall?
+  let isPropDom ← isPropPure dom.toPExpr
   if isPropType then if !isPropDom then fail
   let patched := patched || pType?.isSome
   let patch := if patched then some (Expr.proj typeName idx struct).toPExpr else none
@@ -977,7 +978,8 @@ def reduceNat (e : PExpr) : RecM (Option (PExpr × Option EExpr)) := do
     if f == ``Nat.mul then return ← reduceBinNatOp ``Nat.mul Nat.mul a.toPExpr b.toPExpr
     if f == ``Nat.pow then return ← reduceBinNatOp ``Nat.pow Nat.pow a.toPExpr b.toPExpr
     if f == ``Nat.gcd then 
-      dbg_trace s!"DBG: GCD averted: {natLitExt? (← whnf a.toPExpr).1} {natLitExt? (← whnf a.toPExpr).1}"
+      return none
+      -- dbg_trace s!"DBG: GCD averted: {natLitExt? (← whnf a.toPExpr).1} {natLitExt? (← whnf a.toPExpr).1}"
       -- return ← reduceBinNatOp ``Nat.gcd Nat.gcd a.toPExpr b.toPExpr
     if f == ``Nat.mod then return ← reduceBinNatOp ``Nat.mod Nat.mod a.toPExpr b.toPExpr
     if f == ``Nat.div then return ← reduceBinNatOp ``Nat.div Nat.div a.toPExpr b.toPExpr
@@ -1163,7 +1165,7 @@ private def _whnfCore' (e' : Expr) (cheapRec := false) (cheapProj := false) : Re
     let (f, pf0Eqf?) ← whnfCore f0.toPExpr cheapRec cheapProj
     let frargs := f.toExpr.mkAppRevRange 0 rargs.size rargs
     -- patch to cast rargs as necessary to agree with type of f
-    let (_, frargs'?) ← inferType frargs
+    let (_, frargs'?) ← inferType frargs -- FIXME can result in redundant casts?
     let frargs' := frargs'?.getD frargs.toPExpr
     let rargs' := frargs'.toExpr.getAppArgs[f.toExpr.getAppArgs.size:].toArray.reverse
     assert 10 $ rargs'.size == rargs.size
@@ -1256,17 +1258,19 @@ Checks if `t` and `s` are definitionally equivalent according to proof irrelevan
 -/
 def isDefEqProofIrrel (t s : PExpr) : RecLB := do
   let tType ← inferTypePure t 19
-  let (prop, pprop?) ← isProp tType
-  assert 12 $ pprop? == none
+  let prop ← isPropPure tType
   if !prop then return (.undef, none)
   let sType ← inferTypePure s 20
   let (ret, pt?) ← isDefEq tType sType
   if ret == .true then
-    let p ← if let some pt := pt? then
-      appPrfIrrelHEq tType sType pt t s
+    if ← isDefEqPure t s then
+      return (.true, none)
     else
-      appPrfIrrel tType t s
-    return (.true, .some p)
+      let p ← if let some pt := pt? then
+        appPrfIrrelHEq tType sType pt t s
+      else
+        appPrfIrrel tType t s
+      return (.true, .some p)
   pure (.undef, none)
 
 def failedBefore (failure : Std.HashSet (Expr × Expr)) (t s : Expr) : Bool :=
@@ -1458,8 +1462,7 @@ with one constructor without any fields or indices).
 -- NOTE: It is okay for this to be a non-congruence-proving function,
 -- because any two instances of a unit type must be definitionally equal to a constructor application
 def isDefEqUnitLike (t s : PExpr) : RecB := do
-  let (tType, p?) ← whnf (← inferTypePure t 21)
-  assert 13 $ p? == none
+  let tType ← whnfPure (← inferTypePure t 21) 9
   let .const I _ := tType.toExpr.getAppFn | return (false, none)
   let env ← getEnv
   let .inductInfo { isRec := false, ctors := [c], numIndices := 0, .. } ← env.get I
@@ -1563,10 +1566,11 @@ def isDefEqCore' (t s : PExpr) : RecB := do
   return (false, none)
 
 def isDefEqCorePure' (t s : PExpr) : RecM Bool := do
-  let (defEq, p?) ← isDefEqCore' t s
-  assert 14 $ p? == none
-  pure defEq
-
+  try
+    let res ← runLeanMinus $ Lean.TypeChecker.isDefEqCore t.toExpr s.toExpr
+    pure res
+  catch e =>
+    throw e
 
 end Inner
 
@@ -1658,9 +1662,11 @@ def ensureSort (t : PExpr) (lps : List Name) (s := t) : MEE :=
 
 @[inherit_doc ensureSortCore]
 def ensureSortPure (t : PExpr) (lps : List Name) (s := t) : M PExpr := withReader ({ · with lparams := lps }) $ RecM.run do 
-  let (s, p?) ← (ensureSortCore t s)
-  assert 15 $ p? == none
-  pure s
+  try
+    let res ← runLeanMinus $ Lean.TypeChecker.ensureSort t.toExpr s.toExpr
+    pure res.toPExpr
+  catch e =>
+    throw e
 
 @[inherit_doc ensureForallCore]
 def ensureForall (t : PExpr) (lps : List Name) (s := t) : MEE := withReader ({ · with lparams := lps }) $ (ensureForallCore t s).run
