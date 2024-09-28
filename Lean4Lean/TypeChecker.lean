@@ -748,7 +748,7 @@ def Methods.withFuel : Nat → Methods
       whnf := fun e => whnf' e (withFuel n)
       inferType := fun e i => inferType' e i (withFuel n) }
 
-def RecM.run (x : RecM α) : M α := x (Methods.withFuel 1000)
+def RecM.run (x : RecM α) (fuel := 1000) : M α := x (Methods.withFuel fuel)
 
 def check (e : Expr) (lps : List Name) : M Expr :=
   withReader ({ · with lparams := lps }) (inferType e (inferOnly := false)).run
@@ -759,7 +759,7 @@ def inferType (e : Expr) : M Expr := (Inner.inferType e).run
 
 def inferTypeCheck (e : Expr) : M Expr := (Inner.inferType e (inferOnly := false)).run
 
-def isDefEq (t s : Expr) : M Bool := (Inner.isDefEq t s).run
+def isDefEq (t s : Expr) (fuel := 1000) : M Bool := (Inner.isDefEq t s).run fuel
 
 def isDefEqCore (t s : Expr) : M Bool := (Inner.isDefEqCore t s).run
 
