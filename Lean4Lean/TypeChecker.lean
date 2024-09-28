@@ -304,7 +304,7 @@ def reduceRecursor (e : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) :
   if env.header.quotInit then
     if let some r ← quotReduceRec e whnf then
       return r
-  let whnf' e := if cheapRec then whnfCore e cheapRec cheapProj else whnf e
+  let whnf' e := whnf e
   if let some (r, usedKLikeReduction) ← inductiveReduceRec env e whnf' inferType isDefEq (← readThe Context).opts.kLikeReduction then
     if usedKLikeReduction then
       modify fun s => {s with data := {s.data with usedKLikeReduction := true}}
@@ -321,9 +321,11 @@ def reduceProj (idx : Nat) (struct : Expr) (cheapRec cheapProj : Bool) : RecM (O
   if let .lit (.strVal s) := c then
     c := .strLitToConstructor s
   c.withApp fun mk args => do
-  let .const mkC _ := mk | return none
+  let .const mkC _ := mk |
+    return none
   let env ← getEnv
-  let .ctorInfo mkInfo ← env.get mkC | return none
+  let .ctorInfo mkInfo ← env.get mkC |
+    return none
   return args[mkInfo.numParams + idx]?
 
 def isLetFVar (lctx : LocalContext) (fvar : FVarId) : Bool :=
@@ -371,10 +373,11 @@ def whnfCore' (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr :=
       else
         pure r
   | .letE _ _ val body _ =>
-    save <|← whnfCore (body.instantiate1 val) cheapRec cheapProj
-  | .proj _ idx s =>
+    save <| ← whnfCore (body.instantiate1 val) cheapRec cheapProj
+  | .proj n idx s =>
     if let some m ← reduceProj idx s cheapRec cheapProj then
-      save <|← whnfCore m cheapRec cheapProj
+      let ret ← whnfCore m cheapRec cheapProj
+      save <| ret
     else
       save e
 
@@ -425,7 +428,10 @@ def reduceBinNatPred (f : Nat → Nat → Bool) (a b : Expr) : RecM (Option Expr
 def reduceNat (e : Expr) : RecM (Option Expr) := do
   if e.hasFVar then return none
   let nargs := e.getAppNumArgs
-  if nargs == 1 then
+  if nargs == 0 then
+    if e == .const ``Nat.zero [] then
+      return some <| .lit <| .natVal <| 0
+  else if nargs == 1 then
     let f := e.appFn!
     if f == .const ``Nat.succ [] then
       let some v := rawNatLitExt? (← whnf e.appArg!) | return none
@@ -494,7 +500,8 @@ def isDefEqForall (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
     let sType ← if tDom != sDom then
       let sType := sDom.instantiateRev subst
       let tType := tDom.instantiateRev subst
-      if !(← isDefEq tType sType) then return false
+      if !(← isDefEq tType sType) then
+        return false
       pure (some sType)
     else pure none
     if tBody.hasLooseBVars || sBody.hasLooseBVars then
@@ -504,7 +511,11 @@ def isDefEqForall (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
         isDefEqForall tBody sBody (subst.push (.fvar id))
     else
       isDefEqForall tBody sBody (subst.push default)
-  | t, s => isDefEq (t.instantiateRev subst) (s.instantiateRev subst)
+  | t, s => do
+    let ret ← isDefEq (t.instantiateRev subst) (s.instantiateRev subst)
+    if not ret then
+        dbg_trace s!"DBG[1]: TypeChecker.lean:503 {t}, {s}"
+    pure ret
 
 def quickIsDefEq (t s : Expr) (useHash := false) : RecM LBool := do
   if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 (eqvManager := m)) =>
@@ -687,8 +698,8 @@ def isDefEqCore' (t s : Expr) : RecM Bool := do
   if !t.hasFVar && s.isConstOf ``true then
     if (← whnf t).isConstOf ``true then return true
 
-  let tn ← whnfCore t (cheapProj := true)
-  let sn ← whnfCore s (cheapProj := true)
+  let tn ← whnf t
+  let sn ← whnf s
 
   if !(unsafe ptrEq tn t && ptrEq sn s) then
     let r ← quickIsDefEq tn sn
@@ -700,11 +711,6 @@ def isDefEqCore' (t s : Expr) : RecM Bool := do
       if r == .true then
         modify fun s => {s with data := {s.data with usedProofIrrelevance := true}}
       return r == .true
-
-  match ← lazyDeltaReduction tn sn with
-  | .continue .. => unreachable!
-  | .bool b => return b
-  | .unknown tn sn =>
 
   match tn, sn with
   | .const tf tl, .const sf sl =>

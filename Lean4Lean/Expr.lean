@@ -79,5 +79,6 @@ def strLitToConstructor (s : String) : Expr :=
 end Expr
 
 def Literal.toConstructor : Literal → Expr
-  | .natVal n => .natLitToConstructor n
+  | .natVal n =>
+    .natLitToConstructor n
   | .strVal s => .strLitToConstructor s
