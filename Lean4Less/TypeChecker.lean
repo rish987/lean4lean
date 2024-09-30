@@ -76,7 +76,7 @@ instance (priority := low) : MonadWithReaderOf (Std.HashMap (FVarId × FVarId) (
 structure Methods where
   isDefEqCore : PExpr → PExpr → MB
   isDefEqCorePure : PExpr → PExpr → M Bool
-  whnfCore (e : PExpr) (cheapRec := false) : MEE
+  whnfCore (e : PExpr) (cheapK := false) : MEE
   whnf (e : PExpr) (cheapK : Bool) : MEE
   whnfPure (e : PExpr) (n : Nat) : M PExpr
   inferType (e : Expr) : MPE
@@ -249,6 +249,7 @@ def isDefEq (t s : PExpr) : RecB := do
   if result && p?.isNone then
     modify fun st => { st with eqvManager := st.eqvManager.addEquiv t s }
   -- else if result && p?.isSome then
+  --   dbg_trace s!"DBG[2]: TypeChecker.lean:242 {t} {s}"
   pure r
 
 def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : PExpr)
@@ -759,6 +760,7 @@ def inferType' (e : Expr) : RecPE := do
         pure ((Expr.bindingBody! fType').instantiate1 a' |>.toPExpr, patch)
       else
         -- if e'.isApp then if let .const `Bool.casesOn _ := e'.withApp fun f _ => f then
+        dbg_trace s!"DBG[15]: TypeChecker.lean:762 {e}, {fType}, {aType}"
         throw <| .appTypeMismatch (← getEnv) (← getLCtx) e fType' aType
     | .letE .. => inferLet e
   modify fun s => { s with inferTypeC := s.inferTypeC.insert e (r, ep?) }
@@ -777,7 +779,7 @@ Reduces `e` to its weak-head normal form, without unfolding definitions. This
 is a conservative version of `whnf` (which does unfold definitions), to be used
 for efficiency purposes.
 
-Setting `cheapRec` or `cheapProj` to `true` will cause the major premise/struct
+Setting `cheapK` or `cheapProj` to `true` will cause the major premise/struct
 argument to be reduced "lazily" (using `whnfCore` rather than `whnf`) when
 reducing recursor applications/struct projections. This can be a useful
 optimization if we're checking the definitional equality of two recursor
@@ -794,7 +796,7 @@ which is the weak-head normal form of its definition if `e` is a let variable an
 -/
 def whnfFVar (e : PExpr) (cheapK : Bool) : RecEE := do
   if let some (.ldecl (value := v) ..) := (← getLCtx).find? e.toExpr.fvarId! then
-    return ← whnf v.toPExpr cheapK
+    return ← whnfCore v.toPExpr cheapK
   return (e, none)
 
 def appProjThm? (structName : Name) (projIdx : Nat) (struct structN : PExpr) (structEqstructN? : Option EExpr) : RecM (Option EExpr) := do
@@ -976,11 +978,9 @@ These include: `Nat.add`, `Nat.sub`, `Nat.mul`, `Nat.pow`, `Nat.gcd`,
 `Nat.mod`, `Nat.div`, `Nat.beq`, `Nat.ble`.
 -/
 def reduceNat (e : PExpr) : RecM (Option (PExpr × Option EExpr)) := do
+  if e.toExpr.hasFVar then return none
   let nargs := e.toExpr.getAppNumArgs
-  if nargs == 0 then
-    if e.toExpr == .const ``Nat.zero [] then
-      return some ((Expr.lit <| .natVal <| 0).toPExpr, none)
-  else if nargs == 1 then
+  if nargs == 1 then
     let f := e.toExpr.appFn!
     if f == .const ``Nat.succ [] then
       let prec := e.toExpr.appArg!.toPExpr
@@ -1158,26 +1158,26 @@ def reduceRecursor (e : PExpr) (cheapK : Bool) : RecM (Option (PExpr × Option E
   return none
 
 @[inherit_doc whnfCore]
-private def _whnfCore' (e' : Expr) (cheapRec := false) : RecEE := do
+private def _whnfCore' (e' : Expr) (cheapK := false) : RecEE := do
   let e := e'.toPExpr
   match e' with
   | .bvar .. | .sort .. | .mvar .. | .forallE .. | .const .. | .lam .. | .lit .. => return (e, none)
-  | .mdata _ e => return ← _whnfCore' e cheapRec
+  | .mdata _ e => return ← _whnfCore' e cheapK
   | .fvar id => if !isLetFVar (← getLCtx) id then return (e, none)
   | .app .. | .letE .. | .proj .. => pure ()
-  if let some r := (← get).whnfCoreCache.get? (e, cheapRec) then
+  if let some r := (← get).whnfCoreCache.get? (e, cheapK) then
     return r
   let rec save r := do
-    modify fun s => { s with whnfCoreCache := s.whnfCoreCache.insert (e, cheapRec) r }
+    modify fun s => { s with whnfCoreCache := s.whnfCoreCache.insert (e, cheapK) r }
     return r
   match e' with
   | .bvar .. | .sort .. | .mvar .. | .forallE .. | .const .. | .lam .. | .lit ..
   | .mdata .. => throw $ .other "unreachable 9"
-  | .fvar _ => return ← whnfFVar e cheapRec
+  | .fvar _ => return ← whnfFVar e cheapK
   | .app .. => -- beta-reduce at the head as much as possible, apply any remaining `rargs` to the resulting expression, and re-run `whnfCore`
     e'.withAppRev fun f0 rargs => do
     -- the head may still be a let variable/binding, projection, or mdata-wrapped expression
-    let (f, pf0Eqf?) ← whnfCore f0.toPExpr cheapRec
+    let (f, pf0Eqf?) ← whnfCore f0.toPExpr cheapK
     let frargs := f.toExpr.mkAppRevRange 0 rargs.size rargs
     -- patch to cast rargs as necessary to agree with type of f
     let (_, frargs'?) ← inferType frargs -- FIXME can result in redundant casts?
@@ -1195,7 +1195,7 @@ private def _whnfCore' (e' : Expr) (cheapRec := false) : RecEE := do
         let cont := do
           let r := f.instantiateRange (rargs'.size - m) rargs'.size rargs'
           let r := r.mkAppRevRange 0 (rargs'.size - m) rargs' |>.toPExpr
-          let (r', rEqr'?) ← whnfCore r cheapRec
+          let (r', rEqr'?) ← whnfCore r cheapK
           let eEqr'? ← appHEqTrans? e frargs' r' eEqfrargs'? rEqr'?
           save (r', eEqr'?)
         if let .lam _ _ body _ := f then
@@ -1204,22 +1204,22 @@ private def _whnfCore' (e' : Expr) (cheapRec := false) : RecEE := do
         else cont
       loop 1 body
     else if f == f0 then
-      if let some (r, eEqr?) ← reduceRecursor e cheapRec then
-        let (r', rEqr'?) ← whnfCore r cheapRec
+      if let some (r, eEqr?) ← reduceRecursor e cheapK then
+        let (r', rEqr'?) ← whnfCore r cheapK
         let eEqr'? ← appHEqTrans? e r r' eEqr? rEqr'?
         pure (r', eEqr'?)
       else
         pure (e, none)
     else
       -- FIXME replace with reduceRecursor? adding arguments can only result in further normalization if the head reduced to a partial recursor application
-      let (r', frargsEqr'?) ← whnfCore frargs' cheapRec
+      let (r', frargsEqr'?) ← whnfCore frargs' cheapK
       let eEqr'? ← appHEqTrans? e frargs' r' eEqfrargs'? frargsEqr'?
       save (r', eEqr'?)
   | .letE _ _ val body _ =>
-    save <|← whnfCore (body.instantiate1 val).toPExpr cheapRec
+    save <|← whnfCore (body.instantiate1 val).toPExpr cheapK
   | .proj typeName idx s =>
-    if let some (m, eEqm?) ← reduceProj typeName idx s.toPExpr cheapRec then
-      let (r', mEqr'?) ← whnfCore m cheapRec
+    if let some (m, eEqm?) ← reduceProj typeName idx s.toPExpr cheapK then
+      let (r', mEqr'?) ← whnfCore m cheapK
       let eEqr'? ← appHEqTrans? e m r' eEqm? mEqr'?
       save (r', eEqr'?)
     else
@@ -1295,6 +1295,79 @@ def cacheFailure (t s : Expr) : M Unit := do
   let k := if t.hash ≤ s.hash then (t, s) else (s, t)
   modify fun st => { st with failure := st.failure.insert k }
 
+def tryUnfoldProjApp (e : PExpr) : RecM (Option (PExpr × Option EExpr)) := do
+  let f := e.toExpr.getAppFn
+  if !f.isProj then return none
+  let (e', p?) ← whnfCore e (cheapK := true)
+  return if e' != e then (e', p?) else none
+
+/--
+Performs a single step of δ-reduction on `tn`, `sn`, or both (according to
+optimizations) followed by weak-head normalization (without further
+δ-reduction). If the resulting terms have matching head constructors (excluding
+non-α-equivalent applications and projections), or are applications with the
+same function head and defeq args, returns whether `tn` and `sn` are defeq.
+Otherwise, a return value indicates to the calling `lazyDeltaReduction` that
+δ-reduction is to be continued.
+
+If δ-reduction+weak-head-normalization cannot be continued (i.e. we have a
+weak-head normal form (with cheapProj := true)), defers further defeq-checking
+to `isDefEq`.
+-/
+def lazyDeltaReductionStep (ltn lsn : PExpr) : RecM ReductionStatus := do
+  let env ← getEnv
+  let delta e := whnfCore (unfoldDefinition env e).get! (cheapK := true)
+  let cont (nltn nlsn : PExpr) (pltnEqnltn? plsnEqnlsn? : Option EExpr) :=
+    return ← match ← quickIsDefEq nltn nlsn with
+    | (.undef, _) => pure $ .continue nltn nlsn pltnEqnltn? plsnEqnlsn?
+    | (.true, pnltnEqnlsn?) =>
+      do pure $ .bool .true (← appHEqTrans? ltn nltn lsn pltnEqnltn? <| ← appHEqTrans? nltn nlsn lsn pnltnEqnlsn? <| ← appHEqSymm? lsn nlsn plsnEqnlsn?)
+    | (.false, _) => pure $ .bool false none
+  let deltaCont_t := do
+    pure () -- FIXME why is this needed to block `delta` below from being run immediately in the outer monad context?
+    let (nltn, pltnEqnltn?) ← delta ltn
+    let ret ← cont nltn lsn pltnEqnltn? none
+    pure ret
+  let deltaCont_s := do
+    pure ()
+    let (nlsn, plsnEqnlsn?) ← delta lsn
+    cont ltn nlsn none plsnEqnlsn?
+  let deltaCont_both := do
+    pure ()
+    let (nltn, pltnEqnltn?) ← delta ltn
+    let (nlsn, plsnEqnlsn?) ← delta lsn
+    cont nltn nlsn pltnEqnltn? plsnEqnlsn?
+  match isDelta env ltn, isDelta env lsn with
+  | none, none => return .notDelta
+  | some _, none =>
+    -- FIXME hasn't whnfCore already been called on sn? so when would this case arise?
+    if let some (nlsn, plsnEqnlsn?) ← tryUnfoldProjApp lsn then
+      cont ltn nlsn none plsnEqnlsn?
+    else
+      deltaCont_t
+  | none, some _ =>
+    if let some (nltn, pltnEqnltn?) ← tryUnfoldProjApp ltn then
+      cont nltn lsn pltnEqnltn? none
+    else
+      deltaCont_s
+  | some dt, some ds =>
+    let ht := dt.hints
+    let hs := ds.hints
+    if ht.lt' hs then
+      deltaCont_s
+    else if hs.lt' ht then
+      deltaCont_t
+    else
+      if ltn.toExpr.isApp && lsn.toExpr.isApp && (unsafe ptrEq dt ds) && dt.hints.isRegular
+        && !failedBefore (← get).failure ltn lsn
+      then
+        if Level.isEquivList ltn.toExpr.getAppFn.constLevels! lsn.toExpr.getAppFn.constLevels! then
+          let (r, proof?) ← isDefEqApp methsA ltn lsn
+          if r then
+            return .bool true proof?
+        cacheFailure ltn lsn
+      deltaCont_both
+
 @[inline] def isNatZero (t : Expr) : Bool :=
   t == .natZero || t matches .lit (.natVal 0)
 
@@ -1318,6 +1391,62 @@ def isDefEqOffset (t s : PExpr) : RecLB := do
     let p? ← mkNatSuccAppArgHEq? p? t' s'
     pure (ret.toLBool, p?)
   | _, _ => return (.undef, none)
+
+/--
+Returns whether the `cheapProj := true` weak-head normal forms of `tn` and
+`sn` are defeq if:
+- they have matching head constructors (excluding non-α-equivalent applications
+  and projections)
+- they're both natural number successors (as literals or `Nat.succ` applications)
+- one of them can be converted to a natural number/boolean literal.
+Otherwise, defers to the calling function with these normal forms.
+-/
+def lazyDeltaReduction (tn sn : PExpr) : RecM ReductionStatus := loop tn sn none none 1000 where
+  loop ltn lsn (tnEqltn? snEqlsn? : Option EExpr)
+  | 0 => throw .deterministicTimeout
+  | fuel+1 => do
+    let (r, proof?) ← isDefEqOffset ltn lsn
+    if r != .undef then
+      if (r == .true) then
+        return .bool true proof?
+      else
+        return .bool false none
+    if !ltn.toExpr.hasFVar && !lsn.toExpr.hasFVar then
+      if let some (ltn', ltnEqltn'?) ← reduceNat ltn then
+        let (ret, ptn'Eqsn?) ← isDefEqCore ltn' lsn
+        let tnEqsn? ← appHEqTrans? ltn ltn' lsn ltnEqltn'? ptn'Eqsn?
+        return .bool ret tnEqsn?
+      else if let some (lsn', lsnEqlsn'?) ← reduceNat lsn then
+        let (ret, ptnEqsn'?) ← isDefEqCore ltn lsn'
+        let tnEqsn? ← appHEqTrans? ltn lsn' lsn ptnEqsn'? (← appHEqSymm? lsn lsn' lsnEqlsn'?)
+        return .bool ret tnEqsn?
+    let env ← getEnv
+    if let some (ltn', pltnEqLtn'?) ← reduceNative env ltn then
+      -- TODO does this case ever happen?
+      let (ret, ptn'Eqsn?) ← isDefEqCore ltn' lsn
+      let tnEqsn? ← appHEqTrans? ltn ltn' lsn pltnEqLtn'? ptn'Eqsn?
+      return .bool ret tnEqsn?
+    else if let some (lsn', lsnEqlsn'?) ← reduceNative env lsn then
+      -- TODO does this case ever happen?
+      let (ret, ptnEqsn'?) ← isDefEqCore ltn lsn'
+      let tnEqsn? ← appHEqTrans? ltn lsn' lsn ptnEqsn'? (← appHEqSymm? lsn lsn' lsnEqlsn'?)
+      return .bool ret tnEqsn?
+
+    match ← lazyDeltaReductionStep ltn lsn with
+    | .continue nltn nlsn ltnEqnltn? lsnEqnlsn? =>
+
+      let tnEqnltn? ← appHEqTrans? tn ltn nltn tnEqltn? ltnEqnltn?
+      let snEqnlsn? ← appHEqTrans? sn lsn nlsn snEqlsn? lsnEqnlsn?
+
+      let ret ← loop nltn nlsn tnEqnltn? snEqnlsn? fuel
+      pure ret
+    | .notDelta =>
+      return .unknown ltn lsn tnEqltn? snEqlsn?
+    | .bool .true ltnEqlsn? =>
+      return .bool .true (← appHEqTrans? tn ltn sn tnEqltn? <| ← appHEqTrans? ltn lsn sn ltnEqlsn? <| ← appHEqSymm? sn lsn snEqlsn?)
+    | .bool .false _ =>
+      return .bool .false none
+    | .unknown .. => throw $ .other "unreachable 11"
 
 /--
 If `t` is a string literal and `s` is a string constructor application,
@@ -1356,7 +1485,7 @@ def isDefEqUnitLike (t s : PExpr) : RecB := do
 
 @[inherit_doc isDefEqCore]
 def isDefEqCore' (t s : PExpr) : RecB := do
-  if ← isDefEqPure t s 50 then -- TODO make configurable
+  if ← isDefEqPure t s 50 then -- NOTE: this is a tradeoff between runtime and output size
     return (true, none)
   let (r, pteqs?) ← quickIsDefEq t s (useHash := true)
   if r != .undef then return (r == .true, pteqs?)
@@ -1365,28 +1494,38 @@ def isDefEqCore' (t s : PExpr) : RecB := do
     let (t, p?) ← whnf t
     if t.toExpr.isConstOf ``true then return (true, p?)
 
+  let (tn, tEqtn?) ← whnfCore t (cheapK := true)
+  let (sn, sEqsn?) ← whnfCore s (cheapK := true)
+
   let mktEqs? (t' s' : PExpr) (tEqt'? sEqs'? t'Eqs'? : Option EExpr) := do appHEqTrans? t s' s (← appHEqTrans? t t' s' tEqt'? t'Eqs'?) (← appHEqSymm? s s' sEqs'?)
 
-  let (r, tEqs?) ← isDefEqProofIrrel t s
-  if r != .undef then 
-    if r == .true then
-      return (true, ← mktEqs? t s none none tEqs?)
-    return (false, none)
-
-  let (tn, tEqtn?) ← whnf t (cheapK := true)
-  let (sn, sEqsn?) ← whnf s (cheapK := true)
-
-  if !(tn == t && sn == s) then
+  if !(unsafe ptrEq tn t && ptrEq sn s) then
     let (r, tnEqsn?) ← quickIsDefEq tn sn
     if r == .false then
       return (false, none)
     else if r == .true then
       return (true, ← mktEqs? tn sn tEqtn? sEqsn? tnEqsn?)
 
-  match tn.toExpr, sn.toExpr with
+  let (r, tnEqsn?) ← isDefEqProofIrrel tn sn
+  if r != .undef then 
+    if r == .true then
+      return (true, ← mktEqs? tn sn tEqtn? sEqsn? tnEqsn?)
+    return (false, none)
+
+  match ← lazyDeltaReduction tn sn with
+  | .continue ..
+  | .notDelta => throw $ .other "unreachable 12"
+  | .bool b tnEqsn? =>
+    return (b, ← mktEqs? tn sn tEqtn? sEqsn? tnEqsn?)
+  | .unknown tn' sn' tnEqtn'? snEqsn'? =>
+
+  let tEqtn'? ← appHEqTrans? t tn tn' tEqtn? tnEqtn'?
+  let sEqsn'? ← appHEqTrans? s sn sn' sEqsn? snEqsn'?
+
+  match tn'.toExpr, sn'.toExpr with
   | .const tf tl, .const sf sl =>
-    if tf == sf && Level.isEquivList tl sl then return (true, ← mktEqs? tn sn tEqtn? sEqsn? none)
-  | .fvar tv, .fvar sv => if tv == sv then return (true, ← mktEqs? tn sn tEqtn? sEqsn? none)
+    if tf == sf && Level.isEquivList tl sl then return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? none)
+  | .fvar tv, .fvar sv => if tv == sv then return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? none)
   | .proj tTypeName ti te, .proj _ si se =>
     if ti == si then
       -- optimized by above functions using `cheapProj = true`
@@ -1396,53 +1535,55 @@ def isDefEqCore' (t s : PExpr) : RecB := do
         let ret := (true, ← appProjThm? tTypeName ti te.toPExpr se.toPExpr teEqse?)
         return ret
   | .app .., .app .. =>
-    let tf := tn.toExpr.getAppFn
-    let sf := sn.toExpr.getAppFn
-    if let .const tfn _ := tf then
-      if let .const sfn _ := sf then
-        if tfn == sfn then
-          if let some (.recInfo info) := (← getEnv).find? tfn then
+    let tf := tn'.toExpr.getAppFn
+    let sf := sn'.toExpr.getAppFn
+    if let .const tn _ := tf then
+      if let .const sn _ := sf then
+        if tn == sn then
+          if let some (.recInfo info) := (← getEnv).find? tn then
             if info.k then
-              -- optimized by above functions using `cheapRec = true`
-              match ← isDefEqApp methsA tn sn with
-              | (true, tnEqsn?) =>
-                return (true, ← mktEqs? tn sn tEqtn? sEqsn? tnEqsn?)
+              -- optimized by above functions using `cheapK = true`
+              match ← isDefEqApp methsA tn' sn' with
+              | (true, tn'Eqsn'?) =>
+                return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)
               | _ =>
                 pure ()
+              
+
   | _, _ => pure ()
 
-  -- above functions used `cheapK = true`, so we may not have a complete WHNF
-  let (tn'', tn'Eqtn''?) ← whnf tn (cheapK := false)
-  let (sn'', sn'Eqsn''?) ← whnf sn (cheapK := false)
-
-  if !(tn'' == tn && sn'' == sn) then
+  -- above functions used `cheapProj = true`, `cheapK = true`, so we may not have a complete WHNF
+  let (tn'', tn'Eqtn''?) ← whnfCore tn'
+  let (sn'', sn'Eqsn''?) ← whnfCore sn'
+  if !(unsafe ptrEq tn'' tn' && ptrEq sn'' sn') then
     -- if projection reduced, need to re-run (as we may not have a WHNF)
-    let tEqtn''? ← appHEqTrans? t tn tn'' tEqtn? tn'Eqtn''?
-    let sEqsn''? ← appHEqTrans? s sn sn'' sEqsn? sn'Eqsn''?
+    let tEqtn''? ← appHEqTrans? t tn' tn'' tEqtn'? tn'Eqtn''?
+    let sEqsn''? ← appHEqTrans? s sn' sn'' sEqsn'? sn'Eqsn''?
     let (true, tn''Eqsn''?) ← isDefEqCore tn'' sn'' | return (false, none)
     return (true, ← mktEqs? tn'' sn'' tEqtn''? sEqsn''? tn''Eqsn''?)
 
-  match ← isDefEqApp methsA tn sn with
+  -- optimized by above functions using `cheapK = true`
+  match ← isDefEqApp methsA tn' sn' with
   | (true, tn'Eqsn'?) =>
-    return (true, ← mktEqs? tn sn tEqtn? sEqsn? tn'Eqsn'?)
+    return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)
   | _ =>
     pure ()
 
-  match ← tryEtaExpansion tn sn with
-  | (true, tn'Eqsn'?) => return (true, ← mktEqs? tn sn tEqtn? sEqsn? tn'Eqsn'?)
+  match ← tryEtaExpansion tn' sn' with
+  | (true, tn'Eqsn'?) => return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)
   | _ => pure ()
-  match ← tryEtaStruct tn sn with
-  | (true, tn'Eqsn'?) => return (true, ← mktEqs? tn sn tEqtn? sEqsn? tn'Eqsn'?)
+  match ← tryEtaStruct tn' sn' with
+  | (true, tn'Eqsn'?) => return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)
   | _ => pure ()
-  let r ← tryStringLitExpansion tn sn
+  let r ← tryStringLitExpansion tn' sn'
   if r != .undef then
     if r == .true then 
-      return (true, ← mktEqs? tn sn tEqtn? sEqsn? none)
+      return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? none)
     else
       return (false, none)
-  let (r, tn'Eqsn'?) ← isDefEqUnitLike tn sn
+  let (r, tn'Eqsn'?) ← isDefEqUnitLike tn' sn'
   if r then
-    return (true, ← mktEqs? tn sn tEqtn? sEqsn? tn'Eqsn'?)
+    return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)
   return (false, none)
 
 def isDefEqCorePure' (t s : PExpr) : RecM Bool := do
@@ -1478,8 +1619,8 @@ def Methods.withFuel : Nat → Methods
         pure ret
       isDefEqCorePure := fun t s =>
         isDefEqCorePure' t s (withFuel n)
-      whnfCore := fun e r =>
-        whnfCore' e r (withFuel n)
+      whnfCore := fun e k =>
+        whnfCore' e (cheapK := k) (withFuel n)
       whnf := fun e k =>
         whnf' e (cheapK := k) (withFuel n)
       whnfPure := fun e m =>

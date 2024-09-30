@@ -241,9 +241,7 @@ def forallAbs (max : Nat) (tfT sfT : Expr) : m
         f none tDomsVars sDomsVars tDoms sDoms tDomsEqsDoms
 
     let cont tBod sBod := do 
-      let (true, tBodEqsBod?) ← meth.isDefEq tBod.toPExpr sBod.toPExpr |
-        dbg_trace s!"DBG[22]: App.lean:244 {tBod}, {sBod}, {← meth.whnf (← meth.whnf (tBod.getAppArgs[0]!.toPExpr)).1.toExpr.getAppArgs[3]!.toPExpr}, {← meth.whnf (← meth.whnf (sBod.getAppArgs[0]!.toPExpr)).1.toExpr.getAppArgs[3]!.toPExpr}"
-        unreachable!
+      let (true, tBodEqsBod?) ← meth.isDefEq tBod.toPExpr sBod.toPExpr | unreachable!
       withMaybeAbs tBod sBod tBodEqsBod? fun newtsBod? tDomsVars sDomsVars tDoms sDoms tDomsEqsDoms => do
         let (newtBod, newsBod) := newtsBod?.getD (tBod, sBod)
         let mut newDomVars := #[]
