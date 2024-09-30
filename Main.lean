@@ -28,6 +28,10 @@ unsafe def main (args : List String) : IO UInt32 := do
   let verbose : Bool := "--verbose" ∈ flags
   let compare : Bool := "--compare" ∈ flags
   match args with
+    | [mod, only] => match mod.toName with
+      | .anonymous => throw <| IO.userError s!"Could not resolve module: {mod}"
+      | m =>
+        replayFromFresh addDecl m (verbose := verbose) (compare := compare) (onlyConsts? := [only.toName])
     | [mod] => match mod.toName with
       | .anonymous => throw <| IO.userError s!"Could not resolve module: {mod}"
       | m =>

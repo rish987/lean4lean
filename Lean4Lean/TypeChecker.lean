@@ -426,7 +426,6 @@ def reduceBinNatPred (f : Nat → Nat → Bool) (a b : Expr) : RecM (Option Expr
   return toExpr <| f v1 v2
 
 def reduceNat (e : Expr) : RecM (Option Expr) := do
-  if e.hasFVar then return none
   let nargs := e.getAppNumArgs
   if nargs == 0 then
     if e == .const ``Nat.zero [] then
@@ -494,6 +493,20 @@ def isDefEqLambda (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
       isDefEqLambda tBody sBody (subst.push default)
   | t, s => isDefEq (t.instantiateRev subst) (s.instantiateRev subst)
 
+def isDefEqApp (t s : Expr) : RecM Bool := do
+  unless t.isApp && s.isApp do
+    return false
+  t.withApp fun tf tArgs =>
+  s.withApp fun sf sArgs => do
+  unless tArgs.size == sArgs.size do
+    return false
+  unless ← isDefEq tf sf do
+    return false
+  for ta in tArgs, sa in sArgs do
+    unless ← isDefEq ta sa do
+      return false
+  return true
+
 def isDefEqForall (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
   match t, s with
   | .forallE _ tDom tBody _, .forallE name sDom sBody bi => do
@@ -513,8 +526,6 @@ def isDefEqForall (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
       isDefEqForall tBody sBody (subst.push default)
   | t, s => do
     let ret ← isDefEq (t.instantiateRev subst) (s.instantiateRev subst)
-    if not ret then
-        dbg_trace s!"DBG[1]: TypeChecker.lean:503 {t}, {s}"
     pure ret
 
 def quickIsDefEq (t s : Expr) (useHash := false) : RecM LBool := do
@@ -563,22 +574,14 @@ def tryEtaStructCore (t s : Expr) : RecM Bool := do
 def tryEtaStruct (t s : Expr) : RecM Bool :=
   tryEtaStructCore t s <||> tryEtaStructCore s t
 
-def isDefEqApp (t s : Expr) : RecM Bool := do
-  unless t.isApp && s.isApp do return false
-  t.withApp fun tf tArgs =>
-  s.withApp fun sf sArgs => do
-  unless tArgs.size == sArgs.size do return false
-  unless ← isDefEq tf sf do return false
-  for ta in tArgs, sa in sArgs do
-    unless ← isDefEq ta sa do return false
-  return true
-
 def isDefEqProofIrrel (t s : Expr) : RecM LBool := do
-  let tType ← inferType t
-  if !(← isProp tType) then return .undef
-  let ret ← toLBoolM <| isDefEq tType (← inferType s)
-  return ret
-  -- pure .undef
+  if (← readThe Context).opts.proofIrrelevance then
+    let tType ← inferType t
+    if !(← isProp tType) then return .undef
+    let ret ← toLBoolM <| isDefEq tType (← inferType s)
+    return ret
+  else
+    pure .undef
   
 
 def failedBefore (failure : Std.HashSet (Expr × Expr)) (t s : Expr) : Bool :=
@@ -698,19 +701,18 @@ def isDefEqCore' (t s : Expr) : RecM Bool := do
   if !t.hasFVar && s.isConstOf ``true then
     if (← whnf t).isConstOf ``true then return true
 
+  let r ← isDefEqProofIrrel t s
+  if r != .undef then
+    if r == .true then
+      modify fun s => {s with data := {s.data with usedProofIrrelevance := true}}
+    return r == .true
+
   let tn ← whnf t
   let sn ← whnf s
 
   if !(unsafe ptrEq tn t && ptrEq sn s) then
     let r ← quickIsDefEq tn sn
     if r != .undef then return r == .true
-
-  if (← readThe Context).opts.proofIrrelevance then
-    let r ← isDefEqProofIrrel tn sn
-    if r != .undef then
-      if r == .true then
-        modify fun s => {s with data := {s.data with usedProofIrrelevance := true}}
-      return r == .true
 
   match tn, sn with
   | .const tf tl, .const sf sl =>
@@ -719,11 +721,6 @@ def isDefEqCore' (t s : Expr) : RecM Bool := do
   | .proj _ ti te, .proj _ si se =>
     if ti == si then if ← isDefEq te se then return true
   | _, _ => pure ()
-
-  let tnn ← whnfCore tn
-  let snn ← whnfCore sn
-  if !(unsafe ptrEq tnn tn && ptrEq snn sn) then
-    return ← isDefEqCore tnn snn
 
   if ← isDefEqApp tn sn then return true
   if ← tryEtaExpansion tn sn then return true
