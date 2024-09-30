@@ -3,6 +3,8 @@ import Lean4Lean.Expr
 import Lean4Less.EExpr
 import Lean4Less.Ext
 
+-- whnfPure 218
+
 open Lean
 
 section
@@ -239,7 +241,9 @@ def forallAbs (max : Nat) (tfT sfT : Expr) : m
         f none tDomsVars sDomsVars tDoms sDoms tDomsEqsDoms
 
     let cont tBod sBod := do 
-      let (true, tBodEqsBod?) ← meth.isDefEq tBod.toPExpr sBod.toPExpr | unreachable!
+      let (true, tBodEqsBod?) ← meth.isDefEq tBod.toPExpr sBod.toPExpr |
+        dbg_trace s!"DBG[22]: App.lean:244 {tBod}, {sBod}, {← meth.whnf (← meth.whnf (tBod.getAppArgs[0]!.toPExpr)).1.toExpr.getAppArgs[3]!.toPExpr}, {← meth.whnf (← meth.whnf (sBod.getAppArgs[0]!.toPExpr)).1.toExpr.getAppArgs[3]!.toPExpr}"
+        unreachable!
       withMaybeAbs tBod sBod tBodEqsBod? fun newtsBod? tDomsVars sDomsVars tDoms sDoms tDomsEqsDoms => do
         let (newtBod, newsBod) := newtsBod?.getD (tBod, sBod)
         let mut newDomVars := #[]
@@ -402,8 +406,8 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
           | .forallE tDomName tDom _ _, .forallE sDomName sDom _ _ =>
             pure $ (tDom.toPExpr, tDomName, sDom.toPExpr, sDomName)
           | _, _ => unreachable!
-    let ta := tArgs[idx]!
-    let sa := sArgs[idx]!
+    let ta := ← meth.whnfPure tArgs[idx]! 216
+    let sa := ← meth.whnfPure sArgs[idx]! 217
 
     let mut taEqsa? := none
     if let some _p? := targsEqsargs?.get? idx then

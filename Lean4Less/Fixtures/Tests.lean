@@ -184,11 +184,12 @@ theorem HashMapTest' {α : Type u} {β : α → Type v} [inst : BEq α] [inst_1 
         sorry))
     (@rfl (Option (β a)) (@Std.DHashMap.get? α β inst inst_1 inst_2 (@Std.DHashMap.empty α β inst inst_1 c) a))
 
-axiom tP : (x : P) → Q x → Prop
-axiom tPp : tP q Qq
-def tempaux : P := p
+axiom tP : Nat → Prop
+axiom tempaux : tP 0
 set_option pp.all true
-def temp : tP p Qq := tPp
+
+def temp (m n : Nat) : (Nat.sub n m).pred = Nat.sub n (m + 1) := rfl
+-- #print UInt16.ofNat_one
 
 
 -- def HashMapTest {α : Type u} {β : α → Type v} [BEq α] [Hashable α] [LawfulBEq α] {a : α}

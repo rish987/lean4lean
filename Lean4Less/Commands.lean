@@ -75,9 +75,9 @@ def patchConsts : List Name := [
 `sorryAx, --FIXME
 ]
 
-def transL4L' (ns : Array Name) (env : Environment) (pp := false) : IO Environment := do
+def transL4L' (ns : Array Name) (env : Environment) (pp := false) (printProgress := false) : IO Environment := do
   let map := ns.foldl (init := default) fun acc n => .insert acc n
-  let (_, newEnv) ← checkConstants (printErr := true) env map @Lean4Less.addDecl (initConsts := patchConsts) (op := "patch")
+  let (_, newEnv) ← checkConstants (printErr := true) env map @Lean4Less.addDecl (initConsts := patchConsts) (op := "patch") (printProgress := printProgress)
   for n in ns do
     if pp then
       ppConst newEnv n
@@ -87,8 +87,8 @@ def transL4L (n : Array Name) (env? : Option Environment := none) : Lean.Elab.Co
   let env ← env?.getDM getEnv
   transL4L' n env
 
-def checkL4L (ns : Array Name) (env : Environment) (printOutput := true) : IO Environment := do
-  let env ← transL4L' ns env (pp := printOutput)
+def checkL4L (ns : Array Name) (env : Environment) (printOutput := true) (printProgress := false) : IO Environment := do
+  let env ← transL4L' ns env (pp := printOutput) (printProgress := printProgress)
   let nSet := ns.foldl (init := default) fun acc n => acc.insert n
 
   let (_, checkEnv) ← checkConstants (printErr := true) env nSet Lean4Lean.addDecl (initConsts := patchConsts) (opts := {proofIrrelevance := false, kLikeReduction := false})

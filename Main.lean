@@ -37,7 +37,7 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
     | m =>
       if let some onlyConsts := onlyConsts? then
         Lean.withImportModules #[{module := mod}, {module := `patch.PatchTheoremsAx}] {} 0 fun env => do
-          _ ← Lean4Less.checkL4L (onlyConsts.map (·.toName)) env
+          _ ← Lean4Less.checkL4L (onlyConsts.map (·.toName)) env (printProgress := true)
       else
         replayFromFresh' Lean4Less.addDecl `patch.PatchTheoremsAx (onlyConsts? := Lean4Less.patchConsts) (op := "patch") fun env =>
           replayFromInit' Lean4Less.addDecl m env (op := "patch") fun env' =>
