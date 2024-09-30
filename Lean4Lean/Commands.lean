@@ -6,7 +6,7 @@ open Lean
 
 namespace Lean4Lean
 
-def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn : Declaration → M Unit) (initConsts : List Name := []) (printErr := false) (opts : TypeCheckerOpts := {}) (op : String := "typecheck"): IO (Lean.NameSet × Environment) := do
+def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn : Declaration → M Unit) (initConsts : List Name := []) (printErr := false) (opts : TypeCheckerOpts := {}) (op : String := "typecheck") (printProgress := false) : IO (Lean.NameSet × Environment) := do
   let mut onlyConstsToTrans : Lean.NameSet := default
 
   -- constants that should be skipped on account of already having been typechecked
@@ -14,8 +14,10 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn :
   -- constants that should throw an error if encountered on account of having previously failed to typecheck
   let mut errConsts : Lean.NameSet := default
   let mut modEnv := ← Lean.mkEmptyEnvironment
-  for const in initConsts ++ consts.toList do
+  let loop const modEnv skipConsts errConsts onlyConstsToTrans printProgress := do
     try
+      let mut modEnv := modEnv
+      let mut skipConsts := skipConsts
       if not $ skipConsts.contains const then
         let mut (_, {map := map, ..}) ← ((Deps.namedConstDeps const).toIO { options := default, fileName := "", fileMap := default } {env} {env})
         let mapConsts := map.fold (init := default) fun acc const _ => acc.insert const
@@ -28,14 +30,22 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn :
         for skipConst in skippedConsts do
           map := map.erase skipConst
 
-        modEnv ← replay addDeclFn {newConstants := map, opts} modEnv (printProgress := false)
+        modEnv ← replay addDeclFn {newConstants := map, opts} modEnv (printProgress := printProgress)
         skipConsts := skipConsts.union mapConsts -- TC success, so want to skip in future runs (already in environment)
-      onlyConstsToTrans := onlyConstsToTrans.insert const
+      let onlyConstsToTrans := onlyConstsToTrans.insert const
+      pure (modEnv, skipConsts, errConsts, onlyConstsToTrans)
     catch
     | e =>
       if printErr then
         dbg_trace s!"Error {op}ing constant `{const}`: {e.toString}"
-      errConsts := errConsts.insert const
+      let errConsts := errConsts.insert const
+      pure (modEnv, skipConsts, errConsts, onlyConstsToTrans)
+
+
+  for const in initConsts do 
+    (modEnv, skipConsts, errConsts, onlyConstsToTrans) ← loop const modEnv skipConsts errConsts onlyConstsToTrans false
+  for const in consts.toList do 
+    (modEnv, skipConsts, errConsts, onlyConstsToTrans) ← loop const modEnv skipConsts errConsts onlyConstsToTrans printProgress
   pure (onlyConstsToTrans, modEnv)
 
 end Lean4Lean
