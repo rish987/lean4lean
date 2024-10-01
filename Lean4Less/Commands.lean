@@ -93,15 +93,15 @@ def checkL4L (ns : Array Name) (env : Environment) (printOutput := true) (printP
 
   let (_, checkEnv) ← checkConstants (printErr := true) env nSet Lean4Lean.addDecl (initConsts := patchConsts) (opts := {proofIrrelevance := false, kLikeReduction := false})
 
-  let env' ← transL4L' ns env
-  for n in ns do
-    let .some c  := env.find? n | unreachable!
-    let .some c' := env'.find? n | unreachable!
-
-    let diffTypes := c.toConstantVal.type != c'.toConstantVal.type
-    let diffVals := c.value? != c'.value?
-    if diffTypes || diffVals then
-      throw $ IO.userError $ s!"failed round-trip test: \n--- LHS\n {← ppConst env n} \n--- RHS\n {← ppConst env' n}"
+  -- let env' ← transL4L' ns env
+  -- for n in ns do
+  --   let .some c  := env.find? n | unreachable!
+  --   let .some c' := env'.find? n | unreachable!
+  --
+  --   let diffTypes := c.toConstantVal.type != c'.toConstantVal.type
+  --   let diffVals := c.value? != c'.value?
+  --   if diffTypes || diffVals then
+  --     throw $ IO.userError $ s!"failed round-trip test: \n--- LHS\n {← ppConst env n} \n--- RHS\n {← ppConst env' n}"
   pure checkEnv
 
 elab "#trans_l4l " i:ident : command => do

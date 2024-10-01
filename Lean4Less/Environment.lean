@@ -39,10 +39,8 @@ def patchDefinition (env : Environment) (v : DefinitionVal) :
     M.run env' v.name (safety := .unsafe) (lctx := {}) do
       let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
       let value' := value'?.getD v.value.toPExpr
-      let (defEq, _) ← isDefEq valueType type v.levelParams
-      if !defEq then
+      let (true, value) ← smartCast valueType type value' v.levelParams |
         throw <| .declTypeMismatch env' (.defnDecl v) valueType
-      let value ← smartCast valueType type value' v.levelParams
       let v := {v with type, value}
       return .defnInfo v
   else
@@ -55,14 +53,10 @@ def patchDefinition (env : Environment) (v : DefinitionVal) :
       -- dbg_trace s!"DBG[98]: Environment.lean:54: valueType={valueType}"
       let value' := value'?.getD v.value.toPExpr
       -- dbg_trace s!"DBG[33]: Environment.lean:54 (after let value := value?.getD v.value.toPExpr)"
-      let (defEq, _) ← isDefEq valueType type v.levelParams
-      -- dbg_trace s!"DBG[13]: Environment.lean:58 (after let (defEq, _) ← isDefEq valueType typ…)"
       -- dbg_trace s!"DBG[31]: Environment.lean:57: valueTypeEqtype?={valueTypeEqtype?}"
 
-      if !defEq then
+      let (true, value) ← smartCast valueType type value' v.levelParams |
         throw <| .declTypeMismatch env (.defnDecl v) valueType
-
-      let value ← smartCast valueType type value' v.levelParams
       -- dbg_trace s!"DBG[15]: Environment.lean:65 (after let value ← smartCast valueType type v…)"
       let v := {v with type, value}
       -- dbg_trace s!"DBG[35]: Environment.lean:64 (after let v := v with type, value)"
@@ -76,10 +70,9 @@ def patchTheorem (env : Environment) (v : TheoremVal) :
     checkNoMVarNoFVar env v.name v.value
     let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
     let value' := value'?.getD v.value.toPExpr
-    let (defEq, _) ← isDefEq valueType type v.levelParams
-    if !defEq then
+    let (true, ret) ← smartCast valueType type value' v.levelParams |
       throw <| .declTypeMismatch env (.thmDecl v) valueType
-    pure (type, ← smartCast valueType type value' v.levelParams)
+    pure (type, ret)
   let v := {v with type, value}
   return .thmInfo v
 
@@ -89,10 +82,9 @@ def patchOpaque (env : Environment) (v : OpaqueVal) :
     let type ← checkConstantVal env v.toConstantVal
     let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
     let value' := value'?.getD v.value.toPExpr
-    let (defEq, _) ← isDefEq valueType type v.levelParams
-    if !defEq then
+    let (true, ret) ← smartCast valueType type value' v.levelParams |
       throw <| .declTypeMismatch env (.opaqueDecl v) valueType
-    pure (type, ← smartCast valueType type value' v.levelParams)
+    pure (type, ret)
   let v := {v with type, value}
   return .opaqueInfo v
 
@@ -122,10 +114,8 @@ def patchMutual (env : Environment) (vs : List DefinitionVal) :
       checkNoMVarNoFVar env' v'.name v'.value
       let (valueType, value'?) ← TypeChecker.check v'.value v'.levelParams
       let value' := value'?.getD v'.value.toPExpr
-      let (defEq, _) ← isDefEq valueType type v'.levelParams
-      if !defEq then
+      let (true, value) ← smartCast valueType type value' vs[0]!.levelParams |
         throw <| .declTypeMismatch env' (.mutualDefnDecl vs') valueType
-      let value ← smartCast valueType type value' vs[0]!.levelParams
       newvs' := newvs'.append #[{v' with value}]
     return newvs'.map .defnInfo |>.toList
 

@@ -3,7 +3,7 @@ import Lean4Lean.Expr
 import Lean4Less.EExpr
 import Lean4Less.Ext
 
--- whnfPure 218
+-- whnfPure 216
 
 open Lean
 
@@ -404,8 +404,8 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
           | .forallE tDomName tDom _ _, .forallE sDomName sDom _ _ =>
             pure $ (tDom.toPExpr, tDomName, sDom.toPExpr, sDomName)
           | _, _ => unreachable!
-    let ta := ← meth.whnfPure tArgs[idx]! 216
-    let sa := ← meth.whnfPure sArgs[idx]! 217
+    let ta := tArgs[idx]!
+    let sa := sArgs[idx]!
 
     let mut taEqsa? := none
     if let some _p? := targsEqsargs?.get? idx then

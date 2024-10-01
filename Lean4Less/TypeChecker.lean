@@ -435,7 +435,7 @@ def isDefEqForall (t s : PExpr) (numBinds := 0) : RecB := do
       pure $ UaEqVx?
     pure ret
 
-def smartCast (tl tr e : PExpr) (p? : Option EExpr := none) : RecM PExpr := do
+def smartCast' (tl tr e : PExpr) (p? : Option EExpr := none) : RecM ((Bool × Option EExpr) × PExpr) := do
   let mkCast'' n tl tr p e (prfVars prfVals : Array Expr) (lvl : Level) := do
     let p := p.toExpr.replaceFVars prfVars prfVals
     pure $ Lean.mkAppN (← getConst n [lvl]) #[tl, tr, p, e]
@@ -476,7 +476,7 @@ def smartCast (tl tr e : PExpr) (p? : Option EExpr := none) : RecM PExpr := do
       pure $ (← getLCtx).mkLambda lamVars cast
   let p? ←
     if let some p := p? then
-      pure $ .some p
+      pure $ (true, .some p)
     else
       let rec lamCount (e tl tr : Expr) := do
         match e, (← whnfPure tl.toPExpr 3).toExpr, (← whnfPure tr.toPExpr 4).toExpr with
@@ -491,17 +491,18 @@ def smartCast (tl tr e : PExpr) (p? : Option EExpr := none) : RecM PExpr := do
       let (nLams, tl, tr) ← lamCount e tl tr
       let tl := tl.toPExpr
       let tr := tr.toPExpr
-      let (ret, p?) ←
-        if nLams > 0 then
-          isDefEqForall tl tr nLams
-        else
-          isDefEq tl tr 
-      assert! ret == true
-      pure p?
-  pure $ (← p?.mapM (fun (p : EExpr) => do pure (← loop e.toExpr tl.toExpr tr.toExpr #[] #[] #[] p).toPExpr)).getD e
+      if nLams > 0 then
+        isDefEqForall tl tr nLams
+      else
+        isDefEq tl tr 
+  pure $ (p?, (← p?.2.mapM (fun (p : EExpr) => do pure (← loop e.toExpr tl.toExpr tr.toExpr #[] #[] #[] p).toPExpr)).getD e)
+
+def smartCast (tl tr e : PExpr) (p? : Option EExpr := none) : RecM (Bool × PExpr) := do
+  let ret ← smartCast' tl tr e p?
+  pure (ret.1.1, ret.2)
 
 def maybeCast (p? : Option EExpr) (typLhs typRhs e : PExpr) : RecM PExpr := do
-  pure $ (← p?.mapM (fun (p : EExpr) => do smartCast typLhs typRhs e p)).getD e
+  pure $ (← p?.mapM (fun (p : EExpr) => do pure (← smartCast typLhs typRhs e p).2)).getD e
 
 def isDefEqProofIrrel' (t s tType sType : PExpr) (pt? : Option EExpr) (useRfl := false) : RecM (Option EExpr) := do
   if ← isDefEqPure t s then
@@ -631,14 +632,13 @@ def inferLet (e : Expr) : RecPE := loop #[] #[] false e where
     let type' ← maybeCast pType? sort sort' (type'?.getD type.toPExpr)
     let val := val.instantiateRev fvars
     let (valType, val'?) ← inferType val 
-    let (defEq, pVal?) ← isDefEq valType type' -- FIXME order?
-    if !defEq then
+    let val' := val'?.getD val.toPExpr
+    let ((true, pVal?), valC') ← smartCast' valType type' val' |
       throw <| .letTypeMismatch (← getEnv) (← getLCtx) name valType type'
-    let val' ← smartCast valType type' (val'?.getD val.toPExpr)
     let id := ⟨← mkFreshId⟩
-    withLCtx ((← getLCtx).mkLetDecl id name type' val') do
+    withLCtx ((← getLCtx).mkLetDecl id name type' valC') do
       let fvars := fvars.push (.fvar id)
-      let vals := vals.push val'
+      let vals := vals.push valC'
       loop fvars vals (typePatched || type'?.isSome || pType?.isSome || val'?.isSome || pVal?.isSome) body
   | e => do
     let (r, e'?) ← inferType (e.instantiateRev fvars)
@@ -753,15 +753,13 @@ def inferType' (e : Expr) : RecPE := do
       let dType := Expr.bindingDomain! fType' |>.toPExpr
       -- it can be shown that if `e` is typeable as `T`, then `T` is typeable as `Sort l`
       -- for some universe level `l`, so this use of `isDefEq` is valid
-      let (defEq, pa'?) ← isDefEq aType dType
-      if defEq then
-        let a' ← smartCast aType dType (a'?.getD a.toPExpr)
-        let patch := if f'?.isSome || a'?.isSome || pf'?.isSome || pa'?.isSome then .some (Expr.app f' a').toPExpr else none
-        pure ((Expr.bindingBody! fType').instantiate1 a' |>.toPExpr, patch)
-      else
+      let ((true, pa'?), a') ← smartCast' aType dType (a'?.getD a.toPExpr) |
         -- if e'.isApp then if let .const `Bool.casesOn _ := e'.withApp fun f _ => f then
-        dbg_trace s!"DBG[15]: TypeChecker.lean:762 {e}, {fType}, {aType}"
+        dbg_trace s!"dbg: {e}, {fType}, {aType}"
         throw <| .appTypeMismatch (← getEnv) (← getLCtx) e fType' aType
+
+      let patch := if f'?.isSome || a'?.isSome || pf'?.isSome || pa'?.isSome then .some (Expr.app f' a').toPExpr else none
+      pure ((Expr.bindingBody! fType').instantiate1 a' |>.toPExpr, patch)
     | .letE .. => inferLet e
   modify fun s => { s with inferTypeC := s.inferTypeC.insert e (r, ep?) }
   return (r, ep?)
@@ -1695,7 +1693,7 @@ def ensureForall (t : PExpr) (lps : List Name) (s := t) : MEE := withReader ({ �
 def maybeCast (p? : Option EExpr) (typLhs typRhs e : PExpr) (lps : List Name) : M PExpr := 
   withReader ({ · with lparams := lps }) (Inner.maybeCast p? typLhs typRhs e).run
 
-def smartCast (typLhs typRhs e : PExpr) (lps : List Name) : M PExpr := 
+def smartCast (typLhs typRhs e : PExpr) (lps : List Name) : M (Bool × PExpr) := 
   withReader ({ · with lparams := lps }) (Inner.smartCast typLhs typRhs e).run
 
 -- def test' : MetaM String := do

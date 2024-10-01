@@ -11,7 +11,7 @@ section
 structure ExtMethodsR (m : Type → Type u) extends ExtMethods m where
   isDefEqApp' : PExpr → PExpr → Std.HashMap Nat (Option EExpr) → m (Bool × Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))
   isDefEqApp : PExpr → PExpr → Std.HashMap Nat (Option EExpr) → m (Bool × Option EExpr)
-  smartCast : PExpr → PExpr → PExpr → m PExpr
+  smartCast : PExpr → PExpr → PExpr → m (Bool × PExpr)
   isDefEqProofIrrel' : PExpr → PExpr → PExpr → PExpr → Option EExpr → m (Option EExpr)
 
 variable [Monad m] (env : Environment)
@@ -156,7 +156,7 @@ def inductiveReduceRec [Monad m] (env : Environment) (e : PExpr) (cheapK : Bool 
         | .forallE _ dom body _, .forallE _ origDom origBody _, m + 1 => 
           let idx := (info.numMotives + info.numMinors) - n + info.numParams
           let origMotiveMinor := recArgs[idx]!.toPExpr
-          let newMotiveMinor ← meth.smartCast origDom.toPExpr dom.toPExpr origMotiveMinor
+          let (true, newMotiveMinor) ← meth.smartCast origDom.toPExpr dom.toPExpr origMotiveMinor | unreachable!
           let (true, origMotiveMinorEqnewMotiveMinor?) ← meth.isDefEq origMotiveMinor newMotiveMinor | unreachable!
           let ret := ret.push (origMotiveMinorEqnewMotiveMinor?.map fun p => (origMotiveMinor, newMotiveMinor, p))
           loop2 (body.instantiate1 newMotiveMinor) (origBody.instantiate1 origMotiveMinor) m ret
