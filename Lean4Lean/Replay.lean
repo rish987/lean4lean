@@ -98,10 +98,11 @@ def print (m : String) : M Unit := do
   maybePrintln
   IO.print m
 
-def printProgress (op : String := "typecheck") : M Unit := do
+def printProgress (op : String := "typecheck") (name : Option String := none) : M Unit := do
   let numToCheck := (← get).numToCheck
   let numChecked := (← get).numChecked
-  IO.print s!"{Ansi.resetLine}[{numChecked}/{numToCheck}] ({(numChecked  * 100) / numToCheck}%) constants {op}ed"
+  let curr := (name.map fun n => s!" (current: {n})").getD ""
+  IO.print s!"{Ansi.resetLine}[{numChecked}/{numToCheck}] ({(numChecked  * 100) / numToCheck}%) constants {op}ed{curr}"
   modify fun s => {s with printNewLine := true}
   let stdout ← IO.getStdout
   stdout.flush
@@ -122,11 +123,11 @@ def throwKernelException (ex : KernelException) : M α := do
     Prod.fst <$> (Lean.Core.CoreM.toIO · ctx state) do Lean.throwKernelException ex
 
 /-- Add a declaration, possibly throwing a `KernelException`. -/
-def addDecl (d : Declaration) (verbose := false) : M Unit := do
+def addDecl (d : Declaration) (verbose := false) (allowAxiomReplace := false) : M Unit := do
   if (← read).verbose then
     println s!"adding {d.name}"
   let t1 ← IO.monoMsNow
-  match (← get).env.addDecl' d (← read).opts with
+  match (← get).env.addDecl' d (← read).opts allowAxiomReplace with
   | .ok (env, data) =>
     if data.usedKLikeReduction then
       if verbose then
@@ -189,8 +190,17 @@ partial def replayConstant (name : Name) (addDeclFn' : Declaration → M Unit) (
     if printProgress? then
       printProgress op
 
+  let preAddDecl n := do
+    if printProgress? then
+      printProgress op n
+
   let addDeclFn := fun decl => do
-    addDeclFn' decl
+    preAddDecl decl.name
+    try
+      addDeclFn' decl
+    catch e =>
+      dbg_trace s!"Error in {decl.name}"
+      throw e
     postAddDecl
 
   if ← isTodo name then

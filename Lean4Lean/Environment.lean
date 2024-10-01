@@ -22,7 +22,7 @@ def addAxiom (env : Environment) (v : AxiomVal) (opts : TypeCheckerOpts := {}) :
     (safety := if v.isUnsafe then .unsafe else .safe) (opts := opts)
   return (add env (.axiomInfo v), s.data)
 
-def addDefinition (env : Environment) (v : DefinitionVal) (opts : TypeCheckerOpts := {}) :
+def addDefinition (env : Environment) (v : DefinitionVal) (opts : TypeCheckerOpts := {}) (allowAxiomReplace := false) :
     Except KernelException (Environment × Data) := do
   if let .unsafe := v.safety then
     -- Meta definition can be recursive.
@@ -30,32 +30,53 @@ def addDefinition (env : Environment) (v : DefinitionVal) (opts : TypeCheckerOpt
     _ ← (checkConstantVal env v.toConstantVal).run env (safety := .unsafe)
     let env' := add env (.opaqueInfo {v with isUnsafe := false})
     checkNoMVarNoFVar env' v.name v.value
-    let (_, s) ← M.run env' (safety := .unsafe) (lctx := {}) (opts := opts) do
-      let valType ← TypeChecker.check v.value v.levelParams
-      if !(← isDefEq valType v.type) then
-        throw <| .declTypeMismatch env' (.defnDecl v) valType
-    return (add env (.defnInfo v), s.data)
+    let (ret, s) ← M.run env' (safety := .unsafe) (lctx := {}) (opts := opts) do
+      try
+        let valType ← TypeChecker.check v.value v.levelParams
+        if !(← isDefEq valType v.type) then
+          throw <| .declTypeMismatch env' (.defnDecl v) valType
+      catch e =>
+        if allowAxiomReplace then
+          return (.axiomInfo {v with isUnsafe := false})
+        else
+          throw e
+      pure (.defnInfo v)
+    return (add env ret, s.data)
   else
-    let (_, s) ← M.run env (safety := .safe) (lctx := {}) (opts := opts) do
+    let (ret, s) ← M.run env (safety := .safe) (lctx := {}) (opts := opts) do
       checkConstantVal env v.toConstantVal (← checkPrimitiveDef env v)
       checkNoMVarNoFVar env v.name v.value
-      let valType ← TypeChecker.check v.value v.levelParams
-      if !(← isDefEq valType v.type) then
-        throw <| .declTypeMismatch env (.defnDecl v) valType
-    return (add env (.defnInfo v), s.data)
+      try
+        let valType ← TypeChecker.check v.value v.levelParams
+        if !(← isDefEq valType v.type) then
+          throw <| .declTypeMismatch env (.defnDecl v) valType
+      catch e =>
+        if allowAxiomReplace then
+          return (.axiomInfo {v with isUnsafe := false})
+        else
+          throw e
+      pure (.defnInfo v)
+    return (add env ret, s.data)
 
-def addTheorem (env : Environment) (v : TheoremVal) (opts : TypeCheckerOpts := {}) :
+def addTheorem (env : Environment) (v : TheoremVal) (opts : TypeCheckerOpts := {}) (allowAxiomReplace := false) :
     Except KernelException (Environment × Data) := do
   -- TODO(Leo): we must add support for handling tasks here
-  let (_, s) ← M.run env (safety := .safe) (lctx := {}) (opts := opts) do
+  let (ret, s) ← M.run env (safety := .safe) (lctx := {}) (opts := opts) do
     if !(← isProp v.type) then
       throw <| .thmTypeIsNotProp env v.name v.type
     checkConstantVal env v.toConstantVal
     checkNoMVarNoFVar env v.name v.value
-    let valType ← TypeChecker.check v.value v.levelParams
-    if !(← isDefEq valType v.type) then
-      throw <| .declTypeMismatch env (.thmDecl v) valType
-  return (add env (.thmInfo v), s.data)
+    try
+      let valType ← TypeChecker.check v.value v.levelParams
+      if !(← isDefEq valType v.type) then
+        throw <| .declTypeMismatch env (.thmDecl v) valType
+    catch e =>
+      if allowAxiomReplace then
+        return (.axiomInfo {v with isUnsafe := false})
+      else
+        throw e
+    pure (.thmInfo v)
+  return (add env ret, s.data)
 
 def addOpaque (env : Environment) (v : OpaqueVal) (opts : TypeCheckerOpts := {}) :
     Except KernelException (Environment × Data) := do
@@ -89,12 +110,12 @@ def addMutual (env : Environment) (vs : List DefinitionVal) (opts : TypeCheckerO
   return (env', s.data)
 
 /-- Type check given declaration and add it to the environment -/
-def addDecl' (env : Environment) (decl : @& Declaration) (opts : TypeCheckerOpts) :
+def addDecl' (env : Environment) (decl : @& Declaration) (opts : TypeCheckerOpts) (allowAxiomReplace := false) :
     Except KernelException (Environment × Data) := do
   match decl with
   | .axiomDecl v => addAxiom env v opts
-  | .defnDecl v => addDefinition env v opts 
-  | .thmDecl v => addTheorem env v opts
+  | .defnDecl v => addDefinition env v opts allowAxiomReplace
+  | .thmDecl v => addTheorem env v opts allowAxiomReplace
   | .opaqueDecl v => addOpaque env v opts
   | .mutualDefnDecl v => addMutual env v opts
   | .quotDecl => pure (← addQuot env, {})

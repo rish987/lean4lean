@@ -30,7 +30,8 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn :
         for skipConst in skippedConsts do
           map := map.erase skipConst
 
-        modEnv ← replay addDeclFn {newConstants := map, opts} modEnv (printProgress := printProgress)
+        modEnv ← replay addDeclFn {newConstants := map.erase const, opts := {}} modEnv (printProgress := printProgress)
+        modEnv ← replay addDeclFn {newConstants := Std.HashMap.insert default const (map.get! const), opts} modEnv (printProgress := printProgress)
         skipConsts := skipConsts.union mapConsts -- TC success, so want to skip in future runs (already in environment)
       let onlyConstsToTrans := onlyConstsToTrans.insert const
       pure (modEnv, skipConsts, errConsts, onlyConstsToTrans)
