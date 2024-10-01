@@ -111,7 +111,7 @@ elab "#check_only " i:ident : command => do
   _ ← checkConstants (printErr := true) (← getEnv) (.insert default i.getId) (Lean4Lean.addDecl (verbose := true)) (opts := {})
 
 elab "#check_off " i:ident : command => do
-  _ ← checkConstants (printErr := true) (← getEnv) (.insert default i.getId) Lean4Lean.addDecl (opts := {proofIrrelevance := false, kLikeReduction := false})
+  _ ← checkConstants (printErr := true) (← getEnv) (.insert default i.getId) (Lean4Lean.addDecl (allowAxiomReplace := true)) (opts := {proofIrrelevance := false, kLikeReduction := false})
 
 elab "#check_l4l " i:ident : command => do
   _ ← checkL4L #[i.getId] (← getEnv)

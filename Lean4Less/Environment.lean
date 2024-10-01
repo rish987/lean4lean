@@ -28,7 +28,7 @@ def patchAxiom (env : Environment) (v : AxiomVal) :
   let v := {v with type}
   return .axiomInfo v
 
-def patchDefinition (env : Environment) (v : DefinitionVal) :
+def patchDefinition (env : Environment) (v : DefinitionVal) (allowAxiomReplace := false) :
     Except KernelException ConstantInfo := do
   if let .unsafe := v.safety then
     -- Meta definition can be recursive.
@@ -40,7 +40,10 @@ def patchDefinition (env : Environment) (v : DefinitionVal) :
       let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
       let value' := value'?.getD v.value.toPExpr
       let (true, value) ← smartCast valueType type value' v.levelParams |
-        throw <| .declTypeMismatch env' (.defnDecl v) valueType
+        if allowAxiomReplace then
+          return .axiomInfo {v with type, isUnsafe := false}
+        else
+          throw <| .declTypeMismatch env' (.defnDecl v) valueType
       let v := {v with type, value}
       return .defnInfo v
   else
@@ -56,25 +59,36 @@ def patchDefinition (env : Environment) (v : DefinitionVal) :
       -- dbg_trace s!"DBG[31]: Environment.lean:57: valueTypeEqtype?={valueTypeEqtype?}"
 
       let (true, value) ← smartCast valueType type value' v.levelParams |
-        throw <| .declTypeMismatch env (.defnDecl v) valueType
+        if allowAxiomReplace then
+          return .axiomInfo {v with type, isUnsafe := false}
+        else
+          throw <| .declTypeMismatch env (.defnDecl v) valueType
       -- dbg_trace s!"DBG[15]: Environment.lean:65 (after let value ← smartCast valueType type v…)"
       let v := {v with type, value}
       -- dbg_trace s!"DBG[35]: Environment.lean:64 (after let v := v with type, value)"
       return (.defnInfo v)
 
-def patchTheorem (env : Environment) (v : TheoremVal) :
+def patchTheorem (env : Environment) (v : TheoremVal) (allowAxiomReplace := false) :
     Except KernelException ConstantInfo := do
   -- TODO(Leo): we must add support for handling tasks here
-  let (type, value) ← M.run env v.name (safety := .safe) (lctx := {}) do
+  let (type, value?) ← M.run env v.name (safety := .safe) (lctx := {}) do
     let type ← checkConstantVal env v.toConstantVal
     checkNoMVarNoFVar env v.name v.value
     let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
     let value' := value'?.getD v.value.toPExpr
     let (true, ret) ← smartCast valueType type value' v.levelParams |
-      throw <| .declTypeMismatch env (.thmDecl v) valueType
-    pure (type, ret)
-  let v := {v with type, value}
-  return .thmInfo v
+      if allowAxiomReplace then
+        pure (type, none)
+      else
+        throw <| .declTypeMismatch env (.thmDecl v) valueType
+    pure (type, .some ret)
+
+  if let .some value := value? then
+    let v := {v with type, value}
+    return .thmInfo v
+  else
+    let v := {v with type, isUnsafe := false}
+    return .axiomInfo v
 
 def patchOpaque (env : Environment) (v : OpaqueVal) :
     Except KernelException ConstantInfo := do
@@ -120,17 +134,17 @@ def patchMutual (env : Environment) (vs : List DefinitionVal) :
     return newvs'.map .defnInfo |>.toList
 
 /-- Type check given declaration and add it to the environment -/
-def addDecl' (env : Environment) (decl : @& Declaration) :
+def addDecl' (env : Environment) (decl : @& Declaration) (allowAxiomReplace := false) :
     Except KernelException Environment := do
   match decl with
   | .axiomDecl v =>
     let v ← patchAxiom env v
     return add env v
   | .defnDecl v =>
-    let v ← patchDefinition env v
+    let v ← patchDefinition env v allowAxiomReplace
     return add env v
   | .thmDecl v =>
-    let v ← patchTheorem env v
+    let v ← patchTheorem env v allowAxiomReplace
     return add env v
   | .opaqueDecl v =>
     let v ← patchOpaque env v

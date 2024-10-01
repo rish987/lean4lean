@@ -992,8 +992,8 @@ def reduceNat (e : PExpr) : RecM (Option (PExpr × Option EExpr)) := do
     if f == ``Nat.mul then return ← reduceBinNatOp ``Nat.mul Nat.mul a.toPExpr b.toPExpr
     if f == ``Nat.pow then return ← reduceBinNatOp ``Nat.pow Nat.pow a.toPExpr b.toPExpr
     if f == ``Nat.gcd then 
+      dbg_trace s!"dbg: GCD averted: {natLitExt? (← whnf a.toPExpr).1} {natLitExt? (← whnf a.toPExpr).1}"
       return none
-      -- dbg_trace s!"dbg: GCD averted: {natLitExt? (← whnf a.toPExpr).1} {natLitExt? (← whnf a.toPExpr).1}"
       -- return ← reduceBinNatOp ``Nat.gcd Nat.gcd a.toPExpr b.toPExpr
     if f == ``Nat.mod then return ← reduceBinNatOp ``Nat.mod Nat.mod a.toPExpr b.toPExpr
     if f == ``Nat.div then return ← reduceBinNatOp ``Nat.div Nat.div a.toPExpr b.toPExpr
@@ -1483,7 +1483,7 @@ def isDefEqUnitLike (t s : PExpr) : RecB := do
 
 @[inherit_doc isDefEqCore]
 def isDefEqCore' (t s : PExpr) : RecB := do
-  if ← isDefEqPure t s 50 then -- NOTE: this is a tradeoff between runtime and output size
+  if ← isDefEqPure t s 150 then -- NOTE: this is a tradeoff between runtime and output size
     return (true, none)
   let (r, pteqs?) ← quickIsDefEq t s (useHash := true)
   if r != .undef then return (r == .true, pteqs?)
