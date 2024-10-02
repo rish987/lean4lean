@@ -11,7 +11,7 @@ section
 structure ExtMethodsR (m : Type → Type u) extends ExtMethods m where
   isDefEqApp' : PExpr → PExpr → Std.HashMap Nat (Option EExpr) → m (Bool × Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))
   isDefEqApp : PExpr → PExpr → Std.HashMap Nat (Option EExpr) → m (Bool × Option EExpr)
-  smartCast : PExpr → PExpr → PExpr → m (Bool × PExpr)
+  smartCast : PExpr → PExpr → PExpr → Nat → m (Bool × PExpr)
   isDefEqProofIrrel' : PExpr → PExpr → PExpr → PExpr → Option EExpr → m (Option EExpr)
 
 variable [Monad m] (env : Environment)
@@ -48,11 +48,11 @@ def toCtorWhenK (rval : RecursorVal) (e : PExpr) : m (PExpr × Option (EExpr)) :
   let some (newCtorApp, newCtorName) := mkNullaryCtor env type rval.numParams | return (e, none)
   if let (.const ctorName _) := e.toExpr.getAppFn then
     if ctorName == newCtorName then
-      if let true ← meth.isDefEqPure e newCtorApp then
+      if let true ← meth.isDefEqPure e newCtorApp 101 then
         return (e, none)
   let appType ← meth.inferTypePure newCtorApp 102
   -- check that the indices of types of `e` and `newCtorApp` match
-  let (true, pt?) ← meth.isDefEq type appType | return (e, none)
+  let (true, pt?) ← meth.isDefEq type appType 101 | return (e, none)
   let prf? ← meth.isDefEqProofIrrel' e newCtorApp type appType pt?
 
   return (newCtorApp, prf?)
@@ -127,7 +127,7 @@ def inductiveReduceRec [Monad m] (env : Environment) (e : PExpr) (cheapK : Bool 
     if type.toExpr.isApp then
       meth.isDefEqApp' type newType default
     else
-      pure (← meth.isDefEqPure type newType, none)
+      pure (← meth.isDefEqPure type newType 102, none)
 
   assert! defEq == true
 
@@ -156,8 +156,8 @@ def inductiveReduceRec [Monad m] (env : Environment) (e : PExpr) (cheapK : Bool 
         | .forallE _ dom body _, .forallE _ origDom origBody _, m + 1 => 
           let idx := (info.numMotives + info.numMinors) - n + info.numParams
           let origMotiveMinor := recArgs[idx]!.toPExpr
-          let (true, newMotiveMinor) ← meth.smartCast origDom.toPExpr dom.toPExpr origMotiveMinor | unreachable!
-          let (true, origMotiveMinorEqnewMotiveMinor?) ← meth.isDefEq origMotiveMinor newMotiveMinor | unreachable!
+          let (true, newMotiveMinor) ← meth.smartCast origDom.toPExpr dom.toPExpr origMotiveMinor 101 | unreachable!
+          let (true, origMotiveMinorEqnewMotiveMinor?) ← meth.isDefEq origMotiveMinor newMotiveMinor 102 | unreachable!
           let ret := ret.push (origMotiveMinorEqnewMotiveMinor?.map fun p => (origMotiveMinor, newMotiveMinor, p))
           loop2 (body.instantiate1 newMotiveMinor) (origBody.instantiate1 origMotiveMinor) m ret
         | _, _, m =>

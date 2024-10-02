@@ -4,6 +4,8 @@ import Lean4Less.EExpr
 import Lean4Less.Ext
 
 -- whnfPure 216
+-- isDefEqPure 204
+-- isDefEq 209
 
 open Lean
 
@@ -40,7 +42,7 @@ def mkAppEqProof? (aVars bVars : Array PExpr) (Uas Vbs : Array PExpr) (ds? : Arr
         let Ua := Uas[idx]!
         let Vb := Vbs[idx]!
 
-        let (defEq, UaEqVb?) ← meth.isDefEq Ua Vb
+        let (defEq, UaEqVb?) ← meth.isDefEq Ua Vb 201
         assert! defEq
 
         let (UaTypeLvl, UaType) ← meth.getTypeLevel Ua
@@ -91,8 +93,8 @@ def mkAppEqProof? (aVars bVars : Array PExpr) (Uas Vbs : Array PExpr) (ds? : Arr
       else
         pure none
 
-    f ← meth.whnfPure (f.toExpr.app a |>.toPExpr) 202
-    g ← meth.whnfPure (g.toExpr.app b |>.toPExpr) 203
+    f := f.toExpr.app a |>.toPExpr
+    g := g.toExpr.app b |>.toPExpr
   pure fEqg?
 
 structure BinderData where
@@ -120,9 +122,9 @@ def mkAppEqProof (T S : PExpr) (as bs : Array PExpr) (asEqbs? : Array (Option EE
     -- sanity check
     let aType ← meth.inferTypePure a 203
     let bType ← meth.inferTypePure b 204
-    let .true ← meth.isDefEqPure A aType | do
+    let .true ← meth.isDefEqPure A aType 201 | do
       throw $ .other s!"expected: {A}\n inferred: {aType}"
-    let .true ← meth.isDefEqPure B bType | do
+    let .true ← meth.isDefEqPure B bType 202 | do
       -- let app := Lean.mkAppN g.toExpr (bs[:5].toArray.map PExpr.toExpr)
       -- let appType ← meth.whnfPure $ ← meth.inferTypePure app.toPExpr 205
       -- let .forallE _ _domType _ _ := appType.toExpr | unreachable!
@@ -137,14 +139,14 @@ def mkAppEqProof (T S : PExpr) (as bs : Array PExpr) (asEqbs? : Array (Option EE
 
     let AEqB? ←
       if A != B then
-        let (defEq, AEqB?) ← meth.isDefEq A B
+        let (defEq, AEqB?) ← meth.isDefEq A B 202
         assert! defEq
         if AEqB?.isSome then
           if asEqbs?[idx]!.isSome then
             -- if idx == 0 then
             pure AEqB?
           else
-            assert! ← meth.isDefEqPure A B
+            assert! ← meth.isDefEqPure A B 203
             pure none
         else pure none
       else pure none
@@ -232,7 +234,7 @@ def forallAbs (max : Nat) (tfT sfT : Expr) : m
             let sDom := (← getLCtx).mkLambda (origDepVars.map fun (_, svar) => (Expr.fvar svar)) sType |>.toPExpr
             let tDoms := tDoms.push tDom
             let sDoms := sDoms.push sDom
-            let (true, tDomEqsDom?) ← meth.isDefEq tDom sDom | unreachable!
+            let (true, tDomEqsDom?) ← meth.isDefEq tDom sDom 203 | unreachable!
             let tDomsEqsDoms := tDomsEqsDoms.push tDomEqsDom?
             let newtType := Lean.mkAppN (.fvar MtVar.1) (depVars.map (.fvar ·.1))
             let newsType := Lean.mkAppN (.fvar MsVar.1) (depVars.map (.fvar ·.2))
@@ -241,7 +243,7 @@ def forallAbs (max : Nat) (tfT sfT : Expr) : m
         f none tDomsVars sDomsVars tDoms sDoms tDomsEqsDoms
 
     let cont tBod sBod := do 
-      let (true, tBodEqsBod?) ← meth.isDefEq tBod.toPExpr sBod.toPExpr | unreachable!
+      let (true, tBodEqsBod?) ← meth.isDefEq tBod.toPExpr sBod.toPExpr 204 | unreachable!
       withMaybeAbs tBod sBod tBodEqsBod? fun newtsBod? tDomsVars sDomsVars tDoms sDoms tDomsEqsDoms => do
         let (newtBod, newsBod) := newtsBod?.getD (tBod, sBod)
         let mut newDomVars := #[]
@@ -261,7 +263,7 @@ def forallAbs (max : Nat) (tfT sfT : Expr) : m
 
           let idt := ⟨← mkFreshId⟩
 
-          let (true, tDomEqsDom?) ← meth.isDefEq tDom.toPExpr sDom.toPExpr | unreachable!
+          let (true, tDomEqsDom?) ← meth.isDefEq tDom.toPExpr sDom.toPExpr 205 | unreachable!
 
           let cont' ids := do
             let tBod := tBod.instantiate1 (.fvar idt)
@@ -312,7 +314,7 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
   unless tArgs.size == sArgs.size do return (false, none)
 
   let (.true, tfEqsf?) ← if tfEqsf?.isSome then pure (.true, tfEqsf?.get!)
-    else meth.isDefEq tf sf | return (false, none)
+    else meth.isDefEq tf sf 206 | return (false, none)
 
   let mkAppEqProof' tVars sVars tArgs' sArgs' taEqsas' tBodFun sBodFun tBodArgs sBodArgs _tArgsVars _sArgsVars tBodT sBodT tEtaVars sEtaVars idx := do -- FIXME why do I have to pass in the mutable variables?
     let tLCtx := tVars.foldl (init := (← getLCtx)) fun acc (id, n, (type : PExpr)) => LocalContext.mkLocalDecl acc id n type default
@@ -411,7 +413,7 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
     if let some _p? := targsEqsargs?.get? idx then
       taEqsa? := _p?
     else
-      let (.true, _p?) ← meth.isDefEq ta sa | return (false, none)
+      let (.true, _p?) ← meth.isDefEq ta sa 207 | return (false, none)
       taEqsa? := _p?
     let taEqsaData? := taEqsa?.map (ta, sa, ·)
     taEqsaDatas := taEqsaDatas.push taEqsaData?
@@ -459,7 +461,7 @@ def isDefEqApp''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
   unless tArgs.size == sArgs.size do return (false, none)
 
   let (.true, _ret?) ← if tfEqsf?.isSome then pure (.true, tfEqsf?.get!)
-    else meth.isDefEq tf sf | return (false, none)
+    else meth.isDefEq tf sf 208 | return (false, none)
 
   let mut taEqsas := #[]
   let mut idx := 0
@@ -468,7 +470,7 @@ def isDefEqApp''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
     if let some _p? := targsEqsargs?[idx]? then
       p? := _p?
     else
-      let (.true, _p?) ← meth.isDefEq ta sa | return (false, none)
+      let (.true, _p?) ← meth.isDefEq ta sa 209 | return (false, none)
       p? := _p?
     taEqsas := taEqsas.push (p?.map (ta, sa, ·))
     idx := idx + 1

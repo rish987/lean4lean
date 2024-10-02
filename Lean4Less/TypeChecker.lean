@@ -14,6 +14,7 @@ import Lean4Less.App
 
 -- inferTypePure 26
 -- whnfPure 14
+-- isDefEq/isDefEqCore/maybeCast/smartCast 24
 
 namespace Lean4Less
 open Lean
@@ -74,12 +75,12 @@ instance (priority := low) : MonadWithReaderOf (Std.HashMap (FVarId × FVarId) (
   withReader f := withReader fun s => { s with eqFVars := f s.eqFVars }
 
 structure Methods where
-  isDefEqCore : PExpr → PExpr → MB
+  isDefEqCore : PExpr → PExpr → Nat → MB
   isDefEqCorePure : PExpr → PExpr → M Bool
   whnfCore (e : PExpr) (cheapK := false) : MEE
   whnf (e : PExpr) (cheapK : Bool) : MEE
   whnfPure (e : PExpr) (n : Nat) : M PExpr
-  inferType (e : Expr) : MPE
+  inferType (e : Expr) (dbg : Bool) : MPE
   inferTypePure (e : PExpr) (n : Nat) : M PExpr
 
 abbrev RecM := ReaderT Methods M
@@ -88,8 +89,9 @@ abbrev RecEE := RecM (PExpr × (Option EExpr))
 abbrev RecB := RecM (Bool × (Option EExpr))
 abbrev RecLB := RecM (LBool × (Option EExpr))
 
-def runLeanMinus (M : Lean.TypeChecker.M T) : RecM T := do
-  Lean.TypeChecker.M.run' (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := false, proofIrrelevance := false}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams) (ngen := (← get).ngen) M
+def runLeanMinus (M : Lean.TypeChecker.M T) : RecM T := do -- FIXME persist cache between runs
+  let ret ← Lean.TypeChecker.M.run' (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := false, proofIrrelevance := false}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams) (ngen := (← get).ngen) M
+  pure ret
 
 def runLean (M : Lean.TypeChecker.M T) : RecM T := do
   Lean.TypeChecker.M.run' (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := true, proofIrrelevance := true}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams) (ngen := (← get).ngen) M
@@ -199,7 +201,7 @@ throw an error if and only if `e` is not typeable according to Lean's
 algorithmic typing judgment. Setting `inferOnly := true` optimizes to avoid
 unnecessary checks in the case that `e` is already known to be well-typed.
 -/
-def inferType (e : Expr) : RecPE := fun m => m.inferType e
+def inferType (e : Expr) (dbg := false) : RecPE := fun m => m.inferType e dbg
 
 def inferTypePure (e : PExpr) (n : Nat) : RecM PExpr := fun m => do
   let ret ← m.inferTypePure e n
@@ -238,13 +240,13 @@ did not/would not throw an error). This ensures in particular that any calls to
 `inferType e (inferOnly := false)` on subterms `e` would not fail, so we know
 that `e` types as the return value of `inferType e (inferOnly := true)`.
 -/
-def isDefEqCore (t s : PExpr) : RecB := fun m => m.isDefEqCore t s
+def isDefEqCore (t s : PExpr) (n : Nat) : RecB := fun m => m.isDefEqCore t s n
 
 def isDefEqCorePure (t s : PExpr) : RecM Bool := fun m => m.isDefEqCorePure t s
 
 @[inherit_doc isDefEqCore]
-def isDefEq (t s : PExpr) : RecB := do
-  let r ← isDefEqCore t s
+def isDefEq (t s : PExpr) (n : Nat) : RecB := do
+  let r ← isDefEqCore t s n
   let (result, p?) := r
   if result && p?.isNone then
     modify fun st => { st with eqvManager := st.eqvManager.addEquiv t s }
@@ -261,7 +263,7 @@ def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : P
     let tDom := tDom.instantiateRev tvars
     let sDom := sDom.instantiateRev svars
     let p? ← if tDom != sDom then
-      let (defEq, p?) ← isDefEq tDom sDom
+      let (defEq, p?) ← isDefEq tDom sDom 1
       if !defEq then return (false, none)
       pure p?
     else pure none
@@ -282,7 +284,7 @@ def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : P
           let tBody := tBody.instantiateRev tvars
           let sBody := sBody.instantiateRev svars
 
-          let (defEq, ptbodEqsbod?) ← isDefEq tBody sBody
+          let (defEq, ptbodEqsbod?) ← isDefEq tBody sBody 2
           if !defEq then return (false, none)
           let ret ← f tBody sBody ptbodEqsbod? tvars.reverse ds.reverse
           pure (true, ret) -- FIXME can iterate backwards instead of reversing lists?
@@ -308,15 +310,16 @@ def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : P
 def mkHRefl (lvl : Level) (T : PExpr) (t : PExpr) : RecM EExpr := do
   pure $ .refl {u := lvl, A := T, a := t}
 
-def isDefEqPure (t s : PExpr) (fuel := 1000) : RecM Bool := do
+def isDefEqPure (t s : PExpr) (n : Nat) (fuel := 1000) : RecM Bool := do
   try
-    runLeanMinus $ Lean.TypeChecker.isDefEq t s fuel
+    let ret ← runLeanMinus $ Lean.TypeChecker.isDefEq t s fuel
+    pure ret
   catch e =>
     match e with
     | .deepRecursion =>
       pure false -- proof irrelevance may be needed to avoid deep recursion (e.g. String.size_toUTF8)
     | _ => 
-      dbg_trace s!"isDefEqPure error: {0}"
+      dbg_trace s!"isDefEqPure error: {n}"
       throw e
 
 def appPrfIrrelHEq (P Q : PExpr) (hPQ : EExpr) (p q : PExpr) : RecM EExpr := do
@@ -435,7 +438,7 @@ def isDefEqForall (t s : PExpr) (numBinds := 0) : RecB := do
       pure $ UaEqVx?
     pure ret
 
-def smartCast' (tl tr e : PExpr) (p? : Option EExpr := none) : RecM ((Bool × Option EExpr) × PExpr) := do
+def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((Bool × Option EExpr) × PExpr) := do
   let mkCast'' n tl tr p e (prfVars prfVals : Array Expr) (lvl : Level) := do
     let p := p.toExpr.replaceFVars prfVars prfVals
     pure $ Lean.mkAppN (← getConst n [lvl]) #[tl, tr, p, e]
@@ -479,33 +482,36 @@ def smartCast' (tl tr e : PExpr) (p? : Option EExpr := none) : RecM ((Bool × Op
       pure $ (true, .some p)
     else
       let rec lamCount (e tl tr : Expr) := do
-        match e, (← whnfPure tl.toPExpr 3).toExpr, (← whnfPure tr.toPExpr 4).toExpr with
-        | .lam _ _ b _, .forallE nl tdl tbl bil, .forallE nr tdr tbr bir =>
-          let idl := ⟨← mkFreshId⟩
-          let idr := ⟨← mkFreshId⟩
-          withLCtx ((← getLCtx).mkLocalDecl idl nl tdl bil) do
-            withLCtx ((← getLCtx).mkLocalDecl idr nr tdr bir) do
-              let (c, atbl, atbr) ← lamCount b (tbl.instantiate1 (.fvar idl)) (tbr.instantiate1 (.fvar idr))
-              pure $ (c + 1, (← getLCtx).mkForall #[(.fvar idl)] atbl, (← getLCtx).mkForall #[(.fvar idr)] atbr)
-        | _, tl, tr => pure (0, tl, tr)
-      let (nLams, tl, tr) ← lamCount e tl tr
-      let tl := tl.toPExpr
-      let tr := tr.toPExpr
+        match e with
+        | .lam _ _ b _ =>
+          match (← whnfPure tl.toPExpr 3).toExpr, (← whnfPure tr.toPExpr 4).toExpr with
+          | .forallE nl tdl tbl bil, .forallE nr tdr tbr bir =>
+            let idl := ⟨← mkFreshId⟩
+            let idr := ⟨← mkFreshId⟩
+            withLCtx ((← getLCtx).mkLocalDecl idl nl tdl bil) do
+              withLCtx ((← getLCtx).mkLocalDecl idr nr tdr bir) do
+                let (c, atbl, atbr) ← lamCount b (tbl.instantiate1 (.fvar idl)) (tbr.instantiate1 (.fvar idr))
+                pure $ (c + 1, (← getLCtx).mkForall #[(.fvar idl)] atbl, (← getLCtx).mkForall #[(.fvar idr)] atbr)
+          | _, _ => unreachable!
+        | _ => pure (0, tl, tr)
+      let (nLams, tl', tr') ← lamCount e tl tr
+      let tl' := tl'.toPExpr
+      let tr' := tr'.toPExpr
       if nLams > 0 then
-        isDefEqForall tl tr nLams
+        isDefEqForall tl' tr' nLams
       else
-        isDefEq tl tr 
+        isDefEq tl' tr' (50 + n)
   pure $ (p?, (← p?.2.mapM (fun (p : EExpr) => do pure (← loop e.toExpr tl.toExpr tr.toExpr #[] #[] #[] p).toPExpr)).getD e)
 
-def smartCast (tl tr e : PExpr) (p? : Option EExpr := none) : RecM (Bool × PExpr) := do
-  let ret ← smartCast' tl tr e p?
+def smartCast (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM (Bool × PExpr) := do
+  let ret ← smartCast' tl tr e n p?
   pure (ret.1.1, ret.2)
 
-def maybeCast (p? : Option EExpr) (typLhs typRhs e : PExpr) : RecM PExpr := do
-  pure $ (← p?.mapM (fun (p : EExpr) => do pure (← smartCast typLhs typRhs e p).2)).getD e
+def maybeCast (p? : Option EExpr) (typLhs typRhs e : PExpr) (n : Nat) : RecM PExpr := do
+  pure $ (← p?.mapM (fun (p : EExpr) => do pure (← smartCast typLhs typRhs e n p).2)).getD e
 
-def isDefEqProofIrrel' (t s tType sType : PExpr) (pt? : Option EExpr) (useRfl := false) : RecM (Option EExpr) := do
-  if ← isDefEqPure t s then
+def isDefEqProofIrrel' (t s tType sType : PExpr) (pt? : Option EExpr) (n : Nat) (useRfl := false) : RecM (Option EExpr) := do
+  if ← isDefEqPure t s (n + 50) 5 then
     if useRfl then
       return .some $ .refl {u := 0, A := tType, a := t}
     else
@@ -522,19 +528,19 @@ def methsR : ExtMethodsR RecM := {
     smartCast := smartCast
     isDefEqApp := fun t s m => isDefEqApp methsA t s (targsEqsargs? := m)
     isDefEqApp' := fun t s m => isDefEqApp' methsA t s (targsEqsargs? := m)
-    isDefEqProofIrrel' := isDefEqProofIrrel' (useRfl := true) -- need to pass `useRfl := true` because of failure of transitivity (with K-like reduction)
+    isDefEqProofIrrel' := isDefEqProofIrrel' (n := 2) (useRfl := true) -- need to pass `useRfl := true` because of failure of transitivity (with K-like reduction)
   }
 
 /--
 Infers the type of lambda expression `e`.
 -/
-def inferLambda (e : Expr) : RecPE := loop #[] false e where
+def inferLambda (e : Expr) (dbg := false) : RecPE := loop #[] false e where
   loop fvars domPatched : Expr → RecPE -- TODO OK that fvars is not `Array PExpr`?
   | .lam name dom body bi => do
     let d := dom.instantiateRev fvars
     let (sort, d'?) ← inferType d
     let (sort', p?) ← ensureSortCore sort d
-    let d' ← maybeCast p? sort sort' (d'?.getD d.toPExpr)
+    let d' ← maybeCast p? sort sort' (d'?.getD d.toPExpr) 20
 
     let id := ⟨← mkFreshId⟩
     withLCtx ((← getLCtx).mkLocalDecl id name d' bi) do
@@ -542,18 +548,19 @@ def inferLambda (e : Expr) : RecPE := loop #[] false e where
       loop fvars (domPatched || d'?.isSome || p?.isSome) body
   | e => do
     let e := e.instantiateRev fvars
-    let (r, e'?) ← inferType e
+    let (r, e'?) ← inferType e dbg
     let e' := e'?.getD e.toPExpr
     let r := r.toExpr.cheapBetaReduce |>.toPExpr
     let (rSort) ← inferTypePure r 25
     let (rSort', p?) ← ensureSortCore rSort r -- TODO need to test this
-    let r' ← maybeCast p? rSort rSort' r
+    let r' ← maybeCast p? rSort rSort' r 21
 
     let patch ←
       if domPatched || e'?.isSome then do
         pure $ some $ ((← getLCtx).mkLambda fvars e').toPExpr
       else 
         pure none
+
     -- TODO only return .some if any of the fvars had domains that were patched, or if e'? := some e'
     return (( (← getLCtx).mkForall fvars r').toPExpr, patch)
 
@@ -567,7 +574,7 @@ def inferForall (e : Expr) : RecPE := loop #[] #[] false e where
     let (sort, d'?) ← inferType d
     let (sort', p?) ← ensureSortCore sort d
     let lvl := sort'.toExpr.sortLevel!
-    let d' ← maybeCast p? sort sort' (d'?.getD d.toPExpr)
+    let d' ← maybeCast p? sort sort' (d'?.getD d.toPExpr) 22
 
     let us := us.push lvl
     let id := ⟨← mkFreshId⟩
@@ -579,7 +586,7 @@ def inferForall (e : Expr) : RecPE := loop #[] #[] false e where
     let (sort, e'?) ← inferType e
     let (sort', p?) ← ensureSortCore sort e
     let lvl := sort'.toExpr.sortLevel!
-    let e' ← maybeCast p? sort sort' (e'?.getD e.toPExpr)
+    let e' ← maybeCast p? sort sort' (e'?.getD e.toPExpr) 23
 
     let patch? ←
       if domPatched || e'?.isSome || p?.isSome then do
@@ -629,11 +636,11 @@ def inferLet (e : Expr) : RecPE := loop #[] #[] false e where
     let type := type.instantiateRev fvars
     let (sort, type'?) ← inferType type 
     let (sort', pType?) ← ensureSortCore sort type
-    let type' ← maybeCast pType? sort sort' (type'?.getD type.toPExpr)
+    let type' ← maybeCast pType? sort sort' (type'?.getD type.toPExpr) 16
     let val := val.instantiateRev fvars
     let (valType, val'?) ← inferType val 
     let val' := val'?.getD val.toPExpr
-    let ((true, pVal?), valC') ← smartCast' valType type' val' |
+    let ((true, pVal?), valC') ← smartCast' valType type' val' 17 |
       throw <| .letTypeMismatch (← getEnv) (← getLCtx) name valType type'
     let id := ⟨← mkFreshId⟩
     withLCtx ((← getLCtx).mkLetDecl id name type' valC') do
@@ -715,7 +722,7 @@ def inferProj (typeName : Name) (idx : Nat) (struct : PExpr) (patched : Bool) (s
   return (dom.toPExpr, patch)
 
 @[inherit_doc inferType]
-def inferType' (e : Expr) : RecPE := do
+def inferType' (e : Expr) (dbg := false) : RecPE := do
   -- if (← readThe Context).const == `eq_of_heq' then
   --   dbg_trace s!"started e={e}"
   if e.isBVar then
@@ -740,12 +747,12 @@ def inferType' (e : Expr) : RecPE := do
       checkLevel (← readThe Context) l
       pure <| (Expr.sort (.succ l) |>.toPExpr, none)
     | .const c ls => pure (← inferConstant (← readThe Context) c ls, none)
-    | .lam .. => inferLambda e
+    | .lam .. => inferLambda e false
     | .forallE .. => inferForall e
     | .app f a =>
       let (fType, f'?) ← inferType' f
       let (fType', pf'?) ← ensureForallCore fType f
-      let f' ← maybeCast pf'? fType fType' (f'?.getD f.toPExpr)
+      let f' ← maybeCast pf'? fType fType' (f'?.getD f.toPExpr) 18
       -- if (← readThe Context).const == `eq_of_heq' then if let .lam _ (.const `Ty _) _ _ := a then
 
       let (aType, a'?) ← inferType' a
@@ -753,7 +760,7 @@ def inferType' (e : Expr) : RecPE := do
       let dType := Expr.bindingDomain! fType' |>.toPExpr
       -- it can be shown that if `e` is typeable as `T`, then `T` is typeable as `Sort l`
       -- for some universe level `l`, so this use of `isDefEq` is valid
-      let ((true, pa'?), a') ← smartCast' aType dType (a'?.getD a.toPExpr) |
+      let ((true, pa'?), a') ← smartCast' aType dType (a'?.getD a.toPExpr) 19 |
         -- if e'.isApp then if let .const `Bool.casesOn _ := e'.withApp fun f _ => f then
         dbg_trace s!"dbg: {e}, {fType}, {aType}"
         throw <| .appTypeMismatch (← getEnv) (← getLCtx) e fType' aType
@@ -992,7 +999,7 @@ def reduceNat (e : PExpr) : RecM (Option (PExpr × Option EExpr)) := do
     if f == ``Nat.mul then return ← reduceBinNatOp ``Nat.mul Nat.mul a.toPExpr b.toPExpr
     if f == ``Nat.pow then return ← reduceBinNatOp ``Nat.pow Nat.pow a.toPExpr b.toPExpr
     if f == ``Nat.gcd then 
-      dbg_trace s!"dbg: GCD averted: {natLitExt? (← whnf a.toPExpr).1} {natLitExt? (← whnf a.toPExpr).1}"
+      -- dbg_trace s!"dbg: GCD averted: {natLitExt? (← whnf a.toPExpr).1} {natLitExt? (← whnf a.toPExpr).1}"
       return none
       -- return ← reduceBinNatOp ``Nat.gcd Nat.gcd a.toPExpr b.toPExpr
     if f == ``Nat.mod then return ← reduceBinNatOp ``Nat.mod Nat.mod a.toPExpr b.toPExpr
@@ -1039,7 +1046,7 @@ def isDefEqLambda (t s : PExpr) : RecB := do
           let bEqa := (Expr.fvar idbEqa).toPExpr
           pure $ .ABUV {B, b, hAB, vaEqb := {aEqb, bEqa}} {V}
         else
-          let (_, UaEqVx?) ← isDefEq Ua Vx
+          let (_, UaEqVx?) ← isDefEq Ua Vx 4
           if UaEqVx?.isSome then
             pure $ .UV {V}
           else
@@ -1079,7 +1086,7 @@ def quickIsDefEq (t s : PExpr) (useHash := false) : RecLB := do
     | (.false, p?) => pure (false, p?)
   | .forallE .., .forallE .. => pure $ some $ ← isDefEqForall t s
   | .sort a1, .sort a2 => pure $ some $ ((a1.isEquiv a2), none)
-  | .mdata _ a1, .mdata _ a2 => pure $ some $ ← isDefEq a1.toPExpr a2.toPExpr
+  | .mdata _ a1, .mdata _ a2 => pure $ some $ ← isDefEq a1.toPExpr a2.toPExpr 5
   | .mvar .., .mvar .. => throw $ .other "unreachable 6"
   | .lit a1, .lit a2 => pure $ some ((a1 == a2), none)
   | _, _ => pure none
@@ -1095,7 +1102,7 @@ Assuming that `s` has a function type `(x : A) -> B x`, it η-expands to
 def tryEtaExpansionCore (t s : PExpr) : RecB := do
   if t.toExpr.isLambda && !s.toExpr.isLambda then
     let .forallE name ty _ bi := (← whnfPure (← inferTypePure s 16) 6).toExpr | return (false, none)
-    isDefEq t (Expr.lam name ty (.app s (.bvar 0)) bi).toPExpr -- NOTE: same proof should be okay because of eta-expansion when typechecking
+    isDefEq t (Expr.lam name ty (.app s (.bvar 0)) bi).toPExpr 6 -- NOTE: same proof should be okay because of eta-expansion when typechecking
   else return (false, none)
 
 @[inherit_doc tryEtaExpansionCore]
@@ -1121,7 +1128,7 @@ def tryEtaStructCore (t s : PExpr) : RecB := do
   let .ctorInfo fInfo ← env.get f | return (false, none)
   unless s.toExpr.getAppNumArgs == fInfo.numParams + fInfo.numFields do return (false, none)
   unless isStructureLike env fInfo.induct do return (false, none)
-  unless ← isDefEqPure (← inferTypePure t 17) (← inferTypePure s 18) do return (false, none)
+  unless ← isDefEqPure (← inferTypePure t 17) (← inferTypePure s 18) 2 do return (false, none)
   let args := s.toExpr.getAppArgs
   let mut exptE := ctor
   for i in [:fInfo.numParams] do
@@ -1274,9 +1281,9 @@ def isDefEqProofIrrel (t s : PExpr) : RecLB := do
   let prop ← isPropPure tType
   if !prop then return (.undef, none)
   let sType ← inferTypePure s 20
-  let (ret, pt?) ← isDefEq tType sType
+  let (ret, pt?) ← isDefEq tType sType 7
   if ret == .true then
-    let tEqs? ← isDefEqProofIrrel' t s tType sType pt?
+    let tEqs? ← isDefEqProofIrrel' t s tType sType pt? 1
     pure (.true, tEqs?)
   else
     pure (.undef, none)
@@ -1385,7 +1392,7 @@ def isDefEqOffset (t s : PExpr) : RecLB := do
     return (.true, none)
   match isNatSuccOf? t, isNatSuccOf? s with
   | some t', some s' =>
-    let (ret, p?) ← isDefEqCore t' s'
+    let (ret, p?) ← isDefEqCore t' s' 10
     let p? ← mkNatSuccAppArgHEq? p? t' s'
     pure (ret.toLBool, p?)
   | _, _ => return (.undef, none)
@@ -1411,22 +1418,22 @@ def lazyDeltaReduction (tn sn : PExpr) : RecM ReductionStatus := loop tn sn none
         return .bool false none
     if !ltn.toExpr.hasFVar && !lsn.toExpr.hasFVar then
       if let some (ltn', ltnEqltn'?) ← reduceNat ltn then
-        let (ret, ptn'Eqsn?) ← isDefEqCore ltn' lsn
+        let (ret, ptn'Eqsn?) ← isDefEqCore ltn' lsn 11
         let tnEqsn? ← appHEqTrans? ltn ltn' lsn ltnEqltn'? ptn'Eqsn?
         return .bool ret tnEqsn?
       else if let some (lsn', lsnEqlsn'?) ← reduceNat lsn then
-        let (ret, ptnEqsn'?) ← isDefEqCore ltn lsn'
+        let (ret, ptnEqsn'?) ← isDefEqCore ltn lsn' 12
         let tnEqsn? ← appHEqTrans? ltn lsn' lsn ptnEqsn'? (← appHEqSymm? lsn lsn' lsnEqlsn'?)
         return .bool ret tnEqsn?
     let env ← getEnv
     if let some (ltn', pltnEqLtn'?) ← reduceNative env ltn then
       -- TODO does this case ever happen?
-      let (ret, ptn'Eqsn?) ← isDefEqCore ltn' lsn
+      let (ret, ptn'Eqsn?) ← isDefEqCore ltn' lsn 13
       let tnEqsn? ← appHEqTrans? ltn ltn' lsn pltnEqLtn'? ptn'Eqsn?
       return .bool ret tnEqsn?
     else if let some (lsn', lsnEqlsn'?) ← reduceNative env lsn then
       -- TODO does this case ever happen?
-      let (ret, ptnEqsn'?) ← isDefEqCore ltn lsn'
+      let (ret, ptnEqsn'?) ← isDefEqCore ltn lsn' 14
       let tnEqsn? ← appHEqTrans? ltn lsn' lsn ptnEqsn'? (← appHEqSymm? lsn lsn' lsnEqlsn'?)
       return .bool ret tnEqsn?
 
@@ -1482,9 +1489,9 @@ def isDefEqUnitLike (t s : PExpr) : RecB := do
     return (false, none)
 
 @[inherit_doc isDefEqCore]
-def isDefEqCore' (t s : PExpr) : RecB := do
-  if ← isDefEqPure t s 150 then -- NOTE: this is a tradeoff between runtime and output size
-    return (true, none)
+def isDefEqCore' (t s : PExpr) (n : Nat) : RecB := do
+  -- if ← isDefEqPure t s 3 50 then -- NOTE: this is a tradeoff between runtime and output size
+  --   return (true, none)
   let (r, pteqs?) ← quickIsDefEq t s (useHash := true)
   if r != .undef then return (r == .true, pteqs?)
 
@@ -1527,7 +1534,7 @@ def isDefEqCore' (t s : PExpr) : RecB := do
   | .proj tTypeName ti te, .proj _ si se =>
     if ti == si then
       -- optimized by above functions using `cheapProj = true`
-      let (r, teEqse?) ← isDefEq te.toPExpr se.toPExpr
+      let (r, teEqse?) ← isDefEq te.toPExpr se.toPExpr 8
 
       if r then
         let ret := (true, ← appProjThm? tTypeName ti te.toPExpr se.toPExpr teEqse?)
@@ -1557,7 +1564,7 @@ def isDefEqCore' (t s : PExpr) : RecB := do
     -- if projection reduced, need to re-run (as we may not have a WHNF)
     let tEqtn''? ← appHEqTrans? t tn' tn'' tEqtn'? tn'Eqtn''?
     let sEqsn''? ← appHEqTrans? s sn' sn'' sEqsn'? sn'Eqsn''?
-    let (true, tn''Eqsn''?) ← isDefEqCore tn'' sn'' | return (false, none)
+    let (true, tn''Eqsn''?) ← isDefEqCore tn'' sn'' 15 | return (false, none)
     return (true, ← mktEqs? tn'' sn'' tEqtn''? sEqsn''? tn''Eqsn''?)
 
   -- optimized by above functions using `cheapK = true`
@@ -1597,7 +1604,7 @@ open Inner
 
 def Methods.withFuel : Nat → Methods
   | 0 =>
-    { isDefEqCore := fun _ _ =>
+    { isDefEqCore := fun _ _ _ =>
       throw .deepRecursion
       isDefEqCorePure := fun _ _ =>
       throw .deepRecursion
@@ -1612,21 +1619,41 @@ def Methods.withFuel : Nat → Methods
       inferTypePure := fun _ _ _ =>
       throw .deepRecursion }
   | n + 1 =>
-    { isDefEqCore := fun t s => do
-        let ret ← isDefEqCore' t s (withFuel n)
+    { isDefEqCore := fun t s m => do
+        -- dbg_trace s!"DBG[8]: TypeChecker.lean:1635 (after  isDefEqCore := fun t s m => do)"
+        let ret ← isDefEqCore' t s m (withFuel n)
+        -- dbg_trace s!"DBG[9]: TypeChecker.lean:1637 (after let ret ← isDefEqCore t s m (withFuel …)"
         pure ret
-      isDefEqCorePure := fun t s =>
-        isDefEqCorePure' t s (withFuel n)
-      whnfCore := fun e k =>
-        whnfCore' e (cheapK := k) (withFuel n)
-      whnf := fun e k =>
-        whnf' e (cheapK := k) (withFuel n)
-      whnfPure := fun e m =>
-        whnfPure' e m (withFuel n)
-      inferType := fun e =>
-        inferType' e (withFuel n)
-      inferTypePure := fun e m =>
-        inferTypePure' e m (withFuel n) }
+      isDefEqCorePure := fun t s => do
+        -- dbg_trace s!"DBG[10]: TypeChecker.lean:1640 (after isDefEqCorePure := fun t s => do)"
+        let ret ← isDefEqCorePure' t s (withFuel n)
+        -- dbg_trace s!"DBG[11]: TypeChecker.lean:1642 (after let ret ← isDefEqCorePure t s (withFue…)"
+        pure ret
+      whnfCore := fun e k => do
+        -- dbg_trace s!"DBG[12]: TypeChecker.lean:1645 (after whnfCore := fun e k => do)"
+        let ret ← whnfCore' e (cheapK := k) (withFuel n)
+        -- dbg_trace s!"DBG[13]: TypeChecker.lean:1647 (after let ret ← whnfCore e (cheapK := k) (wi…)"
+        pure ret
+      whnf := fun e k => do
+        -- dbg_trace s!"DBG[14]: TypeChecker.lean:1650 (after whnf := fun e k => do)"
+        let ret ← whnf' e (cheapK := k) (withFuel n)
+        -- dbg_trace s!"DBG[15]: TypeChecker.lean:1652 (after let ret ← whnf e (cheapK := k) (withFu…)"
+        pure ret
+      whnfPure := fun e m => do
+        -- dbg_trace s!"DBG[16]: TypeChecker.lean:1655 (after whnfPure := fun e m => do)"
+        let ret ← whnfPure' e m (withFuel n)
+        -- dbg_trace s!"DBG[17]: TypeChecker.lean:1657 (after let ret ← whnfPure e m (withFuel n))"
+        pure ret
+      inferType := fun e d => do
+        -- dbg_trace s!"DBG[18]: TypeChecker.lean:1660 (after inferType := fun e d => do)"
+        let ret ← inferType' e d (withFuel n)
+        -- dbg_trace s!"DBG[19]: TypeChecker.lean:1662 (after let ret ← inferType e d (withFuel n))"
+        pure ret
+      inferTypePure := fun e m => do
+        -- dbg_trace s!"DBG[20]: TypeChecker.lean:1665 (after inferTypePure := fun e m => do)"
+        let ret ← inferTypePure' e m (withFuel n)
+        -- dbg_trace s!"DBG[21]: TypeChecker.lean:1667 (after let ret ← inferTypePure e m (withFuel …)"
+        pure ret }
 
 /--
 Runs `x` with a limit on the recursion depth.
@@ -1669,10 +1696,10 @@ def inferType (e : PExpr) (lps : List Name) : M PExpr := do
 
 @[inherit_doc isDefEqCore]
 def isDefEq (t s : PExpr) (lps : List Name) : MB :=
-  withReader ({ · with lparams := lps }) (Inner.isDefEq t s).run
+  withReader ({ · with lparams := lps }) (Inner.isDefEq t s 9).run
 
 def isDefEqPure (t s : PExpr) (lps : List Name) : M Bool :=
-  withReader ({ · with lparams := lps }) (Inner.isDefEqPure t s).run
+  withReader ({ · with lparams := lps }) (Inner.isDefEqPure t s 4).run
 
 @[inherit_doc ensureSortCore]
 def ensureSort (t : PExpr) (lps : List Name) (s := t) : MEE := 
@@ -1691,10 +1718,10 @@ def ensureSortPure (t : PExpr) (lps : List Name) (s := t) : M PExpr := withReade
 def ensureForall (t : PExpr) (lps : List Name) (s := t) : MEE := withReader ({ · with lparams := lps }) $ (ensureForallCore t s).run
 
 def maybeCast (p? : Option EExpr) (typLhs typRhs e : PExpr) (lps : List Name) : M PExpr := 
-  withReader ({ · with lparams := lps }) (Inner.maybeCast p? typLhs typRhs e).run
+  withReader ({ · with lparams := lps }) (Inner.maybeCast p? typLhs typRhs e 24).run
 
 def smartCast (typLhs typRhs e : PExpr) (lps : List Name) : M (Bool × PExpr) := 
-  withReader ({ · with lparams := lps }) (Inner.smartCast typLhs typRhs e).run
+  withReader ({ · with lparams := lps }) (Inner.smartCast typLhs typRhs e 25).run
 
 -- def test' : MetaM String := do
 --   dbg_trace s!"test"

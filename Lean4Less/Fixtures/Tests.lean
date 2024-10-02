@@ -187,9 +187,11 @@ theorem HashMapTest' {α : Type u} {β : α → Type v} [inst : BEq α] [inst_1 
 axiom tP : Nat → Prop
 axiom tempaux : tP 0
 set_option pp.all true
-#check Std.Sat.AIG.toCNF.Cache.IsExtensionBy_trans_left
+-- #check Std.Sat.AIG.denote.go.eq_def
+-- -- #check_off eq_of_heq
+-- #check_off Std.Sat.AIG.denote.go_eq_of_isPrefix._unary
 
-def temp (m n : Nat) : (Nat.sub n m).pred = Nat.sub n (m + 1) := rfl
+def temp : Q p := X p Qq
 -- #print UInt16.ofNat_one
 
 
