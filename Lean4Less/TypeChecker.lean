@@ -31,6 +31,7 @@ structure TypeChecker.State where
   whnfCache : Std.HashMap (PExpr × Bool) (PExpr × Option EExpr) := {}
   fvarRegistry : Std.HashMap Name Nat := {} -- for debugging purposes
   eqvManager : EquivManager := {}
+  leanMinusState : Lean.TypeChecker.State := {}
   failure : Std.HashSet (Expr × Expr) := {}
 
 structure TypeChecker.Context where
@@ -97,11 +98,12 @@ def mkId (n : Nat) : RecM Name := do
   pure id
 
 def runLeanMinus (M : Lean.TypeChecker.M T) : RecM T := do -- FIXME persist cache between runs
-  let ret ← Lean.TypeChecker.M.run' (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := false, proofIrrelevance := false}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams) (ngen := (← get).ngen) M
+  let (ret, newState) ← Lean.TypeChecker.M.run (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := false, proofIrrelevance := false}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams) (ngen := (← get).ngen) (state := (← get).leanMinusState) M
+  modify fun s => {s with leanMinusState := newState, ngen := newState.ngen}
   pure ret
 
-def runLean (M : Lean.TypeChecker.M T) : RecM T := do
-  Lean.TypeChecker.M.run' (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := true, proofIrrelevance := true}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams) (ngen := (← get).ngen) M
+-- def runLean (M : Lean.TypeChecker.M T) : RecM T := do
+--   Lean.TypeChecker.M.run' (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := true, proofIrrelevance := true}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams) (ngen := (← get).ngen) M
 
 inductive ReductionStatus where
   | continue (nltn nlsn : PExpr) (pltnEqnltn? plsnEqnlsn? : Option EExpr)
@@ -529,7 +531,7 @@ def maybeCast (p? : Option EExpr) (typLhs typRhs e : PExpr) (n : Nat) : RecM PEx
   pure $ (← p?.mapM (fun (p : EExpr) => do pure (← smartCast typLhs typRhs e n p).2)).getD e
 
 def isDefEqProofIrrel' (t s tType sType : PExpr) (pt? : Option EExpr) (n : Nat) (useRfl := false) : RecM (Option EExpr) := do
-  if ← isDefEqPure t s (n + 50) 10 then
+  if ← isDefEqPure t s (n + 50) 15 then
     if useRfl then
       return .some $ .refl {u := 0, A := tType, a := t}
     else
@@ -793,9 +795,9 @@ def inferTypePure' (e : PExpr) (n : Nat) : RecM PExpr := do -- TODO make more ef
   try
     let eT ← runLeanMinus $ Lean.TypeChecker.inferTypeCheck e.toExpr
     pure eT.toPExpr
-  catch e =>
-    dbg_trace s!"inferTypePure error: {n}"
-    throw e
+  catch ex =>
+    dbg_trace s!"inferTypePure error: {n}, {e} {← inferType e.toExpr.getAppFn}"
+    throw ex
 
 /--
 Reduces `e` to its weak-head normal form, without unfolding definitions. This
@@ -1091,9 +1093,9 @@ Otherwise, defers to the calling function.
 -/
 def quickIsDefEq (t s : PExpr) (useHash := false) : RecLB := do
   -- optimization for terms that are already α-equivalent
-  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 (eqvManager := m)) =>
+  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 (eqvManager := m)) => -- FIXME why do I have to list these?
     let (b, m) := m.isEquiv useHash t s
-    (b, .mk a1 a2 a3 a4 a5 a6 a7 (eqvManager := m))
+    (b, .mk a1 a2 a3 a4 a5 a6 a7 a8 (eqvManager := m))
   then return (.true, none)
   let res : Option (Bool × PExpr) ← match t.toExpr, s.toExpr with
   | .lam .., .lam .. => pure $ some $ ← isDefEqLambda t s
@@ -1128,7 +1130,7 @@ def tryEtaExpansion (t s : PExpr) : RecB := do
   match ← tryEtaExpansionCore t s with
   | ret@(true, _) => pure ret 
   | (false, _) => 
-    let (true, sEqt?) ← tryEtaExpansionCore s t | return (false, none)-- TODO apply symm
+    let (true, sEqt?) ← tryEtaExpansionCore s t | return (false, none)
     return (true, ← appHEqSymm? s t sEqt?)
 
 /--
@@ -1507,9 +1509,9 @@ def isDefEqUnitLike (t s : PExpr) : RecB := do
     return (false, none)
 
 @[inherit_doc isDefEqCore]
-def isDefEqCore' (t s : PExpr) (n : Nat) : RecB := do
-  -- if ← isDefEqPure t s 3 50 then -- NOTE: this is a tradeoff between runtime and output size
-  --   return (true, none)
+def isDefEqCore' (t s : PExpr) (_n : Nat) : RecB := do
+  if ← isDefEqPure t s 3 15 then -- NOTE: this is a tradeoff between runtime and output size
+    return (true, none)
   let (r, pteqs?) ← quickIsDefEq t s (useHash := true)
   if r != .undef then return (r == .true, pteqs?)
 
