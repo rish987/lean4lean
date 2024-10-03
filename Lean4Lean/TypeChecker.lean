@@ -43,8 +43,8 @@ namespace TypeChecker
 abbrev M := ReaderT Context <| StateT State <| Except KernelException
 
 def M.run (env : Environment) (x : M α)
-   (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) (ngen : NameGenerator := defngen) : Except KernelException (α × State) :=
-  x { env, safety, lctx, opts, lparams} |>.run {ngen}
+   (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) (ngen : NameGenerator := defngen) (state : State := {}): Except KernelException (α × State) :=
+  x {env, safety, lctx, opts, lparams} |>.run {state with ngen}
 
 def M.run' (env : Environment) (x : M α)
    (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) (ngen : NameGenerator := defngen): Except KernelException α :=
@@ -95,8 +95,8 @@ def ensureSortCore (e s : Expr) : RecM Expr := do
 
 def ensureForallCore (e s : Expr) : RecM Expr := do
   if e.isForall then return e
-  let e ← whnf e
-  if e.isForall then return e
+  let e' ← whnf e
+  if e'.isForall then return e'
   throw <| .funExpected (← getEnv) (← getLCtx) s
 
 def checkLevel (tc : Context) (l : Level) : Except KernelException Unit := do
@@ -265,6 +265,7 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
   assert! !e.hasLooseBVars
   let state ← get
   if let some r := (cond inferOnly state.inferTypeI state.inferTypeC)[e]? then
+    -- dbg_trace s!"DBG[2]: TypeChecker.lean:267: r={r}, {e}"
     return r
   let r ← match e with
     | .lit l => pure l.type
