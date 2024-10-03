@@ -284,24 +284,25 @@ if dep then name.toString ++ "'" |>.toName else name
 
 def LamData.toExpr : LamData EExpr → Expr
 | {u, v, A, U, f, a, g, faEqgx, extra, lctx} =>
-  let hfg := match extra with
-  | .ABUV {b, vaEqb, ..} .. =>
-      lctx.mkLambda #[a, b, vaEqb.toExpr] faEqgx.toExpr |>.toPExpr
-  | .UV ..
-  | .none => lctx.mkLambda #[a] faEqgx.toExpr |>.toPExpr
+  Id.run $ do
+    let hfg := match extra with
+    | .ABUV {b, vaEqb, ..} .. =>
+        lctx.mkLambda #[a, b, vaEqb.toExpr] faEqgx.toExpr |>.toPExpr
+    | .UV ..
+    | .none => lctx.mkLambda #[a] faEqgx.toExpr |>.toPExpr
 
-  let (args, dep) := match extra with
-  | .ABUV {B, hAB, ..} {V} =>
-      let (U, V, dep) := getMaybeDepLemmaApp2 U V lctx
-      (#[A, B, U, V, f, g, hAB.toExpr, hfg], dep)
-  | .UV {V} => 
-      let (U, V, dep) := getMaybeDepLemmaApp2 U V lctx
-      (#[A, U, V, f, g, hfg], dep)
-  | .none => 
-      let (U, dep) := getMaybeDepLemmaApp1 U lctx
-      (#[A, U, f, g, hfg], dep)
-  let n := extra.lemmaName dep
-  Lean.mkAppN (.const n [u, v]) args
+    let (args, dep) := match extra with
+    | .ABUV {B, hAB, ..} {V} =>
+        let (U, V, dep) := getMaybeDepLemmaApp2 U V lctx
+        (#[A, B, U, V, f, g, hAB.toExpr, hfg], dep)
+    | .UV {V} => 
+        let (U, V, dep) := getMaybeDepLemmaApp2 U V lctx
+        (#[A, U, V, f, g, hfg], dep)
+    | .none => 
+        let (U, dep) := getMaybeDepLemmaApp1 U lctx
+        (#[A, U, f, g, hfg], dep)
+    let n := extra.lemmaName dep
+    Lean.mkAppN (.const n [u, v]) args
 
 def ForallDataExtra.lemmaName (dep : Bool) (d : ForallDataExtra EExpr) : Name :=
 let name := match d with
@@ -311,23 +312,24 @@ if dep then name.toString ++ "'" |>.toName else name
 
 def ForallData.toExpr : ForallData EExpr → Expr
 | {u, v, A, U, V, a, UaEqVx, extra, lctx} =>
-  let hUV dep :=
-    if dep then match extra with
-      | .AB {b, vaEqb, ..} => lctx.mkLambda #[a, b, vaEqb.toExpr] UaEqVx.toExpr |>.toPExpr
-      | .none => lctx.mkLambda #[a] UaEqVx.toExpr |>.toPExpr
-    else
-      UaEqVx.toExpr
+  Id.run $ do
+    let hUV dep :=
+      if dep then match extra with
+        | .AB {b, vaEqb, ..} => lctx.mkLambda #[a, b, vaEqb.toExpr] UaEqVx.toExpr |>.toPExpr
+        | .none => lctx.mkLambda #[a] UaEqVx.toExpr |>.toPExpr
+      else
+        UaEqVx.toExpr
 
-  let (args, dep) := match extra with
-  | .AB {B, hAB, ..} => 
-      let (U, V, dep) := getMaybeDepLemmaApp2 U V lctx
-      (#[A, B, U, V, hAB.toExpr, hUV dep], dep)
-  | .none =>
-      let (U, V, dep) := getMaybeDepLemmaApp2 U V lctx
-      (#[A, U, V, hUV dep], dep)
+    let (args, dep) := match extra with
+    | .AB {B, hAB, ..} =>
+        let (U, V, dep) := getMaybeDepLemmaApp2 U V lctx
+        (#[A, B, U, V, hAB.toExpr, hUV dep], dep)
+    | .none =>
+        let (U, V, dep) := getMaybeDepLemmaApp2 U V lctx
+        (#[A, U, V, hUV dep], dep)
 
-  let n := extra.lemmaName dep
-  Lean.mkAppN (.const n [u, v]) args
+    let n := extra.lemmaName dep
+    Lean.mkAppN (.const n [u, v]) args
 
 def AppDataExtra.lemmaName (dep : Bool) (d : AppDataExtra EExpr) : Name :=
 let name := match d with
@@ -414,14 +416,15 @@ def FVarData.reverse : FVarData → FVarData
 
 def LamData.reverse : LamData EExpr → EExpr
 | {u, v, A, U, f, a, g, faEqgx, extra, lctx} =>
-  let (extra, newA, newU, newa) := match extra with
-  | .ABUV {b, B, vaEqb, hAB} {V} =>
-      (.ABUV {b := a, B := A, vaEqb := vaEqb.reverse, hAB := EExpr.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ hAB} {V := U}, B, V, b)
-  | .UV {V} => (.UV {V := U}, A, V, a)
-  | .none => (.none, A, U, a)
+  Id.run $ do 
+    let (extra, newA, newU, newa) := match extra with
+    | .ABUV {b, B, vaEqb, hAB} {V} =>
+        (.ABUV {b := a, B := A, vaEqb := vaEqb.reverse, hAB := EExpr.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ hAB} {V := U}, B, V, b)
+    | .UV {V} => (.UV {V := U}, A, V, a)
+    | .none => (.none, A, U, a)
 
-  let newfaEqgx := EExpr.reverse f g (LocalContext.mkForall lctx #[U.2] U.1).toPExpr (lctx.mkForall #[U.2] U.1).toPExpr (Level.imax u v) faEqgx
-  .lam {u, v, A := newA, U := newU, f := g, a := newa, g := f, faEqgx := newfaEqgx, extra, lctx}
+    let newfaEqgx := EExpr.reverse f g (LocalContext.mkForall lctx #[U.2] U.1).toPExpr (lctx.mkForall #[U.2] U.1).toPExpr (Level.imax u v) faEqgx
+    .lam {u, v, A := newA, U := newU, f := g, a := newa, g := f, faEqgx := newfaEqgx, extra, lctx}
 
 
 def HUVData.reverse (Ua Vb : PExpr) (v : Level) : HUVData EExpr → HUVData EExpr
@@ -433,14 +436,15 @@ def HUVData.reverse (Ua Vb : PExpr) (v : Level) : HUVData EExpr → HUVData EExp
 
 def ForallData.reverse : ForallData EExpr → EExpr
 | {u, v, A, U, V, a, UaEqVx, extra, lctx} =>
-  let (extra, newA, newa) := match extra with
-  | .AB {b, B, hAB, vaEqb} => 
-    (.AB {b := a, B := A, hAB := EExpr.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ hAB, vaEqb := vaEqb.reverse}, B, b)
-  | .none =>
-    (.none, A, a)
+  Id.run $ do 
+    let (extra, newA, newa) := match extra with
+    | .AB {b, B, hAB, vaEqb} => 
+      (.AB {b := a, B := A, hAB := hAB.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ, vaEqb := vaEqb.reverse}, B, b)
+    | .none =>
+      (.none, A, a)
 
-  let newUaEqVx := UaEqVx.reverse U.1 V.1 (Expr.sort v).toPExpr (Expr.sort v).toPExpr v.succ
-  .forallE {u, v, A := newA, U := V, V := U, a := newa, UaEqVx := newUaEqVx, extra, lctx}
+    let newUaEqVx := UaEqVx.reverse U.1 V.1 (Expr.sort v).toPExpr (Expr.sort v).toPExpr v.succ
+    pure $ .forallE {u, v, A := newA, U := V, V := U, a := newa, UaEqVx := newUaEqVx, extra, lctx}
 
 def AppData.reverse : AppData EExpr → EExpr
 | {u, v, A, U, f, a, extra, lctx} =>
@@ -491,7 +495,8 @@ def EExpr.reverse (t s tType sType : PExpr) (lvl : Level) : EExpr → EExpr
 | .symm d
 | .refl d
 | .prfIrrel d
-| .sry d  => d.reverse
+| .sry d  =>
+  d.reverse
 | .fvar d  => .fvar d.reverse
 
 end

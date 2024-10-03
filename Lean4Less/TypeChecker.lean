@@ -443,6 +443,9 @@ def isDefEqForall (t s : PExpr) (numBinds := 0) : RecB := do
         Ua := (← getLCtx).mkForall #[a] Ua |>.toPExpr
         Vx := (← getLCtx).mkForall #[x] Vx |>.toPExpr
 
+      -- if as.any fun a => a.toExpr.isFVar && a.toExpr.fvarId!.name == "_kernel_fresh.104".toName then
+      --   dbg_trace s!"DBG[7]: TypeChecker.lean:418 (after sorry) {UaEqVx?.map (·.reverse default default default default default)}\n\n"
+
       pure $ UaEqVx?
     pure ret
 
@@ -466,8 +469,7 @@ def lamCount (e ltl ltr : Expr) : RecM (Nat × Expr × Expr) := do
 
 def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((Bool × Option EExpr) × PExpr) := do
   let mkCast'' n tl tr p e (prfVars prfVals : Array Expr) (lvl : Level) := do
-    let p := p.toExpr.replaceFVars prfVars prfVals
-    pure $ Lean.mkAppN (← getConst n [lvl]) #[tl, tr, p, e]
+    pure $ (Lean.mkAppN (← getConst n [lvl]) #[tl, tr, p, e]).replaceFVars prfVars prfVals
 
   let mkCast' n tl tr p e (prfVars prfVals : Array Expr) := do
     let sort ← inferTypePure tr.toPExpr 8
@@ -527,7 +529,7 @@ def maybeCast (p? : Option EExpr) (typLhs typRhs e : PExpr) (n : Nat) : RecM PEx
   pure $ (← p?.mapM (fun (p : EExpr) => do pure (← smartCast typLhs typRhs e n p).2)).getD e
 
 def isDefEqProofIrrel' (t s tType sType : PExpr) (pt? : Option EExpr) (n : Nat) (useRfl := false) : RecM (Option EExpr) := do
-  if ← isDefEqPure t s (n + 50) 5 then
+  if ← isDefEqPure t s (n + 50) 10 then
     if useRfl then
       return .some $ .refl {u := 0, A := tType, a := t}
     else
