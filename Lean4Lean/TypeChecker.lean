@@ -692,7 +692,7 @@ def isDefEqCore' (t s : Expr) : RecM Bool := do
   let tn ← whnfCore t (cheapProj := true)
   let sn ← whnfCore s (cheapProj := true)
 
-  if !(unsafe ptrEq tn t && ptrEq sn s) then
+  if !(tn == t && sn == s) then
     let r ← quickIsDefEq tn sn
     if r != .undef then return r == .true
 
@@ -718,7 +718,7 @@ def isDefEqCore' (t s : Expr) : RecM Bool := do
 
   let tnn ← whnfCore tn
   let snn ← whnfCore sn
-  if !(unsafe ptrEq tnn tn && ptrEq snn sn) then
+  if !(tnn == tn && snn == sn) then
     return ← isDefEqCore tnn snn
 
   if ← isDefEqApp tn sn then return true
