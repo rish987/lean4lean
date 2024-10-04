@@ -53,7 +53,6 @@ def toCtorWhenK (rval : RecursorVal) (e : PExpr) : m (PExpr × Option (EExpr)) :
   let appType ← meth.inferTypePure 104 newCtorApp
   -- check that the indices of types of `e` and `newCtorApp` match
   let (true, pt?) ← meth.isDefEq 105 type appType | return (e, none)
-  dbg_trace s!"DBG[1]: Reduce.lean:55 (after let (true, pt?) ← meth.isDefEq type ap…)"
   let prf? ← meth.isDefEqProofIrrel' e newCtorApp type appType pt?
 
   return (newCtorApp, prf?)

@@ -32,6 +32,34 @@ structure TypeChecker.State where
   leanMinusState : Lean.TypeChecker.State := {}
   failure : Std.HashSet (Expr × Expr) := {}
 
+inductive CallData where
+|  isDefEqCore : PExpr → PExpr → CallData
+|  isDefEqCorePure : PExpr → PExpr → CallData
+|  whnfCore (e : PExpr) (cheapK : Bool) : CallData
+|  whnf (e : PExpr) (cheapK : Bool) : CallData
+|  whnfPure (e : PExpr) : CallData
+|  inferType (e : Expr) (dbg : Bool) : CallData
+|  inferTypePure (e : PExpr) : CallData
+
+def CallData.name : CallData → String
+| .isDefEqCore ..     => "isDefEqCore"
+| .isDefEqCorePure .. => "isDefEqCorePure"
+| .whnfCore ..        => "whnfCore"
+| .whnf ..            => "whnf"
+| .whnfPure ..        => "whnfPure"
+| .inferType ..       => "inferType"
+| .inferTypePure ..   => "inferTypePure"
+
+@[reducible]
+def CallDataT : CallData → Type
+| .isDefEqCore .. => Bool × Option EExpr
+| .isDefEqCorePure .. => Bool
+| .whnfCore .. => PExpr × Option EExpr
+| .whnf .. => PExpr × Option EExpr
+| .whnfPure .. => PExpr
+| .inferType .. => PExpr × Option PExpr
+| .inferTypePure .. => PExpr
+
 structure TypeChecker.Context where
   env : Environment
   pure : Bool := false -- (for debugging purposes)
@@ -45,6 +73,7 @@ structure TypeChecker.Context where
   eqFVars : Std.HashMap (FVarId × FVarId) (FVarId × FVarId) := {}
   safety : DefinitionSafety := .safe
   cheapK := false
+  callStack : Array (Nat × CallData) := #[]
   lparams : List Name := []
 
 namespace TypeChecker
@@ -124,6 +153,9 @@ def whnfPure (n : Nat) (e : PExpr) : RecM PExpr := fun m => m.whnfPure n e
 
 @[inline] def withCheapK [MonadWithReaderOf Context m] (x : m α) : m α :=
   withReader (fun l => {l with cheapK := true}) x
+
+@[inline] def withCallData [MonadWithReaderOf Context m] (i : Nat) (d : CallData) (x : m α) : m α :=
+  withReader (fun c => {c with callStack := c.callStack.push (i, d)}) x
 
 @[inline] def withForallOpt [MonadWithReaderOf Context m] (x : m α) : m α :=
   withReader (fun l => {l with forallOpt := true}) x
@@ -1167,7 +1199,6 @@ def reduceRecursor (e : PExpr) (cheapK : Bool) : RecM (Option (PExpr × Option E
   let env ← getEnv
   if env.header.quotInit then
     if let some r ← quotReduceRec e (whnf 51) (fun x y tup => isDefEqApp methsA x y (targsEqsargs? := Std.HashMap.insert default tup.1 tup.2)) then
-      dbg_trace s!"DBG[2]: TypeChecker.lean:1175 (after if let some r ← quotReduceRec e whnf (…)"
       return r
   let whnf' e := whnf e (cheapK := cheapK)
   let meths := {methsR with whnf := whnf'}
@@ -1515,7 +1546,7 @@ def isDefEqCore' (t s : PExpr) : RecB := do
 
   let mktEqs? (t' s' : PExpr) (tEqt'? sEqs'? t'Eqs'? : Option EExpr) := do appHEqTrans? t s' s (← appHEqTrans? t t' s' tEqt'? t'Eqs'?) (← appHEqSymm? s s' sEqs'?)
 
-  if !(unsafe ptrEq tn t && ptrEq sn s) then
+  if !(tn == t && sn == s) then
     let (r, tnEqsn?) ← quickIsDefEq tn sn
     if r == .false then
       return (false, none)
@@ -1564,14 +1595,12 @@ def isDefEqCore' (t s : PExpr) : RecB := do
                 return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)
               | _ =>
                 pure ()
-              
-
   | _, _ => pure ()
 
   -- above functions used `cheapProj = true`, `cheapK = true`, so we may not have a complete WHNF
   let (tn'', tn'Eqtn''?) ← whnfCore 79 tn'
   let (sn'', sn'Eqsn''?) ← whnfCore 80 sn'
-  if !(unsafe ptrEq tn'' tn' && ptrEq sn'' sn') then
+  if !(tn'' == tn' && sn'' == sn') then
     -- if projection reduced, need to re-run (as we may not have a WHNF)
     let tEqtn''? ← appHEqTrans? t tn' tn'' tEqtn'? tn'Eqtn''?
     let sEqsn''? ← appHEqTrans? s sn' sn'' sEqsn'? sn'Eqsn''?
@@ -1615,74 +1644,43 @@ open Inner
 
 def defFuel := 1000
 
-inductive CallData where
-|  isDefEqCore : PExpr → PExpr → CallData
-|  isDefEqCorePure : PExpr → PExpr → CallData
-|  whnfCore (e : PExpr) (cheapK : Bool) : CallData
-|  whnf (e : PExpr) (cheapK : Bool) : CallData
-|  whnfPure (e : PExpr) : CallData
-|  inferType (e : Expr) (dbg : Bool) : CallData
-|  inferTypePure (e : PExpr) : CallData
-
-@[reducible]
-def CallDataT : CallData → Type
-| .isDefEqCore .. => Bool × Option EExpr
-| .isDefEqCorePure .. => Bool
-| .whnfCore .. => PExpr × Option EExpr
-| .whnf .. => PExpr × Option EExpr
-| .whnfPure .. => PExpr
-| .inferType .. => PExpr × Option PExpr
-| .inferTypePure .. => PExpr
-
 mutual
-def fuelWrap (idx : Nat) (fuel : Nat) (k : String) (d : CallData) : M (CallDataT d) := do
-  let recDepth := (defFuel - fuel)
-  let m : RecM (CallDataT d):=
-    match d with
-    | .isDefEqCore t s => isDefEqCore' t s
-    | .isDefEqCorePure t s => isDefEqCorePure' t s
-    | .whnfCore e k => whnfCore' e k
-    | .whnf e k => whnf' e k
-    | .whnfPure e => whnfPure' e
-    | .inferType e d => inferType' e d
-    | .inferTypePure e => inferTypePure' e
-  if recDepth > 100 then
-    dbg_trace s!"DBG[3]: {k}, {fuel}, {idx}"
-  m (Methods.withFuel fuel)
-
-def Methods.withFuel : Nat → Methods
+def fuelWrap (idx : Nat) (fuel : Nat) (d : CallData) : M (CallDataT d) := do
+  match fuel with
   | 0 =>
-    { isDefEqCore := fun _ _ _ =>
-      throw .deepRecursion
-      isDefEqCorePure := fun _ _ _ =>
-      throw .deepRecursion
-      whnfCore := fun _ _ _ =>
-      throw .deepRecursion
-      whnf := fun _ _ _ =>
-      throw .deepRecursion
-      whnfPure := fun _ _ =>
-      throw .deepRecursion
-      inferType := fun _ _ _ =>
-      throw .deepRecursion
-      inferTypePure := fun _ _ _ =>
-      throw .deepRecursion }
-  | n + 1 =>
-    { isDefEqCore := fun i t s => do
-        fuelWrap i n "isDefEqCore" $ .isDefEqCore t s
-      isDefEqCorePure := fun i t s => do
-        fuelWrap i n "isDefEqCorePure" $ .isDefEqCorePure t s
-      whnfCore := fun i e k => do
-        fuelWrap i n "whnfCore" $ .whnfCore e k
-      whnf := fun i e k => do
-        fuelWrap i n "whnf" $ .whnf e k
-      whnfPure := fun i e => do
-        fuelWrap i n "whnfPure" $ .whnfPure e
-      inferType := fun i e d => do
-        fuelWrap i n "inferType" $ .inferType e d
-      inferTypePure := fun i e => do
-        fuelWrap i n "inferTypePure" $ .inferTypePure e
-    }
+    dbg_trace s!"deep recursion callstack: {(← readThe Context).callStack.map (·.1)}"
+    throw .deepRecursion
+  | fuel' + 1 =>
+    -- let recDepth := (defFuel - fuel)
+    let m : RecM (CallDataT d):=
+      match d with
+      | .isDefEqCore t s => isDefEqCore' t s
+      | .isDefEqCorePure t s => isDefEqCorePure' t s
+      | .whnfCore e k => whnfCore' e k
+      | .whnf e k => whnf' e k
+      | .whnfPure e => whnfPure' e
+      | .inferType e d => inferType' e d
+      | .inferTypePure e => inferTypePure' e
+    -- if recDepth > 100 then
+    --   dbg_trace s!"DBG[3]: {d.name}, {fuel}, {idx}"
+    withCallData idx d $ m (Methods.withFuel fuel')
 
+def Methods.withFuel (n : Nat) : Methods := 
+  { isDefEqCore := fun i t s => do
+      fuelWrap i n $ .isDefEqCore t s
+    isDefEqCorePure := fun i t s => do
+      fuelWrap i n $ .isDefEqCorePure t s
+    whnfCore := fun i e k => do
+      fuelWrap i n $ .whnfCore e k
+    whnf := fun i e k => do
+      fuelWrap i n $ .whnf e k
+    whnfPure := fun i e => do
+      fuelWrap i n $ .whnfPure e
+    inferType := fun i e d => do
+      fuelWrap i n $ .inferType e d
+    inferTypePure := fun i e => do
+      fuelWrap i n $ .inferTypePure e
+  }
 end
 /--
 Runs `x` with a limit on the recursion depth.
