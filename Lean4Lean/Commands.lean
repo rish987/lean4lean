@@ -6,6 +6,21 @@ open Lean
 
 namespace Lean4Lean
 
+def mkModuleData (env : Environment) : IO ModuleData := do
+  let pExts ← persistentEnvExtensionsRef.get
+  let entries := pExts.map fun pExt =>
+    let state := pExt.getState env
+    (pExt.name, pExt.exportEntriesFn state)
+  let constNames := env.constants.map₁.fold (fun names name _ => names.push name) #[]
+  let constants  := env.constants.map₁.fold (fun cs _ c => cs.push c) #[]
+  return {
+    imports         := env.header.imports
+    extraConstNames := env.extraConstNames.toArray
+    constNames, constants, entries
+  }
+
+open private add from Lean.Environment
+
 def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn : Declaration → M Unit) (initConsts : List Name := []) (printErr := false) (opts : TypeCheckerOpts := {}) (op : String := "typecheck") (printProgress := false) : IO (Lean.NameSet × Environment) := do
   let mut onlyConstsToTrans : Lean.NameSet := default
 
@@ -30,7 +45,26 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn :
         for skipConst in skippedConsts do
           map := map.erase skipConst
 
-        modEnv ← replay addDeclFn {newConstants := map.erase const, opts := {}} modEnv (printProgress := printProgress)
+        let rp := replay addDeclFn {newConstants := map.erase const, opts := {}} modEnv (printProgress := printProgress)
+
+        if not (initConsts.contains const) && consts.size == 1 && const != `temp then
+          let outName := (const.toString) ++ s!"_{opts.kLikeReduction}_{opts.kLikeReduction}.olean"
+          let outPath := ((← IO.Process.getCurrentDir).join "saved").join outName
+          if ← System.FilePath.pathExists outPath then
+            let (mod, _) ← readModuleData outPath
+            let module := modEnv.mainModule
+            let (_, s) ← importModulesCore mod.imports
+              |>.run (s := { moduleNameSet := ({} : NameHashSet).insert module })
+            modEnv ← finalizeImport s #[{module}] {} 0
+            for const in mod.constants do
+              modEnv := add modEnv const
+            modEnv := modEnv.setMainModule module
+          else
+            modEnv ← rp
+            saveModuleData outPath modEnv.mainModule (← mkModuleData modEnv)
+        else
+          modEnv ← rp
+
         modEnv ← replay addDeclFn {newConstants := Std.HashMap.insert default const (map.get! const), opts} modEnv (printProgress := printProgress)
         skipConsts := skipConsts.union mapConsts -- TC success, so want to skip in future runs (already in environment)
       let onlyConstsToTrans := onlyConstsToTrans.insert const
