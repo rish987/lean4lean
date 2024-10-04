@@ -218,7 +218,7 @@ local only_picker = function(opts) return pickers
         return -prev_onlys[entry].time
       end,
     },
-    attach_mappings = function(prompt_bufnr)
+    attach_mappings = function(prompt_bufnr, map)
       actions.select_default:replace(function()
         local selection = action_state.get_selected_entry()
         if selection == nil then
@@ -230,6 +230,12 @@ local only_picker = function(opts) return pickers
         local val = selection.value
 
         _run_only(prev_onlys[val])
+      end)
+      map("n", "yy", function()
+        local selection = action_state.get_selected_entry()
+        local only = prev_onlys[selection.value]
+        vim.fn.setreg('"', only.const)
+        print('yanked: ' .. vim.inspect(only.const))
       end)
 
       return true

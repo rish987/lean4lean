@@ -11,7 +11,7 @@ section
 structure ExtMethodsR (m : Type → Type u) extends ExtMethods m where
   isDefEqApp' : PExpr → PExpr → Std.HashMap Nat (Option EExpr) → m (Bool × Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))
   isDefEqApp : PExpr → PExpr → Std.HashMap Nat (Option EExpr) → m (Bool × Option EExpr)
-  smartCast : PExpr → PExpr → PExpr → Nat → m (Bool × PExpr)
+  smartCast : Nat → PExpr → PExpr → PExpr → m (Bool × PExpr)
   isDefEqProofIrrel' : PExpr → PExpr → PExpr → PExpr → Option EExpr → m (Option EExpr)
 
 variable [Monad m] (env : Environment)
@@ -38,7 +38,7 @@ it is definitionally equal to by proof irrelevance). Note that the indices of
 -/
 def toCtorWhenK (rval : RecursorVal) (e : PExpr) : m (PExpr × Option (EExpr)) := do
   assert! rval.k
-  let type ← meth.whnfPure (← meth.inferTypePure e 101) 107
+  let type ← meth.whnfPure 101 (← meth.inferTypePure 102 e)
   let .const typeI _ := type.toExpr.getAppFn | return (e, none)
   if typeI != rval.getInduct then return (e, none)
   if type.toExpr.hasExprMVar then
@@ -48,11 +48,12 @@ def toCtorWhenK (rval : RecursorVal) (e : PExpr) : m (PExpr × Option (EExpr)) :
   let some (newCtorApp, newCtorName) := mkNullaryCtor env type rval.numParams | return (e, none)
   if let (.const ctorName _) := e.toExpr.getAppFn then
     if ctorName == newCtorName then
-      if let true ← meth.isDefEqPure e newCtorApp 101 then
+      if let true ← meth.isDefEqPure 103 e newCtorApp then
         return (e, none)
-  let appType ← meth.inferTypePure newCtorApp 102
+  let appType ← meth.inferTypePure 104 newCtorApp
   -- check that the indices of types of `e` and `newCtorApp` match
-  let (true, pt?) ← meth.isDefEq type appType 101 | return (e, none)
+  let (true, pt?) ← meth.isDefEq 105 type appType | return (e, none)
+  dbg_trace s!"DBG[1]: Reduce.lean:55 (after let (true, pt?) ← meth.isDefEq type ap…)"
   let prf? ← meth.isDefEqProofIrrel' e newCtorApp type appType pt?
 
   return (newCtorApp, prf?)
@@ -78,9 +79,9 @@ eta).
 def toCtorWhenStruct (inductName : Name) (e : PExpr) : m (PExpr × Option EExpr) := do
   if !isStructureLike env inductName || (e.toExpr.isConstructorApp?' env).isSome then
     return (e, none)
-  let eType ← meth.whnfPure (← meth.inferTypePure e 103) 108
+  let eType ← meth.whnfPure 107 (← meth.inferTypePure 106 e)
   if !eType.toExpr.getAppFn.isConstOf inductName then return (e, none)
-  if (← meth.whnf (← meth.inferTypePure eType 104)).1 == Expr.prop.toPExpr then return (e, none)
+  if (← meth.whnf 108 (← meth.inferTypePure 109 eType)).1 == Expr.prop.toPExpr then return (e, none)
   return expandEtaStruct env eType e
 
 def getRecRuleFor (rval : RecursorVal) (major : Expr) : Option RecursorRule := do
@@ -107,7 +108,7 @@ def inductiveReduceRec [Monad m] (env : Environment) (e : PExpr) (cheapK : Bool 
   let majorIdx := info.getMajorIdx
   let some major' := recArgs[majorIdx]? | return none
   let major := major'.toPExpr
-  let (majorWhnf, majorEqmajorWhnf?) ← meth.whnf major
+  let (majorWhnf, majorEqmajorWhnf?) ← meth.whnf 110 major
   let (majorKWhnf, majorWhnfEqmajorKWhnf?) ← if info.k && not cheapK then toCtorWhenK env meth info majorWhnf else pure (majorWhnf, none)
   let majorEqmajorKWhnf? ← meth.appHEqTrans? major majorWhnf majorKWhnf majorEqmajorWhnf? majorWhnfEqmajorKWhnf?
   let (majorMaybeCtor, majorKWhnfEqMajorMaybeCtor?) ← match majorKWhnf.toExpr with
@@ -121,13 +122,13 @@ def inductiveReduceRec [Monad m] (env : Environment) (e : PExpr) (cheapK : Bool 
   if ls.length != info.levelParams.length then return none
   let mut rhs := rule.rhs.instantiateLevelParams info.levelParams ls
 
-  let type ← meth.whnfPure (← meth.inferTypePure major 105) 105
-  let newType ← meth.whnfPure (← meth.inferTypePure majorMaybeCtor 106) 106
+  let type ← meth.whnfPure 111 (← meth.inferTypePure 112 major)
+  let newType ← meth.whnfPure 112 (← meth.inferTypePure 113 majorMaybeCtor)
   let (defEq, d?) ←
     if type.toExpr.isApp then
       meth.isDefEqApp' type newType default
     else
-      pure (← meth.isDefEqPure type newType 102, none)
+      pure (← meth.isDefEqPure 114 type newType, none)
 
   assert! defEq == true
 
@@ -140,7 +141,7 @@ def inductiveReduceRec [Monad m] (env : Environment) (e : PExpr) (cheapK : Bool 
   let motivesMinorsEqs? : Array (Option (PExpr × PExpr × EExpr)) ← do
     if paramEqs?.any (·.isSome) then
       let rec loop1 (type origType : Expr) (n : Nat) := do
-        match (← meth.whnfPure type.toPExpr 101).toExpr, (← meth.whnfPure origType.toPExpr 102).toExpr, n with
+        match (← meth.whnfPure 116 type.toPExpr).toExpr, (← meth.whnfPure 117 origType.toPExpr).toExpr, n with
       | .forallE _ _ body _, .forallE _ _ origBody _, m + 1 => 
         let idx := info.numParams - n
         let origParam := recArgs[idx]!
@@ -152,12 +153,12 @@ def inductiveReduceRec [Monad m] (env : Environment) (e : PExpr) (cheapK : Bool 
       let (type', origType') ← loop1 recType recType info.numParams
 
       let rec loop2 (type origType : Expr) (n : Nat) (ret : (Array (Option (PExpr × PExpr × EExpr)))) := do
-        match (← meth.whnfPure type.toPExpr 103).toExpr, (← meth.whnfPure origType.toPExpr 104).toExpr, n with
+        match (← meth.whnfPure 118 type.toPExpr).toExpr, (← meth.whnfPure 119 origType.toPExpr).toExpr, n with
         | .forallE _ dom body _, .forallE _ origDom origBody _, m + 1 => 
           let idx := (info.numMotives + info.numMinors) - n + info.numParams
           let origMotiveMinor := recArgs[idx]!.toPExpr
-          let (true, newMotiveMinor) ← meth.smartCast origDom.toPExpr dom.toPExpr origMotiveMinor 101 | unreachable!
-          let (true, origMotiveMinorEqnewMotiveMinor?) ← meth.isDefEq origMotiveMinor newMotiveMinor 102 | unreachable!
+          let (true, newMotiveMinor) ← meth.smartCast 101 origDom.toPExpr dom.toPExpr origMotiveMinor | unreachable!
+          let (true, origMotiveMinorEqnewMotiveMinor?) ← meth.isDefEq 120 origMotiveMinor newMotiveMinor | unreachable!
           let ret := ret.push (origMotiveMinorEqnewMotiveMinor?.map fun p => (origMotiveMinor, newMotiveMinor, p))
           loop2 (body.instantiate1 newMotiveMinor) (origBody.instantiate1 origMotiveMinor) m ret
         | _, _, m =>

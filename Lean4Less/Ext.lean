@@ -62,12 +62,12 @@ def cond' (ta sa : Expr) : Bool :=
 section
 
 structure ExtMethods (m : Type → Type u) where
-  isDefEq : PExpr → PExpr → Nat → m (Bool × Option EExpr)
-  isDefEqPure : PExpr → PExpr → Nat → m Bool
-  whnf  : PExpr → m (PExpr × Option EExpr)
-  whnfPure  : PExpr → Nat → m PExpr
+  isDefEq : Nat → PExpr → PExpr → m (Bool × Option EExpr)
+  isDefEqPure : Nat → PExpr → PExpr → m Bool
+  whnf  : Nat → PExpr → m (PExpr × Option EExpr)
+  whnfPure  : Nat → PExpr → m PExpr
   mkId  : Nat → m Name
-  inferTypePure : PExpr → Nat → m PExpr
+  inferTypePure : Nat → PExpr → m PExpr
   withPure : {T : Type} → m T → m T
   mkHRefl : Level → PExpr → PExpr → m EExpr
   getTypeLevel : PExpr → m (Level × PExpr)
