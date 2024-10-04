@@ -13,6 +13,7 @@ abbrev InferCache := ExprMap Expr
 structure TypeChecker.Data where
 usedProofIrrelevance : Bool := false
 usedKLikeReduction : Bool := false
+maxRecursionDepth : Nat := 0
 
 def defngen : NameGenerator := { namePrefix := `_kernel_fresh, idx := 0 }
 
@@ -732,6 +733,16 @@ end Inner
 
 open Inner
 
+def defFuel := 1000
+
+mutual
+def fuelWrap (n : Nat) (m : Methods → M T) : M T := do
+  let st ← get
+  let recDepth := (defFuel - n)
+  if recDepth > st.data.maxRecursionDepth then
+    modify fun s => {s with data := {s.data with maxRecursionDepth := recDepth}}
+  m (Methods.withFuel n)
+
 def Methods.withFuel : Nat → Methods
   | 0 =>
     { isDefEqCore := fun _ _ =>
@@ -743,13 +754,17 @@ def Methods.withFuel : Nat → Methods
       inferType := fun _ _ =>
         throw .deepRecursion }
   | n + 1 =>
-    { isDefEqCore := fun t s => isDefEqCore' t s (withFuel n)
+    { isDefEqCore := fun t s => do
+        fuelWrap n $ isDefEqCore' t s
       whnfCore := fun e r p =>
-        whnfCore' e r p (withFuel n)
-      whnf := fun e => whnf' e (withFuel n)
-      inferType := fun e i => inferType' e i (withFuel n) }
+        fuelWrap n $ whnfCore' e r p
+      whnf := fun e =>
+        fuelWrap n $ whnf' e
+      inferType := fun e i =>
+        fuelWrap n $ inferType' e i}
+end
 
-def RecM.run (x : RecM α) (fuel := 1000) : M α := x (Methods.withFuel fuel)
+def RecM.run (x : RecM α) (fuel := defFuel) : M α := x (Methods.withFuel fuel)
 
 def check (e : Expr) (lps : List Name) : M Expr :=
   withReader ({ · with lparams := lps }) (inferType e (inferOnly := false)).run
@@ -760,7 +775,7 @@ def inferType (e : Expr) : M Expr := (Inner.inferType e).run
 
 def inferTypeCheck (e : Expr) : M Expr := (Inner.inferType e (inferOnly := false)).run
 
-def isDefEq (t s : Expr) (fuel := 1000) : M Bool := (Inner.isDefEq t s).run fuel
+def isDefEq (t s : Expr) (fuel := defFuel) : M Bool := (Inner.isDefEq t s).run fuel
 
 def isDefEqCore (t s : Expr) : M Bool := (Inner.isDefEqCore t s).run
 
@@ -794,5 +809,5 @@ def etaExpand (e : Expr) : M Expr :=
         let args := args.push arg
         loop2 fvars args fuel <| ← whnf <| body.instantiate1 arg
     | _, it => return (← getLCtx).mkLambda fvars (mkAppN it args)
-    loop2 fvars #[] 1000 itType
+    loop2 fvars #[] defFuel itType
   loop #[] e

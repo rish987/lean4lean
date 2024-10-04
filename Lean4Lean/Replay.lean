@@ -68,6 +68,7 @@ structure Context where
 structure Data where
 prfIrrelUses := 0
 kLikeRedUses := 0
+constsToData : Std.HashMap Name TypeChecker.Data := default
 
 structure State where
   env : Environment
@@ -137,6 +138,19 @@ def addDecl (d : Declaration) (verbose := false) (allowAxiomReplace := false) : 
       if verbose then
         println s!"{d.name} used proof irrelevance"
       modify fun s => {s with data := {s.data with prfIrrelUses := s.data.prfIrrelUses + 1}}
+
+    match d with
+    | .axiomDecl d
+    | .defnDecl d
+    | .thmDecl d
+    | .opaqueDecl d => do
+      modify fun s => {s with data := {s.data with constsToData := s.data.constsToData.insert d.name data}}
+    | .quotDecl => pure ()
+    | .mutualDefnDecl d
+    | .inductDecl _ _ d _ => do
+      for dv in d do
+        modify fun s => {s with data := {s.data with constsToData := s.data.constsToData.insert dv.name data}}
+
     let t2 ← IO.monoMsNow
     if t2 - t1 > 1000 then
       if (← read).compare then
@@ -322,10 +336,19 @@ def replay (ctx : Context) (env : Environment) (onlyConsts? : Option (List Name)
       checkPostponedRecursors
   if s.printNewLine then
     IO.println ""
-  if printProgress then
+  if printProgress && not s.data.constsToData.isEmpty then
     IO.println s!"{numToCheck} total constants typechecked"
     IO.println s!"-- {s.data.prfIrrelUses} used proof irrelevance"
     IO.println s!"-- {s.data.kLikeRedUses} used k-like reduction"
+    if let some onlyConsts := onlyConsts? then
+      for const in onlyConsts do
+        IO.println s!"-- {const} data: "
+        if let some d := (s.data.constsToData.get? const) then
+          IO.println s!"  - maximum recursion depth: {d.maxRecursionDepth}"
+          if d.usedProofIrrelevance then
+            IO.println s!"  - used proof irrelevance"
+          if d.usedKLikeReduction then
+            IO.println s!"  - used k-like reduction"
   return s.env
 
 unsafe def replayFromImports (module : Name) (verbose := false) (compare := false) : IO Unit := do
