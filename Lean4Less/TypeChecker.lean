@@ -29,6 +29,8 @@ structure TypeChecker.State where
   whnfCache : Std.HashMap (PExpr × Bool) (PExpr × Option EExpr) := {}
   fvarRegistry : Std.HashMap Name Nat := {} -- for debugging purposes
   eqvManager : EquivManager := {}
+  numCalls : Nat := 0
+  printedDbg : Bool := false
   leanMinusState : Lean.TypeChecker.State := {}
   failure : Std.HashSet (Expr × Expr) := {}
 
@@ -1045,7 +1047,7 @@ def reduceNat (e : PExpr) : RecM (Option (PExpr × Option EExpr)) := do
     if f == ``Nat.mul then return ← reduceBinNatOp ``Nat.mul Nat.mul a.toPExpr b.toPExpr
     if f == ``Nat.pow then return ← reduceBinNatOp ``Nat.pow Nat.pow a.toPExpr b.toPExpr
     if f == ``Nat.gcd then 
-      -- dbg_trace s!"dbg: GCD averted: {natLitExt? (← whnf a.toPExpr).1} {natLitExt? (← whnf a.toPExpr).1}"
+      -- dbg_trace s!"dbg: GCD averted: {natLitExt? (← whnf 0 a.toPExpr).1} {natLitExt? (← whnf 0 a.toPExpr).1}"
       return none
       -- return ← reduceBinNatOp ``Nat.gcd Nat.gcd a.toPExpr b.toPExpr
     if f == ``Nat.mod then return ← reduceBinNatOp ``Nat.mod Nat.mod a.toPExpr b.toPExpr
@@ -1119,9 +1121,9 @@ Otherwise, defers to the calling function.
 -/
 def quickIsDefEq (t s : PExpr) (useHash := false) : RecLB := do
   -- optimization for terms that are already α-equivalent
-  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 (eqvManager := m)) => -- FIXME why do I have to list these?
+  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 (eqvManager := m)) => -- FIXME why do I have to list these?
     let (b, m) := m.isEquiv useHash t s
-    (b, .mk a1 a2 a3 a4 a5 a6 a7 a8 (eqvManager := m))
+    (b, .mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 (eqvManager := m))
   then return (.true, none)
   let res : Option (Bool × PExpr) ← match t.toExpr, s.toExpr with
   | .lam .., .lam .. => pure $ some $ ← isDefEqLambda t s
@@ -1651,7 +1653,7 @@ def fuelWrap (idx : Nat) (fuel : Nat) (d : CallData) : M (CallDataT d) := do
     dbg_trace s!"deep recursion callstack: {(← readThe Context).callStack.map (·.1)}"
     throw .deepRecursion
   | fuel' + 1 =>
-    -- let recDepth := (defFuel - fuel)
+    let recDepth := (defFuel - fuel)
     let m : RecM (CallDataT d):=
       match d with
       | .isDefEqCore t s => isDefEqCore' t s
@@ -1661,8 +1663,13 @@ def fuelWrap (idx : Nat) (fuel : Nat) (d : CallData) : M (CallDataT d) := do
       | .whnfPure e => whnfPure' e
       | .inferType e d => inferType' e d
       | .inferTypePure e => inferTypePure' e
-    -- if recDepth > 100 then
-    --   dbg_trace s!"DBG[3]: {d.name}, {fuel}, {idx}"
+    if recDepth > 500 then
+      dbg_trace s!"DBG[3]: {d.name}, {fuel}, {idx}"
+    modify fun s => {s with numCalls := s.numCalls + 1} 
+    let s ← get
+    if s.numCalls > 100000 /- && not s.printedDbg -/ then -- TODO static variables?
+      modify fun s => {s with printedDbg := true} 
+      dbg_trace s!"DBG[1]: TypeChecker.lean:1668 {(← readThe Context).callStack.map (·.1)}"
     withCallData idx d $ m (Methods.withFuel fuel')
 
 def Methods.withFuel (n : Nat) : Methods := 
