@@ -23,6 +23,7 @@ def forallEx'' : Q q → Q q :=
                       (X p (@L4L.castHEq (Q q) (Q p) (@L4L.appArgHEq P Prop Q q p (L4L.prfIrrel q p)) qq)) 
 -- #check_off forallEx''
 -- #print Std.Tactic.BVDecide.BVExpr.bitblast.go
+#check Eq.rec
 
 axiom Qp : Q p
 axiom Qq : Q q

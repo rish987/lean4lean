@@ -1249,17 +1249,29 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
   | .fvar _ => return ← whnfFVar e cheapK cheapProj
   | .app .. => -- beta-reduce at the head as much as possible, apply any remaining `rargs` to the resulting expression, and re-run `whnfCore`
     e'.withAppRev fun f0 rargs => do
+    let f0 := f0.toPExpr
     -- the head may still be a let variable/binding, projection, or mdata-wrapped expression
-    let (f, pf0Eqf?) ← whnfCore 52 f0.toPExpr cheapK cheapProj
-    let frargs := f.toExpr.mkAppRevRange 0 rargs.size rargs
-    -- patch to cast rargs as necessary to agree with type of f
-    let (_, frargs'?) ← inferType 53 frargs -- FIXME can result in redundant casts?
-    let frargs' := frargs'?.getD frargs.toPExpr
-    let rargs' := frargs'.toExpr.getAppArgs[f.toExpr.getAppArgs.size:].toArray.reverse
-    assert 10 $ rargs'.size == rargs.size
-    let (.true, data?) ← isDefEqApp'' methsA f0.toPExpr f (rargs.map (·.toPExpr)).reverse (rargs'.map (·.toPExpr)).reverse (tfEqsf? := pf0Eqf?) |
-      throw $ .other "unreachable 10"
-    let eEqfrargs'? := data?.map (·.1)
+    let (f, pf0Eqf?) ← whnfCore 52 f0 cheapK cheapProj
+    let frargs := f.toExpr.mkAppRevRange 0 rargs.size rargs |>.toPExpr
+
+    let (frargs', rargs', eEqfrargs'?) ←
+      if pf0Eqf?.isSome then
+        let f0T ← inferTypePure 91 f0
+        let fT ← inferTypePure 92 f
+        if ! (← isDefEqPure 93 f0T fT) then
+          -- patch to cast rargs as necessary to agree with type of f
+          let (_, frargs'?) ← inferType 53 frargs -- FIXME can result in redundant casts?
+          let frargs' := frargs'?.getD frargs
+          let rargs' := frargs'.toExpr.getAppArgs[f.toExpr.getAppArgs.size:].toArray.reverse
+          assert 10 $ rargs'.size == rargs.size
+          let (.true, data?) ← isDefEqApp'' methsA f0 f (rargs.map (·.toPExpr)).reverse (rargs'.map (·.toPExpr)).reverse (tfEqsf? := pf0Eqf?) |
+            throw $ .other "unreachable 10"
+          let eEqfrargs'? := data?.map (·.1)
+          pure (frargs', rargs', eEqfrargs'?)
+        else
+          pure (frargs, rargs, none)
+      else
+        pure (frargs, rargs, none)
 
 
     if let (.lam _ _ body _) := f.toExpr then
@@ -1692,30 +1704,32 @@ def fuelWrap (idx : Nat) (fuel : Nat) (d : CallData) : M (CallDataT d) := do
     --   match d with
     --   | .quickIsDefEq t s b => fuel'
     --   | _ => fuel'
+
     -- if s.numCalls > 100000 /- && not s.printedDbg -/ then -- TODO static variables?
     --   modify fun s => {s with printedDbg := true} 
     --   dbg_trace s!"calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}"
-    if s.numCalls == 362305 /- && not s.printedDbg -/ then -- TODO static variables?
-      let stack := (← readThe Context).callStack
-      modify fun s => {s with printedDbg := true} 
-      dbg_trace s!"{s.numCalls}: {stack[10]!.2}, {stack.map (·.1)}"
-      let s ← match stack[8]!.2 with
-        | .isDefEqCore t s .. =>
-          dbg_trace s!"{stack[8]!.2}\n{t} ?= {s} {← isDefEqPure 0 t s 1000 (Methods.withFuel fuel')}"
-          pure s
-        | _ => unreachable!
-      let t ← match stack[10]!.2 with
-        | .whnf t k =>
-          dbg_trace s!"DBG[1]: TypeChecker.lean:1708 (after | .whnf t .. =>)"
-          let t1 ← whnfPure 0 t (Methods.withFuel fuel')
-          let t2 ← reduceRecursor t1 false (Methods.withFuel fuel')
-          let t3 ← whnfPure 0 t2.get!.1 (Methods.withFuel fuel')
-          dbg_trace s!"HERE: {k}, {t3}"
-          let t' ← whnf 0 t1 false (Methods.withFuel fuel')
-          dbg_trace s!"DBG[2]: TypeChecker.lean:1710 (after dbg_trace s!HERE: ← reduceRecursor ("
-          pure t
-        | _ => unreachable!
-      dbg_trace s!"{stack[8]!.2}\n{t} ?= {s} {← isDefEqPure 0 t s 1000 (Methods.withFuel fuel')}"
+
+    -- if s.numCalls == 362305 /- && not s.printedDbg -/ then -- TODO static variables?
+    --   let stack := (← readThe Context).callStack
+    --   modify fun s => {s with printedDbg := true} 
+    --   dbg_trace s!"{s.numCalls}: {stack[10]!.2}, {stack.map (·.1)}"
+    --   let s ← match stack[8]!.2 with
+    --     | .isDefEqCore t s .. =>
+    --       dbg_trace s!"{stack[8]!.2}\n{t} ?= {s} {← isDefEqPure 0 t s 1000 (Methods.withFuel fuel')}"
+    --       pure s
+    --     | _ => unreachable!
+    --   let t ← match stack[10]!.2 with
+    --     | .whnf t k =>
+    --       -- dbg_trace s!"DBG[1]: TypeChecker.lean:1708 (after | .whnf t .. =>)"
+    --       -- let t1 ← whnfPure 0 t (Methods.withFuel fuel')
+    --       -- let t2 ← reduceRecursor t1 false (Methods.withFuel fuel')
+    --       -- let t3 ← whnfPure 0 t2.get!.1 (Methods.withFuel fuel')
+    --       -- dbg_trace s!"HERE: {k}, {t3}"
+    --       -- let t' ← whnf 0 t1 false (Methods.withFuel fuel')
+    --       -- dbg_trace s!"DBG[2]: TypeChecker.lean:1710 (after dbg_trace s!HERE: ← reduceRecursor ("
+    --       pure t
+    --     | _ => unreachable!
+    --   dbg_trace s!"{stack[8]!.2}\n{t} ?= {s} {← isDefEqPure 0 t s 1000 (Methods.withFuel fuel')}"
     withCallData idx d $ m (Methods.withFuel fuel')
 
 def Methods.withFuel (n : Nat) : Methods := 
