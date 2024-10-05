@@ -12,7 +12,7 @@ import Lean4Lean.TypeChecker
 
 import Lean4Less.App
 
--- 81
+-- 90
 -- mkId 13
 
 namespace Lean4Less
@@ -37,15 +37,30 @@ structure TypeChecker.State where
 inductive CallData where
 |  isDefEqCore : PExpr → PExpr → CallData
 |  isDefEqCorePure : PExpr → PExpr → CallData
+|  quickIsDefEq : PExpr → PExpr → Bool → CallData
 |  whnfCore (e : PExpr) (cheapK : Bool) (cheapProj : Bool) : CallData
 |  whnf (e : PExpr) (cheapK : Bool) : CallData
 |  whnfPure (e : PExpr) : CallData
 |  inferType (e : Expr) (dbg : Bool) : CallData
 |  inferTypePure (e : PExpr) : CallData
+deriving Inhabited
+
+instance : ToString CallData where
+toString
+| .isDefEqCore t s     => s!"isDefEqCore ({t}) ({s})"
+| .isDefEqCorePure t s => s!"isDefEqCorePure ({t}) ({s})"
+| .quickIsDefEq t s h  => s!"quickIsDefEq ({t}) ({s}) {h}"
+| .whnfCore e k p      => s!"whnfCore ({e}) {k} {p}"
+| .whnf e k            => s!"whnf ({e}) {k}"
+| .whnfPure e          => s!"whnfPure ({e})"
+| .inferType e d       => s!"inferType ({e}) ({d})"
+| .inferTypePure e     => s!"inferTypePure ({e})"
+
 
 def CallData.name : CallData → String
 | .isDefEqCore ..     => "isDefEqCore"
 | .isDefEqCorePure .. => "isDefEqCorePure"
+| .quickIsDefEq ..    => "quickIsDefEq"
 | .whnfCore ..        => "whnfCore"
 | .whnf ..            => "whnf"
 | .whnfPure ..        => "whnfPure"
@@ -54,13 +69,14 @@ def CallData.name : CallData → String
 
 @[reducible]
 def CallDataT : CallData → Type
-| .isDefEqCore .. => Bool × Option EExpr
+| .isDefEqCore ..     => Bool × Option EExpr
 | .isDefEqCorePure .. => Bool
-| .whnfCore .. => PExpr × Option EExpr
-| .whnf .. => PExpr × Option EExpr
-| .whnfPure .. => PExpr
-| .inferType .. => PExpr × Option PExpr
-| .inferTypePure .. => PExpr
+| .quickIsDefEq ..    => LBool × Option EExpr
+| .whnfCore ..        => PExpr × Option EExpr
+| .whnf ..            => PExpr × Option EExpr
+| .whnfPure ..        => PExpr
+| .inferType ..       => PExpr × Option PExpr
+| .inferTypePure ..   => PExpr
 
 structure TypeChecker.Context where
   env : Environment
@@ -84,6 +100,7 @@ abbrev M := ReaderT Context <| StateT State <| Except KernelException
 abbrev MPE := M (PExpr × Option PExpr)
 abbrev MEE := M (PExpr × Option EExpr)
 abbrev MB := M (Bool × Option EExpr)
+abbrev MLB := M (LBool × Option EExpr)
 
 def M.run (env : Environment) (const : Name) (safety : DefinitionSafety := .safe) (lctx : LocalContext := {})
     (x : M α) : Except KernelException α :=
@@ -109,6 +126,7 @@ instance (priority := low) : MonadWithReaderOf (Std.HashMap (FVarId × FVarId) (
 structure Methods where
   isDefEqCore : Nat → PExpr → PExpr → MB
   isDefEqCorePure : Nat → PExpr → PExpr → M Bool
+  quickIsDefEq : Nat → PExpr → PExpr → Bool → MLB
   whnfCore (n : Nat) (e : PExpr) (cheapK := false) (cheapProj := false) : MEE
   whnf (n : Nat) (e : PExpr) (cheapK : Bool) : MEE
   whnfPure (n : Nat) (e : PExpr) : M PExpr
@@ -284,6 +302,8 @@ that `e` types as the return value of `inferType e (inferOnly := true)`.
 def isDefEqCore (n : Nat) (t s : PExpr) : RecB := fun m => m.isDefEqCore n t s
 
 def isDefEqCorePure (n : Nat) (t s : PExpr) : RecM Bool := fun m => m.isDefEqCorePure n t s
+
+def quickIsDefEq (n : Nat) (t s : PExpr) (useHash : Bool := false) : RecLB := fun m => m.quickIsDefEq n t s useHash
 
 @[inherit_doc isDefEqCore]
 def isDefEq (n : Nat) (t s : PExpr) : RecB := do
@@ -1119,7 +1139,7 @@ If `t` and `s` have matching head constructors and are not projections or
 (non-α-equivalent) applications, checks that they are definitionally equal.
 Otherwise, defers to the calling function.
 -/
-def quickIsDefEq (t s : PExpr) (useHash := false) : RecLB := do
+def quickIsDefEq' (t s : PExpr) (useHash := false) : RecLB := do
   -- optimization for terms that are already α-equivalent
   if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 (eqvManager := m)) => -- FIXME why do I have to list these?
     let (b, m) := m.isEquiv useHash t s
@@ -1367,7 +1387,7 @@ def lazyDeltaReductionStep (ltn lsn : PExpr) : RecM ReductionStatus := do
   let env ← getEnv
   let delta e := whnfCore 63 (unfoldDefinition env e).get! (cheapK := true) (cheapProj := true)
   let cont (nltn nlsn : PExpr) (pltnEqnltn? plsnEqnlsn? : Option EExpr) :=
-    return ← match ← quickIsDefEq nltn nlsn with
+    return ← match ← quickIsDefEq 90 nltn nlsn with
     | (.undef, _) => pure $ .continue nltn nlsn pltnEqnltn? plsnEqnlsn?
     | (.true, pnltnEqnlsn?) =>
       do pure $ .bool .true (← appHEqTrans? ltn nltn lsn pltnEqnltn? <| ← appHEqTrans? nltn nlsn lsn pnltnEqnlsn? <| ← appHEqSymm? lsn nlsn plsnEqnlsn?)
@@ -1536,7 +1556,7 @@ def isDefEqUnitLike (t s : PExpr) : RecB := do
 def isDefEqCore' (t s : PExpr) : RecB := do
   if ← isDefEqPure 74 t s 15 then -- NOTE: this is a tradeoff between runtime and output size
     return (true, none)
-  let (r, pteqs?) ← quickIsDefEq t s (useHash := true)
+  let (r, pteqs?) ← quickIsDefEq 88 t s (useHash := true)
   if r != .undef then return (r == .true, pteqs?)
 
   if !t.toExpr.hasFVar && s.toExpr.isConstOf ``true then
@@ -1549,7 +1569,7 @@ def isDefEqCore' (t s : PExpr) : RecB := do
   let mktEqs? (t' s' : PExpr) (tEqt'? sEqs'? t'Eqs'? : Option EExpr) := do appHEqTrans? t s' s (← appHEqTrans? t t' s' tEqt'? t'Eqs'?) (← appHEqSymm? s s' sEqs'?)
 
   if !(tn == t && sn == s) then
-    let (r, tnEqsn?) ← quickIsDefEq tn sn
+    let (r, tnEqsn?) ← quickIsDefEq 89 tn sn
     if r == .false then
       return (false, none)
     else if r == .true then
@@ -1644,7 +1664,7 @@ end Inner
 
 open Inner
 
-def defFuel := 1000
+def defFuel := 1300
 
 mutual
 def fuelWrap (idx : Nat) (fuel : Nat) (d : CallData) : M (CallDataT d) := do
@@ -1658,6 +1678,7 @@ def fuelWrap (idx : Nat) (fuel : Nat) (d : CallData) : M (CallDataT d) := do
       match d with
       | .isDefEqCore t s => isDefEqCore' t s
       | .isDefEqCorePure t s => isDefEqCorePure' t s
+      | .quickIsDefEq t s b => quickIsDefEq' t s b
       | .whnfCore e k p => whnfCore' e k p
       | .whnf e k => whnf' e k
       | .whnfPure e => whnfPure' e
@@ -1667,9 +1688,17 @@ def fuelWrap (idx : Nat) (fuel : Nat) (d : CallData) : M (CallDataT d) := do
       dbg_trace s!"DBG[3]: {d.name}, {fuel}, {idx}"
     modify fun s => {s with numCalls := s.numCalls + 1} 
     let s ← get
-    if s.numCalls > 100000 /- && not s.printedDbg -/ then -- TODO static variables?
+    -- let newFuel := 
+    --   match d with
+    --   | .quickIsDefEq t s b => fuel'
+    --   | _ => fuel'
+    -- if s.numCalls > 100000 /- && not s.printedDbg -/ then -- TODO static variables?
+    --   modify fun s => {s with printedDbg := true} 
+    --   dbg_trace s!"calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}"
+    if s.numCalls == 122852 /- && not s.printedDbg -/ then -- TODO static variables?
+      let stack := (← readThe Context).callStack
       modify fun s => {s with printedDbg := true} 
-      dbg_trace s!"DBG[1]: TypeChecker.lean:1668 {(← readThe Context).callStack.map (·.1)}"
+      dbg_trace s!"calltrace {s.numCalls}: {stack[4]!.2}, {stack.map (·.1)}"
     withCallData idx d $ m (Methods.withFuel fuel')
 
 def Methods.withFuel (n : Nat) : Methods := 
@@ -1677,6 +1706,8 @@ def Methods.withFuel (n : Nat) : Methods :=
       fuelWrap i n $ .isDefEqCore t s
     isDefEqCorePure := fun i t s => do
       fuelWrap i n $ .isDefEqCorePure t s
+    quickIsDefEq := fun i t s b => do
+      fuelWrap i n $ .quickIsDefEq t s b
     whnfCore := fun i e k p => do
       fuelWrap i n $ .whnfCore e k p
     whnf := fun i e k => do

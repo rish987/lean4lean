@@ -344,7 +344,7 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
   let mut tEtaVars : Nat := 0 -- number of vars that can be eliminated from the lambda by eta reduction
   let mut sEtaVars : Nat := 0
   let mut absArgs : Std.HashSet Nat := default
-  let mut tfT ← meth.inferTypePure 223 tBodFun
+  let mut tfT ← meth.inferTypePure 223 tBodFun -- FIXME avoid when possible
   let mut sfT ← meth.inferTypePure 224 sBodFun
   let mut tBodT := tfT
   let mut sBodT := sfT
