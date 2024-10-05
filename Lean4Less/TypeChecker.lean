@@ -1222,7 +1222,7 @@ def reduceRecursor (e : PExpr) (cheapK : Bool) : RecM (Option (PExpr × Option E
   if env.header.quotInit then
     if let some r ← quotReduceRec e (whnf 51) (fun x y tup => isDefEqApp methsA x y (targsEqsargs? := Std.HashMap.insert default tup.1 tup.2)) then
       return r
-  let whnf' e := whnf e (cheapK := cheapK)
+  let whnf' := whnf (cheapK := cheapK)
   let meths := {methsR with whnf := whnf'}
   let recReduced? ← inductiveReduceRec meths (cheapK := cheapK)
     env e
@@ -1684,8 +1684,8 @@ def fuelWrap (idx : Nat) (fuel : Nat) (d : CallData) : M (CallDataT d) := do
       | .whnfPure e => whnfPure' e
       | .inferType e d => inferType' e d
       | .inferTypePure e => inferTypePure' e
-    if recDepth > 500 then
-      dbg_trace s!"DBG[3]: {d.name}, {fuel}, {idx}"
+    -- if recDepth > 500 then
+    --   dbg_trace s!"DBG[3]: {d.name}, {fuel}, {idx}"
     modify fun s => {s with numCalls := s.numCalls + 1} 
     let s ← get
     -- let newFuel := 
@@ -1695,10 +1695,27 @@ def fuelWrap (idx : Nat) (fuel : Nat) (d : CallData) : M (CallDataT d) := do
     -- if s.numCalls > 100000 /- && not s.printedDbg -/ then -- TODO static variables?
     --   modify fun s => {s with printedDbg := true} 
     --   dbg_trace s!"calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}"
-    if s.numCalls == 122852 /- && not s.printedDbg -/ then -- TODO static variables?
+    if s.numCalls == 362305 /- && not s.printedDbg -/ then -- TODO static variables?
       let stack := (← readThe Context).callStack
       modify fun s => {s with printedDbg := true} 
-      dbg_trace s!"calltrace {s.numCalls}: {stack[4]!.2}, {stack.map (·.1)}"
+      dbg_trace s!"{s.numCalls}: {stack[10]!.2}, {stack.map (·.1)}"
+      let s ← match stack[8]!.2 with
+        | .isDefEqCore t s .. =>
+          dbg_trace s!"{stack[8]!.2}\n{t} ?= {s} {← isDefEqPure 0 t s 1000 (Methods.withFuel fuel')}"
+          pure s
+        | _ => unreachable!
+      let t ← match stack[10]!.2 with
+        | .whnf t k =>
+          dbg_trace s!"DBG[1]: TypeChecker.lean:1708 (after | .whnf t .. =>)"
+          let t1 ← whnfPure 0 t (Methods.withFuel fuel')
+          let t2 ← reduceRecursor t1 false (Methods.withFuel fuel')
+          let t3 ← whnfPure 0 t2.get!.1 (Methods.withFuel fuel')
+          dbg_trace s!"HERE: {k}, {t3}"
+          let t' ← whnf 0 t1 false (Methods.withFuel fuel')
+          dbg_trace s!"DBG[2]: TypeChecker.lean:1710 (after dbg_trace s!HERE: ← reduceRecursor ("
+          pure t
+        | _ => unreachable!
+      dbg_trace s!"{stack[8]!.2}\n{t} ?= {s} {← isDefEqPure 0 t s 1000 (Methods.withFuel fuel')}"
     withCallData idx d $ m (Methods.withFuel fuel')
 
 def Methods.withFuel (n : Nat) : Methods := 
