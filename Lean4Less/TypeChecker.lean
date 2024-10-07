@@ -429,9 +429,62 @@ def meths : ExtMethods RecM := {
     withPure := withPure
   }
 
+def isDefEqForall' (t s : PExpr) (numBinds : Nat) (f : Option EExpr → RecM (Option T)) : RecM (Bool × Option T) := do
+  -- assert! numBinds > 0
+  let rec getData t s n := do
+    match n, t, s with
+    | n + 1, .forallE tName tDom tBody tBi, .forallE sName sDom sBody sBi =>
+      let (datas, tBody, sBody) ← getData tBody sBody n
+      pure (#[({name := tName, dom := tDom.toPExpr, info := tBi}, {name := sName, dom := sDom.toPExpr, info := sBi})] ++ datas, tBody, sBody)
+    | _, tBody, sBody =>
+      pure (#[], tBody.toPExpr, sBody.toPExpr)
+  let (datas, tBody, sBody) ← getData t.toExpr s.toExpr numBinds
+  isDefEqBinder datas tBody sBody fun Ua Vx UaEqVx? as ds => do
+    let mut UaEqVx? := UaEqVx?
+    let mut Ua := Ua
+    let mut Vx := Vx
+
+    let mut idx := 0
+    for (a, d?) in as.zip ds do
+      let x := if let some (b, _, _) := d? then b else a
+
+      idx := idx + 1
+
+      if d?.isSome || UaEqVx?.isSome then
+        let (UaTypeLvl, UaType) ← getTypeLevel Ua
+        let UaType ← whnfPure 9 UaType
+        let UaLvl := UaType.toExpr.sortLevel!
+
+        let (ALvl, A) ← getTypeLevel a
+        let u := ALvl
+        let v := UaLvl
+
+        let UaEqVx := UaEqVx?.getD $ ← mkHRefl UaTypeLvl UaType Ua -- FIXME use special forall lemma variant here
+        let (U, V) := ((Ua, a), (Vx, x))
+
+        let extra ← if let .some (b, idaEqb, idbEqa, hAB) := d? then
+          let B ← inferTypePure 10 b
+          let aEqb := (Expr.fvar idaEqb).toPExpr
+          let bEqa := (Expr.fvar idbEqa).toPExpr
+          pure $ .AB {B, b, vaEqb := {aEqb, bEqa}, hAB}
+        else
+          pure .none
+
+        UaEqVx? := .some $ .forallE {u, v, A, a, U, V, UaEqVx, extra, lctx := ← getLCtx}
+
+      Ua := (← getLCtx).mkForall #[a] Ua |>.toPExpr
+      Vx := (← getLCtx).mkForall #[x] Vx |>.toPExpr
+
+    -- if as.any fun a => a.toExpr.isFVar && a.toExpr.fvarId!.name == "_kernel_fresh.104".toName then
+    --   dbg_trace s!"DBG[7]: TypeChecker.lean:418 (after sorry) {UaEqVx?.map (·.reverse default default default default default)}\n\n"
+
+    f UaEqVx?
+
+
 def methsA : ExtMethodsA RecM := {
     meths with
     opt := true
+    isDefEqForall := isDefEqForall'
   }
 
 def isDefEqForallOpt' (t s : PExpr) : RecB := do
@@ -464,55 +517,7 @@ def isDefEqForall (t s : PExpr) (numBinds := 0) : RecB := do
   if numBinds == 0 then
     isDefEqForallOpt' t s
   else
-    let rec getData t s n := do
-      match n, t, s with
-      | n + 1, .forallE tName tDom tBody tBi, .forallE sName sDom sBody sBi =>
-        let (datas, tBody, sBody) ← getData tBody sBody n
-        pure (#[({name := tName, dom := tDom.toPExpr, info := tBi}, {name := sName, dom := sDom.toPExpr, info := sBi})] ++ datas, tBody, sBody)
-      | _, tBody, sBody =>
-        pure (#[], tBody.toPExpr, sBody.toPExpr)
-    let (datas, tBody, sBody) ← getData t.toExpr s.toExpr numBinds
-    let ret ← isDefEqBinder datas tBody sBody fun Ua Vx UaEqVx? as ds => do
-      let mut UaEqVx? := UaEqVx?
-      let mut Ua := Ua
-      let mut Vx := Vx
-
-      let mut idx := 0
-      for (a, d?) in as.zip ds do
-        let x := if let some (b, _, _) := d? then b else a
-
-        idx := idx + 1
-
-        if d?.isSome || UaEqVx?.isSome then
-          let (UaTypeLvl, UaType) ← getTypeLevel Ua
-          let UaType ← whnfPure 9 UaType
-          let UaLvl := UaType.toExpr.sortLevel!
-
-          let (ALvl, A) ← getTypeLevel a
-          let u := ALvl
-          let v := UaLvl
-
-          let UaEqVx := UaEqVx?.getD $ ← mkHRefl UaTypeLvl UaType Ua
-          let (U, V) := ((Ua, a), (Vx, x))
-
-          let extra ← if let .some (b, idaEqb, idbEqa, hAB) := d? then
-            let B ← inferTypePure 10 b
-            let aEqb := (Expr.fvar idaEqb).toPExpr
-            let bEqa := (Expr.fvar idbEqa).toPExpr
-            pure $ .AB {B, b, vaEqb := {aEqb, bEqa}, hAB}
-          else
-            pure .none
-
-          UaEqVx? := .some $ .forallE {u, v, A, a, U, V, UaEqVx, extra, lctx := ← getLCtx}
-
-        Ua := (← getLCtx).mkForall #[a] Ua |>.toPExpr
-        Vx := (← getLCtx).mkForall #[x] Vx |>.toPExpr
-
-      -- if as.any fun a => a.toExpr.isFVar && a.toExpr.fvarId!.name == "_kernel_fresh.104".toName then
-      --   dbg_trace s!"DBG[7]: TypeChecker.lean:418 (after sorry) {UaEqVx?.map (·.reverse default default default default default)}\n\n"
-
-      pure $ UaEqVx?
-    pure ret
+    isDefEqForall' t s numBinds
 
 def lamCount (e ltl ltr : Expr) : RecM (Nat × Expr × Expr) := do
   match e with

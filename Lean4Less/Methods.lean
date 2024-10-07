@@ -34,39 +34,43 @@ match fuel with
     --   | .quickIsDefEq t s b => fuel'
     --   | _ => fuel'
 
-    -- if s.numCalls > 10000 /- && not s.printedDbg -/ then -- TODO static variables?
-    --   if s.numCalls % 100 == 0 then
-    --     dbg_trace s!"calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}"
+    if s.numCalls > 10000 /- && not s.printedDbg -/ then -- TODO static variables?
+      if s.numCalls % 100 == 0 then
+        dbg_trace s!"calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}"
     let meth := Methods.withFuel fuel'
 
-    if s.numCalls == 176200 /- && not s.printedDbg -/ then -- TODO static variables?
-      let stack := (← readThe Context).callStack
-      let x := stack[8]!.2
-      dbg_trace s!"{s.numCalls}: {stack.map (·.1)}"
-      dbg_trace s!"a"
-      pure ()
-
-      -- let se ← match stack[10]!.2 with
-      --   | .isDefEqCore t s .. =>
-      --     -- dbg_trace s!"{t}\n\n{s}"
-      --     let whnfCorePure x := runLeanRecM (Lean.TypeChecker.Inner.whnfCore x) meth
-      --     let isDefEqCorePure x y := runLeanRecM (Lean.TypeChecker.Inner.isDefEqCore x y) meth
-      --     let res ← runLeanMinusRecM (Lean.TypeChecker.Inner.lazyDeltaReduction t s) meth
-      --     match res with
-      --     | .unknown tn' sn' =>
-      --       -- let w ← whnfCorePure tn'
-      --       let x ← match tn' with
-      --       | .proj _ i s => 
-      --         let s ← runLeanRecM (Lean.TypeChecker.Inner.reduceProj i s false false) meth
-      --         -- let s ← runLeanMinusRecM (Lean.TypeChecker.Inner.inferType s.getAppArgs[5]! true) meth
-      --         -- let s ← runLeanMinusRecM (Lean.TypeChecker.Inner.whnfCore s.get!) meth
-      --         pure s
-      --       | _ => unreachable!
-      --       dbg_trace s!"DBG[1]: {← isDefEqCorePure (← whnfCorePure tn').toPExpr sn'.toPExpr} {sn'}"
-      --     | _ => unreachable! 
-      --     pure s
-      --   | _ => unreachable!
-
+    -- if s.numCalls == 176200 /- && not s.printedDbg -/ then -- TODO static variables?
+    --   let stack := (← readThe Context).callStack
+    --   let x := stack[14]!.2
+    --   dbg_trace s!"{s.numCalls}: {stack.map (·.1)}"
+    --   dbg_trace s!"a"
+    --
+    --   -- pure ()
+    --
+    --   match x with
+    --     | .isDefEqCore t s .. =>
+    --       -- dbg_trace s!"{t}\n\n{s}"
+    --       let whnfCorePure x := runLeanRecM (Lean.TypeChecker.Inner.whnfCore x) meth
+    --       let isDefEqCorePure x y := runLeanRecM (Lean.TypeChecker.Inner.isDefEqCore x y) meth
+    --       -- dbg_trace s!"DBG[2]: Methods.lean:54 {t}, {s}"
+    --       dbg_trace s!"DBG[3]: Methods.lean:55 (after dbg_trace s!DBG[2]: Methods.lean:54 t, s)"
+    --       _ ← isDefEq 0 t s meth
+    --       dbg_trace s!"DBG[1]: Methods.lean:55: res"
+    --       -- let res ← runLeanRecM (Lean.TypeChecker.Inner.isDefEqCore t s) meth
+    --       -- match res with
+    --       -- | .unknown tn' sn' =>
+    --       --   -- let w ← whnfCorePure tn'
+    --       --   let x ← match tn' with
+    --       --   | .proj _ i s => 
+    --       --     let s ← runLeanRecM (Lean.TypeChecker.Inner.reduceProj i s false false) meth
+    --       --     -- let s ← runLeanMinusRecM (Lean.TypeChecker.Inner.inferType s.getAppArgs[5]! true) meth
+    --       --     -- let s ← runLeanMinusRecM (Lean.TypeChecker.Inner.whnfCore s.get!) meth
+    --       --     pure s
+    --       --   | _ => unreachable!
+    --       --   dbg_trace s!"DBG[1]: {← isDefEqCorePure (← whnfCorePure tn').toPExpr sn'.toPExpr} {sn'}"
+    --       -- | _ => unreachable! 
+    --     | _ => unreachable!
+    --
       -- let t ← match stack[10]!.2 with
       --   | .whnf t k =>
       --     -- dbg_trace s!"DBG[1]: TypeChecker.lean:1708 (after | .whnf t .. =>)"

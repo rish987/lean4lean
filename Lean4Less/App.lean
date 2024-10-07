@@ -12,12 +12,13 @@ section
 namespace Lean4Less.TypeChecker.Inner
 
 structure ExtMethodsA (m : Type → Type u) extends ExtMethods m where
+  isDefEqForall (t s : PExpr) (numBinds : Nat) (f : Option EExpr → m (Option T)) : m (Bool × Option T)
   opt : Bool := true
 
 variable [Monad m] [MonadLCtx m] [MonadExcept KernelException m] [MonadNameGenerator m] [MonadWithReaderOf LocalContext m] [MonadWithReaderOf (Std.HashMap (FVarId × FVarId) (FVarId × FVarId)) m] (env : Environment)
   (meth : ExtMethodsA m)
 
-def mkAppEqProof? (aVars bVars : Array PExpr) (Uas Vbs : Array PExpr) (ds? : Array (Option (FVarId × FVarId × EExpr))) (as bs : Array PExpr) (asEqbs? : Array (Option EExpr)) (f g : PExpr) (fEqg? : Option EExpr := none)
+def mkAppEqProof? (aVars bVars : Array PExpr) (Uas Vbs : Array PExpr) (UasEqVbs? : Array (Option EExpr))(ds? : Array (Option (FVarId × FVarId × EExpr))) (as bs : Array PExpr) (asEqbs? : Array (Option EExpr)) (f g : PExpr) (fEqg? : Option EExpr := none)
 : m (Option EExpr) := do
   let mut fEqg? := fEqg?
   let mut f := f
@@ -41,8 +42,7 @@ def mkAppEqProof? (aVars bVars : Array PExpr) (Uas Vbs : Array PExpr) (ds? : Arr
         let Ua := Uas[idx]!
         let Vb := Vbs[idx]!
 
-        let (defEq, UaEqVb?) ← meth.isDefEq 202 Ua Vb
-        assert! defEq
+        let UaEqVb? := UasEqVbs?[idx]!
 
         let (UaTypeLvl, UaType) ← meth.getTypeLevel Ua
         let UaType ← meth.whnfPure 203 UaType
@@ -102,8 +102,8 @@ dom : PExpr
 info : BinderInfo
 deriving Inhabited
 
-def mkAppEqProof (T S : PExpr) (as bs : Array PExpr) (asEqbs? : Array (Option EExpr)) (f g : PExpr) (fEqg? : Option EExpr := none) : m (Option EExpr) := do
-  let rec loop idx T S aVars bVars Uas Vbs ds? : m (Option EExpr) := do
+def mkAppEqProof (T S : PExpr) (TEqS? : Option EExpr) (as bs : Array PExpr) (asEqbs? : Array (Option EExpr)) (f g : PExpr) (fEqg? : Option EExpr := none) : m (Option EExpr) := do
+  let rec loop idx T S aVars bVars Uas Vbs UasEqVbs? ds? : m (Option EExpr) := do
     let (T', dA, S', dB) ← match (← meth.whnfPure 205 T).toExpr, (← meth.whnfPure 206 S).toExpr with
       | .forallE tName tDom tBody tBi, .forallE sName sDom sBody sBi =>
         pure $ (tBody, ({name := tName, dom := tDom.toPExpr, info := tBi} : BinderData), sBody, ({name := sName, dom := sDom.toPExpr, info := sBi} : BinderData))
@@ -165,10 +165,11 @@ def mkAppEqProof (T S : PExpr) (as bs : Array PExpr) (asEqbs? : Array (Option EE
         let bVars := bVars.push bVar
         let Uas := Uas.push Ua
         let Vbs := Vbs.push Vb
+        let UasEqVbs? := UasEqVbs?.push sorry
         if _h : idx < as.size - 1 then
-          loop (idx + 1) T S aVars bVars Uas Vbs ds?
+          loop (idx + 1) T S aVars bVars Uas Vbs UasEqVbs? ds? 
         else
-          mkAppEqProof? meth aVars bVars Uas Vbs ds? as bs asEqbs? f g fEqg?
+          mkAppEqProof? meth aVars bVars Uas Vbs UasEqVbs? ds? as bs asEqbs? f g fEqg?
 
       if let some AEqB := AEqB? then 
         let idb := ⟨← meth.mkId 202⟩
@@ -188,7 +189,7 @@ def mkAppEqProof (T S : PExpr) (as bs : Array PExpr) (asEqbs? : Array (Option EE
   termination_by (as.size - 1) - idx
 
   if as.size > 0 then
-    loop 0 T S #[] #[] #[] #[] #[]
+    loop 0 T S #[] #[] #[] #[] #[] #[]
   else
     pure none
 
@@ -326,8 +327,11 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
     let sf' := sLCtx.mkLambda (sVars'.map (.fvar ·.1)) (Lean.mkAppN sBodFun (sBodArgs'.map (·.toExpr)))
     let tfType := tLCtx.mkForall (tVars.map (.fvar ·.1)) tBodT
     let sfType := sLCtx.mkForall (sVars.map (.fvar ·.1)) sBodT
-    let ret ← mkAppEqProof meth tfType.toPExpr sfType.toPExpr tArgs' sArgs' taEqsas' tf'.toPExpr sf'.toPExpr
-    pure (ret, (Lean.mkAppN tf (tArgs[:idx].toArray.map (·.toExpr))).toPExpr, (Lean.mkAppN sf (sArgs[:idx].toArray.map (·.toExpr))).toPExpr) -- FIXME reduce redexes in last two values (construct partial application directly)
+    let (defEq, p?) ← meth.isDefEqForall tfType.toPExpr sfType.toPExpr tArgs.size fun tfTypeEqsfType? => do
+      let ret ← mkAppEqProof meth tfType.toPExpr sfType.toPExpr tfTypeEqsfType? tArgs' sArgs' taEqsas' tf'.toPExpr sf'.toPExpr
+      pure ret -- FIXME reduce redexes in last two values (construct partial application directly)
+    assert! defEq
+    pure (p?, (Lean.mkAppN tf (tArgs[:idx].toArray.map (·.toExpr))).toPExpr, (Lean.mkAppN sf (sArgs[:idx].toArray.map (·.toExpr))).toPExpr)
 
   let mut taEqsaDatas := #[]
 
@@ -476,11 +480,12 @@ def isDefEqApp''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
 
   let mut tfT ← meth.inferTypePure 236 tf
   let mut sfT ← meth.inferTypePure 237 sf
+  let (defEq, tEqs?) ← meth.isDefEqForall tfT sfT tArgs.size fun tfTEqsfT? =>
+    mkAppEqProof meth tfT sfT tfTEqsfT? tArgs sArgs (taEqsas.map (·.map (·.2.2))) tf sf _ret?
 
-  let tEqs? ← mkAppEqProof meth tfT sfT tArgs sArgs (taEqsas.map (·.map (·.2.2))) tf sf _ret?
-
+  assert! defEq
   -- TODO(perf) restrict data collection to the case of `taEqsa?.isSome || ret?.isSome`
-  return (true, (tEqs?.map fun tEqs => (tEqs, taEqsas)))
+  return (defEq, (tEqs?.map fun tEqs => (tEqs, taEqsas)))
 
 def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
    (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default) (tfEqsf? : Option (Option EExpr) := none) : m (Bool × (Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))) := do
