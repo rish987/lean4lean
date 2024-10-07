@@ -1,4 +1,4 @@
-import Lean4Less.TypeChecker
+import Lean4Less.Methods
 
 namespace Lean4Less
 open Lean
