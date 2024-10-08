@@ -86,8 +86,13 @@ b      : LocalDecl
 vaEqb  : FVarData
 hAB    : EExpr
 
+structure ForallABAppData (EExpr : Type) :=
+b      : LocalDecl
+vaEqb  : FVarData
+
 inductive ForallDataExtra (EExpr : Type) :=
 | AB   : ForallABData EExpr → ForallDataExtra EExpr
+| ABApp: ForallABAppData EExpr → ForallDataExtra EExpr
 | none : ForallDataExtra EExpr
 deriving Inhabited
 
@@ -260,6 +265,108 @@ inductive EExpr where
 | sry      : SorryData → EExpr
 deriving Inhabited
 
+def PExpr.replaceFVar (e fvar val : PExpr) : PExpr := e.toExpr.replaceFVar fvar val |>.toPExpr
+
+def _root_.Lean.LocalDecl.replaceFVar (fvar val : PExpr) (var : LocalDecl) : LocalDecl :=
+  assert! not (var.fvarId == fvar.toExpr.fvarId!)
+  var.replaceFVarId fvar.toExpr.fvarId! val
+
+def _root_.Prod.replaceFVarU (fvar val : PExpr) (Uvar : PExpr × LocalDecl) : PExpr × LocalDecl :=
+  let (U, var) := Uvar
+  (U.replaceFVar fvar val, var.replaceFVar fvar val)
+mutual
+
+def HUVData.replaceFVar (fvar val : PExpr) : HUVData EExpr → HUVData EExpr
+| {a, UaEqVb, extra} => Id.run $ do
+  let extra ← match extra with
+    | .some {b, vaEqb} =>
+      .some {b := b.replaceFVar fvar val, vaEqb := vaEqb.replaceFVar fvar val}
+    | .none => .none
+  {a := a.replaceFVar fvar val, UaEqVb := UaEqVb.replaceFVar fvar val, extra}
+
+def LamData.replaceFVar (fvar val : PExpr) : LamData EExpr → LamData EExpr
+| {u, v, A, U, f, a, g, faEqgx, extra} => Id.run $ do
+  let extra ← match extra with
+  | .ABUV {B, hAB, b, vaEqb} {V} =>
+    .ABUV {B := B.replaceFVar fvar val, hAB := hAB.replaceFVar fvar val, b := b.replaceFVar fvar val, vaEqb := vaEqb.replaceFVar fvar val} {V := (V.replaceFVarU fvar val)}
+  | .UV {V} =>
+    .UV {V := V.replaceFVarU fvar val}
+  | .none =>
+    .none
+  {u, v, A := A.replaceFVar fvar val, U := U.replaceFVarU fvar val, f := f.replaceFVar fvar val, a := a.replaceFVar fvar val, g := g.replaceFVar fvar val, faEqgx := faEqgx.replaceFVar fvar val, extra}
+
+def ForallData.replaceFVar (fvar val : PExpr) : ForallData EExpr → ForallData EExpr
+| {u, v, A, U, V, a, UaEqVx, extra} => Id.run $ do
+  Id.run $ do
+    let extra := match extra with
+    | .AB {B, hAB, b, vaEqb} =>
+      .AB {B := B.replaceFVar fvar val, hAB := hAB.replaceFVar fvar val, b := b.replaceFVar fvar val, vaEqb := vaEqb.replaceFVar fvar val}
+    | .ABApp {b, vaEqb} =>
+      .ABApp {b := b.replaceFVar fvar val, vaEqb := vaEqb.replaceFVar fvar val}
+    | .none =>
+      .none
+    {u, v, A := A.replaceFVar fvar val, U := U.replaceFVarU fvar val, V := V.replaceFVarU fvar val, a := a.replaceFVar fvar val, UaEqVx := UaEqVx.replaceFVar fvar val, extra}
+
+def AppData.replaceFVar (fvar val : PExpr) : AppData EExpr → AppData EExpr
+| {u, v, A, U, f, a, extra} => Id.run $ do
+  let extra := match extra with
+  | .ABUV {B, hAB, V, hUV, g, fEqg, b, aEqb} =>
+    .ABUV {B := B.replaceFVar fvar val, hAB := hAB.replaceFVar fvar val, V := V.replaceFVarU fvar val, hUV := hUV.replaceFVar fvar val, g := g.replaceFVar fvar val, fEqg := fEqg.replaceFVar fvar val, b := b.replaceFVar fvar val, aEqb := aEqb.replaceFVar fvar val}
+  | .UV {V, hUV, g, fEqg, b, aEqb} =>
+    .UV {V := V.replaceFVarU fvar val, hUV := hUV.replaceFVar fvar val, g := g.replaceFVar fvar val, fEqg := fEqg.replaceFVar fvar val, b := b.replaceFVar fvar val, aEqb := aEqb.replaceFVar fvar val}
+  | .UVFun {V, hUV, g, fEqg} =>
+    .UVFun {V := V.replaceFVarU fvar val, hUV := hUV.replaceFVar fvar val, g := g.replaceFVar fvar val, fEqg := fEqg.replaceFVar fvar val}
+  | .AB {B, hAB, g, fEqg, b, aEqb} =>
+    .AB {B := B.replaceFVar fvar val, hAB := hAB.replaceFVar fvar val, g := g.replaceFVar fvar val, fEqg := fEqg.replaceFVar fvar val, b := b.replaceFVar fvar val, aEqb := aEqb.replaceFVar fvar val}
+  | .none {g, fEqg, b, aEqb} =>
+    .none {g := g.replaceFVar fvar val, fEqg := fEqg.replaceFVar fvar val, b := b.replaceFVar fvar val, aEqb := aEqb.replaceFVar fvar val}
+  | .Fun {g, fEqg} =>
+    .Fun {g := g.replaceFVar fvar val, fEqg := fEqg.replaceFVar fvar val}
+  | .Arg {b, aEqb} =>
+    .Arg {b := b.replaceFVar fvar val, aEqb := aEqb.replaceFVar fvar val}
+  {u, v, A := A.replaceFVar fvar val, U := U.replaceFVarU fvar val, f := f.replaceFVar fvar val, a := a.replaceFVar fvar val, extra}
+
+def TransData.replaceFVar (fvar val : PExpr) : TransData EExpr → TransData EExpr
+| {u, A, B, C, a, b, c, aEqb, bEqc} =>
+  {u, A := A.replaceFVar fvar val, B := B.replaceFVar fvar val, C := C.replaceFVar fvar val, a := a.replaceFVar fvar val, b := b.replaceFVar fvar val, c := c.replaceFVar fvar val, aEqb := aEqb.replaceFVar fvar val, bEqc := bEqc.replaceFVar fvar val}
+
+def SymmData.replaceFVar (fvar val : PExpr) : SymmData EExpr → SymmData EExpr
+| {u, A, B, a, b, aEqb} =>
+  {u, A := A.replaceFVar fvar val, B := B.replaceFVar fvar val, a := a.replaceFVar fvar val, b := b.replaceFVar fvar val, aEqb := aEqb.replaceFVar fvar val}
+
+def ReflData.replaceFVar (fvar val : PExpr) : ReflData → ReflData
+| {u, A, a} =>
+  {u, A := A.replaceFVar fvar val, a := a.replaceFVar fvar val}
+
+def PIData.replaceFVar (fvar val : PExpr) : PIData EExpr → PIData EExpr
+| {P, p, q, extra} => Id.run $ do
+  let extra := match extra with
+  | .none =>
+    .none
+  | .HEq {Q, hPQ} =>
+    .HEq {Q := Q.replaceFVar fvar val, hPQ := hPQ.replaceFVar fvar val}
+  {P := P.replaceFVar fvar val, p := p.replaceFVar fvar val, q := q.replaceFVar fvar val, extra}
+
+def FVarData.replaceFVar (fvar val : PExpr) : FVarData → FVarData
+| {aEqb, bEqa} => {aEqb := aEqb.replaceFVar fvar val, bEqa := bEqa.replaceFVar fvar val}
+
+def SorryData.replaceFVar (fvar val : PExpr) : SorryData → SorryData
+| {u, A, a, B, b} => {u, A := A.replaceFVar fvar val, a := a.replaceFVar fvar val, B := B.replaceFVar fvar val, b := b.replaceFVar fvar val}
+
+def EExpr.replaceFVar (fvar val : PExpr) : EExpr → EExpr
+| .other e    => .other $ e.replaceFVar fvar val
+| .lam d      => .lam $ d.replaceFVar fvar val
+| .forallE d  => .forallE $ d.replaceFVar fvar val
+| .app d      => .app $ d.replaceFVar fvar val
+| .trans d    => .trans $ d.replaceFVar fvar val
+| .symm d     => .symm $ d.replaceFVar fvar val
+| .refl d     => .refl $ d.replaceFVar fvar val
+| .prfIrrel d => .prfIrrel $ d.replaceFVar fvar val
+| .fvar d     => .fvar $ d.replaceFVar fvar val
+| .sry d      => .sry $ d.replaceFVar fvar val
+
+end
+
 -- def EExpr.reverse : EExpr → EExpr
 -- | other   (e : Expr) => sorry
 -- | lam     (d : LamData EExpr) => sorry
@@ -307,6 +414,7 @@ def LamData.toExpr : LamData EExpr → Expr
 def ForallDataExtra.lemmaName (dep : Bool) (d : ForallDataExtra EExpr) : Name :=
 let name := match d with
 | .AB .. => `L4L.forallHEqAB
+| .ABApp .. => `L4L.forallHEq
 | .none => `L4L.forallHEq
 if dep then name.toString ++ "'" |>.toName else name
 
@@ -316,16 +424,22 @@ def ForallData.toExpr : ForallData EExpr → Expr
     let hUV dep :=
       if dep then match extra with
         | .AB {b, vaEqb, ..} => mkLambda #[a, b, vaEqb.aEqb] UaEqVx.toExpr
+        | .ABApp {b, vaEqb} =>
+          let fvars := #[b.toExpr, vaEqb.toExpr]
+          let vals := #[a.toExpr, Lean.mkAppN (.const `HEq.refl [u]) #[A, a.toExpr]]
+          -- TODO optimize resultant term -- will need to call replaceFVars directly on UaEqVx, call a simplify routine and prove termination
+          mkLambda #[a] (UaEqVx.toExpr.replaceFVars fvars vals)
         | .none => mkLambda #[a] UaEqVx.toExpr
       else
         UaEqVx.toExpr
 
+    let (U, V, dep) := getMaybeDepLemmaApp2 U V
     let (args, dep) := match extra with
     | .AB {B, hAB, ..} =>
-        let (U, V, dep) := getMaybeDepLemmaApp2 U V
         (#[A, B, U, V, hAB.toExpr, hUV dep], dep)
+    | .ABApp _ =>
+        (#[A, U, V, hUV dep], dep)
     | .none =>
-        let (U, V, dep) := getMaybeDepLemmaApp2 U V
         (#[A, U, V, hUV dep], dep)
 
     let n := extra.lemmaName dep
@@ -407,106 +521,6 @@ def EExpr.toExpr : EExpr → Expr
 
 end
 
-def PExpr.replaceFVar (e fvar val : PExpr) : PExpr := e.toExpr.replaceFVar fvar val |>.toPExpr
-
-def _root_.Lean.LocalDecl.replaceFVar (fvar val : PExpr) (var : LocalDecl) : LocalDecl :=
-  assert! not (var.fvarId == fvar.toExpr.fvarId!)
-  var.replaceFVarId fvar.toExpr.fvarId! val
-
-def _root_.Prod.replaceFVarU (fvar val : PExpr) (Uvar : PExpr × LocalDecl) : PExpr × LocalDecl :=
-  let (U, var) := Uvar
-  (U.replaceFVar fvar val, var.replaceFVar fvar val)
-mutual
-
-def HUVData.replaceFVar (fvar val : PExpr) : HUVData EExpr → HUVData EExpr
-| {a, UaEqVb, extra} => Id.run $ do
-  let extra ← match extra with
-    | .some {b, vaEqb} =>
-      .some {b := b.replaceFVar fvar val, vaEqb := vaEqb.replaceFVar fvar val}
-    | .none => .none
-  {a := a.replaceFVar fvar val, UaEqVb := UaEqVb.replaceFVar fvar val, extra}
-
-def LamData.replaceFVar (fvar val : PExpr) : LamData EExpr → LamData EExpr
-| {u, v, A, U, f, a, g, faEqgx, extra} => Id.run $ do
-  let extra ← match extra with
-  | .ABUV {B, hAB, b, vaEqb} {V} =>
-    .ABUV {B := B.replaceFVar fvar val, hAB := hAB.replaceFVar fvar val, b := b.replaceFVar fvar val, vaEqb := vaEqb.replaceFVar fvar val} {V := (V.replaceFVarU fvar val)}
-  | .UV {V} =>
-    .UV {V := V.replaceFVarU fvar val}
-  | .none =>
-    .none
-  {u, v, A := A.replaceFVar fvar val, U := U.replaceFVarU fvar val, f := f.replaceFVar fvar val, a := a.replaceFVar fvar val, g := g.replaceFVar fvar val, faEqgx := faEqgx.replaceFVar fvar val, extra}
-
-def ForallData.replaceFVar (fvar val : PExpr) : ForallData EExpr → ForallData EExpr
-| {u, v, A, U, V, a, UaEqVx, extra} => Id.run $ do
-  Id.run $ do
-    let extra := match extra with
-    | .AB {B, hAB, b, vaEqb} =>
-      .AB {B := B.replaceFVar fvar val, hAB := hAB.replaceFVar fvar val, b := b.replaceFVar fvar val, vaEqb := vaEqb.replaceFVar fvar val}
-    | .none =>
-      .none
-    {u, v, A := A.replaceFVar fvar val, U := U.replaceFVarU fvar val, V := V.replaceFVarU fvar val, a := a.replaceFVar fvar val, UaEqVx := UaEqVx.replaceFVar fvar val, extra}
-
-def AppData.replaceFVar (fvar val : PExpr) : AppData EExpr → AppData EExpr
-| {u, v, A, U, f, a, extra} => Id.run $ do
-  let extra := match extra with
-  | .ABUV {B, hAB, V, hUV, g, fEqg, b, aEqb} =>
-    .ABUV {B := B.replaceFVar fvar val, hAB := hAB.replaceFVar fvar val, V := V.replaceFVarU fvar val, hUV := hUV.replaceFVar fvar val, g := g.replaceFVar fvar val, fEqg := fEqg.replaceFVar fvar val, b := b.replaceFVar fvar val, aEqb := aEqb.replaceFVar fvar val}
-  | .UV {V, hUV, g, fEqg, b, aEqb} =>
-    .UV {V := V.replaceFVarU fvar val, hUV := hUV.replaceFVar fvar val, g := g.replaceFVar fvar val, fEqg := fEqg.replaceFVar fvar val, b := b.replaceFVar fvar val, aEqb := aEqb.replaceFVar fvar val}
-  | .UVFun {V, hUV, g, fEqg} =>
-    .UVFun {V := V.replaceFVarU fvar val, hUV := hUV.replaceFVar fvar val, g := g.replaceFVar fvar val, fEqg := fEqg.replaceFVar fvar val}
-  | .AB {B, hAB, g, fEqg, b, aEqb} =>
-    .AB {B := B.replaceFVar fvar val, hAB := hAB.replaceFVar fvar val, g := g.replaceFVar fvar val, fEqg := fEqg.replaceFVar fvar val, b := b.replaceFVar fvar val, aEqb := aEqb.replaceFVar fvar val}
-  | .none {g, fEqg, b, aEqb} =>
-    .none {g := g.replaceFVar fvar val, fEqg := fEqg.replaceFVar fvar val, b := b.replaceFVar fvar val, aEqb := aEqb.replaceFVar fvar val}
-  | .Fun {g, fEqg} =>
-    .Fun {g := g.replaceFVar fvar val, fEqg := fEqg.replaceFVar fvar val}
-  | .Arg {b, aEqb} =>
-    .Arg {b := b.replaceFVar fvar val, aEqb := aEqb.replaceFVar fvar val}
-  {u, v, A := A.replaceFVar fvar val, U := U.replaceFVarU fvar val, f := f.replaceFVar fvar val, a := a.replaceFVar fvar val, extra}
-
-def TransData.replaceFVar (fvar val : PExpr) : TransData EExpr → TransData EExpr
-| {u, A, B, C, a, b, c, aEqb, bEqc} =>
-  {u, A := A.replaceFVar fvar val, B := B.replaceFVar fvar val, C := C.replaceFVar fvar val, a := a.replaceFVar fvar val, b := b.replaceFVar fvar val, c := c.replaceFVar fvar val, aEqb := aEqb.replaceFVar fvar val, bEqc := bEqc.replaceFVar fvar val}
-
-def SymmData.replaceFVar (fvar val : PExpr) : SymmData EExpr → SymmData EExpr
-| {u, A, B, a, b, aEqb} =>
-  {u, A := A.replaceFVar fvar val, B := B.replaceFVar fvar val, a := a.replaceFVar fvar val, b := b.replaceFVar fvar val, aEqb := aEqb.replaceFVar fvar val}
-
-def ReflData.replaceFVar (fvar val : PExpr) : ReflData → ReflData
-| {u, A, a} =>
-  {u, A := A.replaceFVar fvar val, a := a.replaceFVar fvar val}
-
-def PIData.replaceFVar (fvar val : PExpr) : PIData EExpr → PIData EExpr
-| {P, p, q, extra} => Id.run $ do
-  let extra := match extra with
-  | .none =>
-    .none
-  | .HEq {Q, hPQ} =>
-    .HEq {Q := Q.replaceFVar fvar val, hPQ := hPQ.replaceFVar fvar val}
-  {P := P.replaceFVar fvar val, p := p.replaceFVar fvar val, q := q.replaceFVar fvar val, extra}
-
-def FVarData.replaceFVar (fvar val : PExpr) : FVarData → FVarData
-| {aEqb, bEqa} => {aEqb := aEqb.replaceFVar fvar val, bEqa := bEqa.replaceFVar fvar val}
-
-def SorryData.replaceFVar (fvar val : PExpr) : SorryData → SorryData
-| {u, A, a, B, b} => {u, A := A.replaceFVar fvar val, a := a.replaceFVar fvar val, B := B.replaceFVar fvar val, b := b.replaceFVar fvar val}
-
-def EExpr.replaceFVar (fvar val : PExpr) : EExpr → EExpr
-| .other e    => .other $ e.replaceFVar fvar val
-| .lam d      => .lam $ d.replaceFVar fvar val
-| .forallE d  => .forallE $ d.replaceFVar fvar val
-| .app d      => .app $ d.replaceFVar fvar val
-| .trans d    => .trans $ d.replaceFVar fvar val
-| .symm d     => .symm $ d.replaceFVar fvar val
-| .refl d     => .refl $ d.replaceFVar fvar val
-| .prfIrrel d => .prfIrrel $ d.replaceFVar fvar val
-| .fvar d     => .fvar $ d.replaceFVar fvar val
-| .sry d      => .sry $ d.replaceFVar fvar val
-
-end
-
 mutual
 
 abbrev revaEqb aEqb (a b A B : PExpr) u := EExpr.reverse a b A B u aEqb
@@ -540,6 +554,8 @@ def ForallData.reverse : ForallData EExpr → EExpr
     let (extra, newA, newa) := match extra with
     | .AB {b, B, hAB, vaEqb} => 
       (.AB {b := a, B := A, hAB := hAB.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ, vaEqb := vaEqb.reverse}, B, b)
+    | .ABApp {b, vaEqb} => 
+      (.ABApp {b := a, vaEqb := vaEqb.reverse}, A, b)
     | .none =>
       (.none, A, a)
 

@@ -327,7 +327,7 @@ def isDefEq (n : Nat) (t s : PExpr) : RecB := do
   pure r
 
 def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : PExpr)
-(f : PExpr → PExpr → Option EExpr → Array LocalDecl → Array (Option (LocalDecl × LocalDecl × LocalDecl × EExpr)) → RecM (Option T))
+(f : PExpr → PExpr → Option EExpr → Array LocalDecl → Array (Option (LocalDecl × LocalDecl × LocalDecl × (Option EExpr))) → RecM (Option T)) (explicit := false)
 : RecM (Bool × (Option T)) := do
   let rec loop idx (tvars svars : Array LocalDecl) ds : RecM (Bool × (Option T)) := do
     let ({name := tName, dom := tDom, info := tBi},
@@ -356,12 +356,12 @@ def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : P
           let tBody := tBody.instantiateRev (tvars.map (·.toExpr.toPExpr))
           let sBody := sBody.instantiateRev (svars.map (·.toExpr.toPExpr))
 
-          let (defEq, ptbodEqsbod?) ← isDefEq 6 tBody sBody
+          let (defEq, ptbodEqsbod?) ← isDefEq 6 tBody sBody -- TODO if explicit use refl proof
           if !defEq then return (false, none)
           let ret ← f tBody sBody ptbodEqsbod? tvars.reverse ds.reverse
           pure (true, ret) -- FIXME can iterate backwards instead of reversing lists?
 
-      if let some p := p? then
+      if explicit || p?.isSome then
         let ids := ⟨← mkId 2⟩
         withLCtx ((← getLCtx).mkLocalDecl ids sName sDom sBi) do
           let some svar := (← getLCtx).find? ids | unreachable!
@@ -374,7 +374,7 @@ def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : P
               let some vtEqs := (← getLCtx).find? idtEqs | unreachable!
               let some vsEqt := (← getLCtx).find? idsEqt | unreachable!
               withEqFVar idt ids (vtEqs, vsEqt) do
-                cont (.some (svar, vtEqs, vsEqt, p)) svar 
+                cont (.some (svar, vtEqs, vsEqt, p?)) svar 
       else
         cont none tvar
 
@@ -431,7 +431,7 @@ def meths : ExtMethods RecM := {
     withPure := withPure
   }
 
-def isDefEqForall' (t s : PExpr) (numBinds : Nat) (f : Option EExpr → RecM (Option T)) : RecM (Bool × Option T) := do
+def isDefEqForall' (t s : PExpr) (numBinds : Nat) (f : Option EExpr → RecM (Option T)) (explicit := false) : RecM (Bool × Option T) := do
   -- assert! numBinds > 0
   let rec getData t s n := do
     match n, t, s with
@@ -441,7 +441,7 @@ def isDefEqForall' (t s : PExpr) (numBinds : Nat) (f : Option EExpr → RecM (Op
     | _, tBody, sBody =>
       pure (#[], tBody.toPExpr, sBody.toPExpr)
   let (datas, tBody, sBody) ← getData t.toExpr s.toExpr numBinds
-  isDefEqBinder datas tBody sBody fun Ua Vx UaEqVx? as ds => do
+  isDefEqBinder datas tBody sBody (explicit := explicit) fun Ua Vx UaEqVx? as ds => do
     let mut UaEqVx? := UaEqVx?
     let mut Ua := Ua
     let mut Vx := Vx
@@ -464,10 +464,15 @@ def isDefEqForall' (t s : PExpr) (numBinds : Nat) (f : Option EExpr → RecM (Op
         let UaEqVx := UaEqVx?.getD $ ← mkHRefl UaTypeLvl UaType Ua -- FIXME use special forall lemma variant here
         let (U, V) := ((Ua, a), (Vx, x))
 
-        let extra ← if let .some (b, aEqb, bEqa, hAB) := d? then
+        let extra ← if let .some (b, aEqb, bEqa, hAB?) := d? then
           let B := b.type.toPExpr
-          pure $ .AB {B, b, vaEqb := {aEqb, bEqa}, hAB}
+          if let some hAB := hAB? then
+            pure $ .AB {B, b, vaEqb := {aEqb, bEqa}, hAB}
+          else -- (if explicit == false)
+            pure $ .ABApp {b, vaEqb := {aEqb, bEqa}}
         else
+          -- sanity check
+          assert! explicit == false
           pure .none
 
         UaEqVx? := .some $ .forallE {u, v, A, a, U, V, UaEqVx, extra}
@@ -480,11 +485,34 @@ def isDefEqForall' (t s : PExpr) (numBinds : Nat) (f : Option EExpr → RecM (Op
 
     f UaEqVx?
 
+def lamCount : Expr → Nat
+  | .lam _ _ b _ =>
+    lamCount b + 1
+  | _ => 0
+
+def alignForAll (numBinds : Nat) (ltl ltr : Expr) : RecM (Expr × Expr) := do
+  match numBinds with
+  | numBinds' + 1 => do
+    match (← whnfPure 11 ltl.toPExpr).toExpr, (← whnfPure 12 ltr.toPExpr).toExpr with
+    | .forallE nl tdl tbl bil, .forallE nr tdr tbr bir => do
+      let idl := ⟨← mkId 6⟩
+      let idr := ⟨← mkId 7⟩
+      withLCtx ((← getLCtx).mkLocalDecl idl nl tdl bil) do
+        withLCtx ((← getLCtx).mkLocalDecl idr nr tdr bir) do
+          let ntbl := tbl.instantiate1 (.fvar idl)
+          let ntbr := tbr.instantiate1 (.fvar idr)
+          let (atbl, atbr) ← alignForAll numBinds' ntbl ntbr
+          let nltl := (← getLCtx).mkForall #[(.fvar idl)] atbl
+          let nltr := (← getLCtx).mkForall #[(.fvar idr)] atbr
+          pure (nltl, nltr)
+    | _, _ => unreachable!
+  | _ => pure (ltl, ltr)
 
 def methsA : ExtMethodsA RecM := {
     meths with
     opt := true
-    isDefEqForall := isDefEqForall'
+    isDefEqForall := isDefEqForall' (explicit := true)
+    alignForAll := alignForAll 
   }
 
 def isDefEqForallOpt' (t s : PExpr) : RecB := do
@@ -518,24 +546,6 @@ def isDefEqForall (t s : PExpr) (numBinds := 0) : RecB := do
     isDefEqForallOpt' t s
   else
     isDefEqForall' t s numBinds fun tEqs? => pure tEqs?
-
-def lamCount (e ltl ltr : Expr) : RecM (Nat × Expr × Expr) := do
-  match e with
-  | .lam _ _ b _ => do
-    match (← whnfPure 11 ltl.toPExpr).toExpr, (← whnfPure 12 ltr.toPExpr).toExpr with
-    | .forallE nl tdl tbl bil, .forallE nr tdr tbr bir => do
-      let idl := ⟨← mkId 6⟩
-      let idr := ⟨← mkId 7⟩
-      withLCtx ((← getLCtx).mkLocalDecl idl nl tdl bil) do
-        withLCtx ((← getLCtx).mkLocalDecl idr nr tdr bir) do
-          let ntbl := tbl.instantiate1 (.fvar idl)
-          let ntbr := tbr.instantiate1 (.fvar idr)
-          let (c, atbl, atbr) ← lamCount b ntbl ntbr
-          let nltl := (← getLCtx).mkForall #[(.fvar idl)] atbl
-          let nltr := (← getLCtx).mkForall #[(.fvar idr)] atbr
-          pure $ (c + 1, nltl, nltr)
-    | _, _ => unreachable!
-  | _ => pure (0, ltl, ltr)
 
 def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((Bool × Option EExpr) × PExpr) := do
   let mkCast'' n tl tr p e (prfVars prfVals : Array Expr) (lvl : Level) := do
@@ -582,7 +592,8 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
     if let some p := p? then
       pure $ (true, .some p)
     else
-      let (nLams, tl', tr') ← lamCount e tl tr
+      let nLams := lamCount e
+      let (tl', tr') ← alignForAll nLams tl tr
       let tl' := tl'.toPExpr
       let tr' := tr'.toPExpr
       if nLams > 0 then
@@ -1107,7 +1118,7 @@ def isDefEqLambda (t s : PExpr) : RecB := do
     | tBody, sBody =>
       pure (#[], tBody.toPExpr, sBody.toPExpr)
   let (datas, tBody, sBody) ← getData t.toExpr s.toExpr
-  isDefEqBinder datas tBody sBody fun fa gx faEqgb? as ds => do
+  isDefEqBinder datas tBody sBody (explicit := false) fun fa gx faEqgb? as ds => do
     let mut faEqgx? := faEqgb?
     let mut fa := fa
     let mut gx := gx
@@ -1124,7 +1135,8 @@ def isDefEqLambda (t s : PExpr) : RecB := do
         let Vx ← inferTypePure 41 gx
         let faEqgx ← faEqgx?.getDM $ mkHRefl UaLvl Ua fa
         let (U, V) := ((Ua, a), (Vx, x))
-        let extra ← if let some (b, aEqb, bEqa, hAB) := d? then
+        let extra ← if let some (b, aEqb, bEqa, hAB?) := d? then
+          let hAB := hAB?.get!
           let B := b.type.toPExpr
           pure $ .ABUV {B, b, hAB, vaEqb := {aEqb, bEqa}} {V}
         else
