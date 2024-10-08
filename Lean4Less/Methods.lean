@@ -34,9 +34,9 @@ match fuel with
     --   | .quickIsDefEq t s b => fuel'
     --   | _ => fuel'
 
-    if s.numCalls > 10000 /- && not s.printedDbg -/ then -- TODO static variables?
-      if s.numCalls % 100 == 0 then
-        dbg_trace s!"calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}"
+    -- if s.numCalls > 10000 /- && not s.printedDbg -/ then -- TODO static variables?
+    --   if s.numCalls % 100 == 0 then
+    --     dbg_trace s!"calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}"
     let meth := Methods.withFuel fuel'
 
     -- if s.numCalls == 176200 /- && not s.printedDbg -/ then -- TODO static variables?
@@ -83,7 +83,11 @@ match fuel with
       --     pure t
       --   | _ => unreachable!
       -- dbg_trace s!"{s.numCalls}: {stack[9]!.2}, {stack.map (·.1)}"
-    withCallData idx d $ m (Methods.withFuel fuel')
+    try
+      withCallData idx d $ m (Methods.withFuel fuel')
+    catch e =>
+      dbg_trace s!"calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}"
+      throw e
 
 def Methods.withFuel (n : Nat) : Methods := 
   { isDefEqCore := fun i t s => do

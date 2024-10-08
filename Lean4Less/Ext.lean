@@ -84,5 +84,5 @@ variable [Monad m] [MonadLCtx m] [MonadExcept KernelException m] [MonadNameGener
 @[inline] def withLCtx [MonadWithReaderOf LocalContext m] (lctx : LocalContext) (x : m α) : m α :=
   withReader (fun _ => lctx) x
 
-@[inline] def withEqFVar [MonadWithReaderOf (Std.HashMap (FVarId × FVarId) (FVarId × FVarId)) m] (idt ids : FVarId) (eq : (FVarId × FVarId)) (x : m α) : m α :=
+@[inline] def withEqFVar [MonadWithReaderOf (Std.HashMap (FVarId × FVarId) (LocalDecl × LocalDecl)) m] (idt ids : FVarId) (eq : (LocalDecl × LocalDecl)) (x : m α) : m α :=
   withReader (fun l => l.insert (idt, ids) eq) x
