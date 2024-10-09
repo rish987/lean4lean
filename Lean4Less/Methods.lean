@@ -34,9 +34,9 @@ match fuel with
     --   | .quickIsDefEq t s b => fuel'
     --   | _ => fuel'
 
-    -- if s.numCalls > 10000 /- && not s.printedDbg -/ then -- TODO static variables?
-    --   if s.numCalls % 100 == 0 then
-    --     dbg_trace s!"calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}"
+    if s.numCalls > 26900 /- && not s.printedDbg -/ then -- TODO static variables?
+      if s.numCalls % 1 == 0 then
+        dbg_trace s!"calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}"
     let meth := Methods.withFuel fuel'
 
     -- if s.numCalls == 176200 /- && not s.printedDbg -/ then -- TODO static variables?

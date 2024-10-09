@@ -27,6 +27,7 @@ structure TypeChecker.State where
   inferTypeC : InferCache := {}
   whnfCoreCache : Std.HashMap PExpr (PExpr × Option EExpr) := {}
   whnfCache : Std.HashMap (PExpr × Bool) (PExpr × Option EExpr) := {}
+  isDefEqCache : Std.HashMap (PExpr × PExpr) EExpr := {}
   fvarRegistry : Std.HashMap Name Nat := {} -- for debugging purposes
   eqvManager : EquivManager := {}
   numCalls : Nat := 0
@@ -320,8 +321,11 @@ def quickIsDefEq (n : Nat) (t s : PExpr) (useHash : Bool := false) : RecLB := fu
 def isDefEq (n : Nat) (t s : PExpr) : RecB := do
   let r ← isDefEqCore n t s
   let (result, p?) := r
-  if result && p?.isNone then
-    modify fun st => { st with eqvManager := st.eqvManager.addEquiv t s }
+  if result then
+    if let some p := p? then
+      modify fun st => { st with isDefEqCache := st.isDefEqCache.insert (t, s) p }
+    else
+      modify fun st => { st with eqvManager := st.eqvManager.addEquiv t s }
   -- else if result && p?.isSome then
   --   dbg_trace s!"DBG[2]: TypeChecker.lean:242 {t} {s}"
   pure r
@@ -1167,9 +1171,9 @@ Otherwise, defers to the calling function.
 -/
 def quickIsDefEq' (t s : PExpr) (useHash := false) : RecLB := do
   -- optimization for terms that are already α-equivalent
-  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 (eqvManager := m)) => -- FIXME why do I have to list these?
+  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 (eqvManager := m)) => -- TODO why do I have to list these?
     let (b, m) := m.isEquiv useHash t s
-    (b, .mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 (eqvManager := m))
+    (b, .mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 (eqvManager := m))
   then return (.true, none)
   let res : Option (Bool × PExpr) ← match t.toExpr, s.toExpr with
   | .lam .., .lam .. => pure $ some $ ← isDefEqLambda t s
@@ -1597,8 +1601,13 @@ def isDefEqUnitLike (t s : PExpr) : RecB := do
 
 @[inherit_doc isDefEqCore]
 def isDefEqCore' (t s : PExpr) : RecB := do
-  if ← isDefEqPure 74 t s 15 then -- NOTE: this is a tradeoff between runtime and output size
-    return (true, none)
+  if let some p := (← get).isDefEqCache.get? (t, s) then
+    return (true, .some p)
+  -- if let some p := (← get).isDefEqCache.get? (s, t) then
+  --   return (true, .some p.reverse sorry sorry sorry) -- <<< TODO
+
+  -- if ← isDefEqPure 74 t s 15 then -- NOTE: this is a tradeoff between runtime and output size
+  --   return (true, none)
   let (r, pteqs?) ← quickIsDefEq 88 t s (useHash := true)
   if r != .undef then return (r == .true, pteqs?)
 
