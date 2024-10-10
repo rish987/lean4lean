@@ -33,11 +33,17 @@ match fuel with
     --   match d with
     --   | .quickIsDefEq t s b => fuel'
     --   | _ => fuel'
+    --   
 
-    if s.numCalls > 26900 /- && not s.printedDbg -/ then -- TODO static variables?
-      if s.numCalls % 1 == 0 then
-        dbg_trace s!"calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}"
+    let mut printedTrace := false
+    -- if s.numCalls >= 57836 /- && not s.printedDbg -/ then -- TODO static variables?
+    --   if s.numCalls % 1 == 0 then
+    --     printedTrace := true
+    --     dbg_trace s!"calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}"
     let meth := Methods.withFuel fuel'
+    -- if s.isDefEqCache.size > 300 then
+    --   modify fun s => {s with isDefEqCache := Std.HashMap.empty (capacity := 1000)} 
+
 
     -- if s.numCalls == 176200 /- && not s.printedDbg -/ then -- TODO static variables?
     --   let stack := (← readThe Context).callStack
@@ -84,7 +90,11 @@ match fuel with
       --   | _ => unreachable!
       -- dbg_trace s!"{s.numCalls}: {stack[9]!.2}, {stack.map (·.1)}"
     try
-      withCallData idx d $ m (Methods.withFuel fuel')
+      let ret ← withCallId s.numCalls (.none) do
+        withCallData idx d $ m (Methods.withFuel fuel')
+      if printedTrace then
+        dbg_trace s!"end of    {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}"
+      pure ret
     catch e =>
       dbg_trace s!"calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}"
       throw e

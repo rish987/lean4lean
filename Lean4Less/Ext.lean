@@ -75,6 +75,7 @@ structure ExtMethods (m : Type → Type u) where
   appPrfIrrelHEq : PExpr → PExpr → EExpr → PExpr → PExpr → m EExpr
   appPrfIrrel : PExpr → PExpr →  PExpr → m EExpr
   appHEqTrans? : PExpr → PExpr → PExpr → Option EExpr → Option EExpr → m (Option EExpr)
+  trace : String → m Unit
 
 namespace TypeChecker
 

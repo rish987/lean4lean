@@ -25,6 +25,7 @@ def mkAppEqProof? (aVars bVars : Array LocalDecl) (us vs : Array Level) (Uas Vbs
   let mut f := f
   let mut g := g
   for idx in [:as.size] do
+    meth.trace s!"DBG[27]: App.lean:27 {idx}, {as.size}"
     let a := as[idx]!
     let b := bs[idx]!
     let aEqb? := asEqbs?[idx]!
@@ -44,40 +45,52 @@ def mkAppEqProof? (aVars bVars : Array LocalDecl) (us vs : Array Level) (Uas Vbs
         let UaEqVb? := UasEqVbs?[idx]!
 
         let (U, V) := ((Ua, aVar), (Vb, bVar))
+        meth.trace s!"DBG[30]: App.lean:47 (after let (U, V) := ((Ua, aVar), (Vb, bVar)))"
 
         let extra ← if let .some (vaEqb, vbEqa, hAB) := d? then
           let B := bVar.type.toPExpr
 
           let some fEqg := fEqg? | unreachable!
           let some aEqb := aEqb? | unreachable!
+          meth.trace s!"DBG[33]: App.lean:54 (after let some aEqb := aEqb? | unreachable!)"
 
           -- Ua and Vb may still contain references to a and b despite being
           -- defeq (if dep == true), so we need to consider this case, and
           -- cannot immediately fall back to .AB (which has no dependent variant)
-          let dep := Ua.toExpr.containsFVar aVar.toExpr.fvarId! || Vb.toExpr.containsFVar bVar.toExpr.fvarId!
+          let dep := Ua.containsFVar' aVar || Vb.containsFVar' bVar
+          meth.trace s!"DBG[43]: App.lean:60 (after let dep := Ua.toExpr.containsFVar aVar.t…)"
 
           if UaEqVb?.isSome || dep then
+            meth.trace s!"DBG[28]: App.lean:60 (after if UaEqVb?.isSome || dep then)"
             let UaEqVb ← UaEqVb?.getDM $ meth.mkHRefl v.succ (Expr.sort v).toPExpr Ua
+            meth.trace s!"DBG[29]: App.lean:62 (after let UaEqVb ← UaEqVb?.getDM  meth.mkHRe…)"
             let hUV := {a := aVar, UaEqVb, extra := .some {b := bVar, vaEqb := {aEqb := vaEqb, bEqa := vbEqa}}}
             pure $ .ABUV {B, hAB, V, hUV, g, fEqg, b, aEqb}
           else
             assert! not dep
+            meth.trace s!"DBG[44]: App.lean:70 (after assert! not dep)"
             pure $ .AB {B, hAB, g, fEqg, b, aEqb}
         else
+          meth.trace s!"DBG[32]: App.lean:70 (after else)"
           if let .some UaEqVb := UaEqVb? then
+            meth.trace s!"DBG[34]: App.lean:73 (after if let .some UaEqVb := UaEqVb? then)"
             let some fEqg := fEqg? | unreachable!
             let hUV := {a := aVar, UaEqVb, extra := .none}
+            meth.trace s!"DBG[36]: App.lean:76 (after let hUV := a := aVar, UaEqVb, extra := .…)"
             if let some aEqb := aEqb? then
               pure $ .UV {V, hUV, g, fEqg, b, aEqb}
             else
               pure $ .UVFun {V, hUV, g, fEqg}
           else
+            meth.trace s!"DBG[37]: App.lean:82 (after else)"
             if let some fEqg := fEqg? then
+              meth.trace s!"DBG[38]: App.lean:84 (after if let some fEqg := fEqg? then)"
               if let some aEqb := aEqb? then
                 pure $ .none {g, fEqg, b, aEqb}
               else
                 pure $ .Fun {g, fEqg}
             else
+              meth.trace s!"DBG[39]: App.lean:90 (after else)"
               if let some aEqb := aEqb? then
                 pure $ .Arg {b, aEqb}
               else
@@ -86,7 +99,7 @@ def mkAppEqProof? (aVars bVars : Array LocalDecl) (us vs : Array Level) (Uas Vbs
         pure $ .some $ .app {u, v, A, U, f, a, extra}
       else
         pure none
-
+    meth.trace s!"DBG[31]: App.lean:93 (after pure none)"
     f := f.toExpr.app a |>.toPExpr
     g := g.toExpr.app b |>.toPExpr
   pure fEqg?
@@ -99,6 +112,7 @@ deriving Inhabited
 
 def mkAppEqProof (T S : PExpr) (TEqS? : Option EExpr) (as bs : Array PExpr) (asEqbs? : Array (Option EExpr)) (f g : PExpr) (fEqg? : Option EExpr := none) : m (Option EExpr) := do
   let rec loop idx T S aVars bVars Uas Vbs UasEqVbs? ds? us vs : m (Option EExpr) := do
+    meth.trace s!"DBG[24]: App.lean:101 (after let rec loop idx T S aVars bVars Uas Vbs…)"
     let (T', dA, S', dB) ← match (← meth.whnfPure 205 T).toExpr, (← meth.whnfPure 206 S).toExpr with
       | .forallE tName tDom tBody tBi, .forallE sName sDom sBody sBi =>
         pure $ (tBody, ({name := tName, dom := tDom.toPExpr, info := tBi} : BinderData), sBody, ({name := sName, dom := sDom.toPExpr, info := sBi} : BinderData))
@@ -112,24 +126,27 @@ def mkAppEqProof (T S : PExpr) (TEqS? : Option EExpr) (as bs : Array PExpr) (asE
 
     let ({name := aName, dom := A, info := aBi},
       {name := bName, dom := B, info := bBi}) := (dA, dB)
+    meth.trace s!"DBG[13]: App.lean:114 (after name := bName, dom := B, info := bBi) :=…)"
 
     -- sanity check
     let aType ← meth.inferTypePure 207 a
     let bType ← meth.inferTypePure 208 b
+    meth.trace s!"DBG[14]: App.lean:119 (after let bType ← meth.inferTypePure 208 b)"
     let .true ← meth.isDefEqPure 209 A aType | do
       throw $ .other s!"expected: {A}\n inferred: {aType}"
     let .true ← meth.isDefEqPure 210 B bType | do
       -- let app := Lean.mkAppN g.toExpr (bs[:5].toArray.map PExpr.toExpr)
       -- let appType ← meth.whnfPure $ ← meth.inferTypePure app.toPExpr 205
       -- let .forallE _ _domType _ _ := appType.toExpr | unreachable!
-      -- dbg_trace s!""
-      -- dbg_trace s!"app: {appType}"
-      -- dbg_trace s!"b: {bType}"
-      -- dbg_trace s!"dom: {domType}"
-      -- dbg_trace s!"eq: {← isDefEqPure bType domType.toPExpr}"
-      -- dbg_trace s!"app b: {← whnfPure $ ← inferTypePure (app.app b).toPExpr}"
-      -- dbg_trace s!""
+      -- meth.trace s!""
+      -- meth.trace s!"app: {appType}"
+      -- meth.trace s!"b: {bType}"
+      -- meth.trace s!"dom: {domType}"
+      -- meth.trace s!"eq: {← isDefEqPure bType domType.toPExpr}"
+      -- meth.trace s!"app b: {← whnfPure $ ← inferTypePure (app.app b).toPExpr}"
+      -- meth.trace s!""
       throw $ .other s!"expected: {B}\n inferred: {bType}"
+    meth.trace s!"DBG[16]: App.lean:123 (after let .true ← meth.isDefEqPure 210 B bTy…)"
 
     let AEqB? ←
       if A != B then
@@ -144,6 +161,7 @@ def mkAppEqProof (T S : PExpr) (TEqS? : Option EExpr) (as bs : Array PExpr) (asE
             pure none
         else pure none
       else pure none
+    meth.trace s!"DBG[17]: App.lean:149 (after else pure none)"
 
     let sort ← meth.inferTypePure 213 A
     let .sort u := (← meth.ensureSortCorePure sort A).toExpr | throw $ .other "unreachable 5"
@@ -152,11 +170,13 @@ def mkAppEqProof (T S : PExpr) (TEqS? : Option EExpr) (as bs : Array PExpr) (asE
       let some aVar := (← getLCtx).find? ida | unreachable!
 
       let cont d? bVar := do 
+        meth.trace s!"DBG[19]: App.lean:158 (after let cont d? bVar := do)"
         let ds? := ds?.push d?
         let Ua := (T'.instantiate1 aVar.toExpr).toPExpr
         let Vb := (S'.instantiate1 bVar.toExpr).toPExpr
         let sort ← meth.inferTypePure 238 Ua
         let .sort v := (← meth.ensureSortCorePure sort A).toExpr | throw $ .other "unreachable 5"
+        meth.trace s!"DBG[18]: App.lean:163 (after let .sort v := (← meth.ensureSortCoreP…)"
 
         let us := us.push u
         let vs := vs.push v
@@ -166,12 +186,17 @@ def mkAppEqProof (T S : PExpr) (TEqS? : Option EExpr) (as bs : Array PExpr) (asE
         let Uas := Uas.push Ua
         let Vbs := Vbs.push Vb
         let (defEq, UaEqVb?) ← meth.isDefEq 202 Ua Vb
+        meth.trace s!"DBG[23]: App.lean:180 (after mkAppEqProof? meth aVars bVars us vs Uas…)"
         assert! defEq
         let UasEqVbs? := UasEqVbs?.push UaEqVb?
         if _h : idx < as.size - 1 then
+          meth.trace s!"DBG[25]: App.lean:179 (after if _h : idx < as.size - 1 then)"
           loop (idx + 1) T S aVars bVars Uas Vbs UasEqVbs? ds? us vs
         else
-          mkAppEqProof? meth aVars bVars us vs Uas Vbs UasEqVbs? ds? as bs asEqbs? f g fEqg?
+          meth.trace s!"DBG[26]: App.lean:182 (after else)"
+          let ret ← mkAppEqProof? meth aVars bVars us vs Uas Vbs UasEqVbs? ds? as bs asEqbs? f g fEqg?
+          meth.trace s!"DBG[40]: App.lean:195 (after let ret ← mkAppEqProof? meth aVars bVa…)"
+          pure ret
 
       if let some AEqB := AEqB? then 
         let idb := ⟨← meth.mkId 202⟩
@@ -204,12 +229,12 @@ def forallAbs (max : Nat) (tfT sfT : Expr) : m
   let rec loop tfT sfT tDomsVars tDoms sDomsVars sDoms tDomsEqsDoms (absArgs' : Std.HashSet Nat) idx' (origDomVars origDomVarsAbs : Array (FVarId × FVarId)) (origDomVarsRefs : Std.HashMap (FVarId × FVarId) (Std.HashSet (FVarId × FVarId))) (origDomVarsToNewDomVars : Std.HashMap (FVarId × FVarId) (FVarId × FVarId)) := do
 
     let withMaybeAbs tType sType tTypeEqsType? f (tName := `tT) (sName := `sT) (tBi := default) (sBi := default) := do 
-      if tTypeEqsType?.isSome || origDomVarsAbs.any (tType.containsFVar ·.1) || origDomVarsAbs.any (sType.containsFVar ·.2) then
+      if tTypeEqsType?.isSome || origDomVarsAbs.any (tType.containsFVar' ·.1) || origDomVarsAbs.any (sType.containsFVar' ·.2) then
         let mut depVars := #[]
         let mut origDepVars := #[]
         let mut origDepVarsSet : Std.HashSet (FVarId × FVarId) := default
         for (tvar, svar) in origDomVars do
-          if tType.containsFVar tvar || sType.containsFVar svar then
+          if tType.containsFVar' tvar || sType.containsFVar' svar then
             origDepVarsSet := origDepVarsSet.insert (tvar, svar)
             for (tvar', svar') in origDomVarsRefs.get! (tvar, svar) do
               origDepVarsSet := origDepVarsSet.insert (tvar', svar')
@@ -260,7 +285,7 @@ def forallAbs (max : Nat) (tfT sfT : Expr) : m
         | .forallE tName tDom tBod tBi, .forallE sName sDom sBod sBi =>
           let mut refs := default
           for (tvar, svar) in origDomVars do
-            if tDom.containsFVar tvar || sDom.containsFVar svar then
+            if tDom.containsFVar' tvar || sDom.containsFVar' svar then
               refs := refs.insert (tvar, svar)
               for (tvar', svar') in origDomVarsRefs.get! (tvar, svar) do
                 refs := refs.insert (tvar', svar')
@@ -339,10 +364,12 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
       --   let ret ← mkAppEqProof meth tfType.toPExpr sfType.toPExpr tfTypeEqsfType? tArgs' sArgs' taEqsas' tf'.toPExpr sf'.toPExpr
       --   pure ret -- FIXME reduce redexes in last two values (construct partial application directly)
       -- assert! defEq
+      meth.trace s!"DBG[12]: App.lean:341 (after -- assert! defEq)"
 
-      -- dbg_trace s!"DBG[1]: App.lean:338 {tArgs.size}"
+      -- meth.trace s!"DBG[1]: App.lean:338 {tArgs.size}"
       let p? ← mkAppEqProof meth tfType.toPExpr sfType.toPExpr none tArgs' sArgs' taEqsas' tf'.toPExpr sf'.toPExpr
-      -- dbg_trace s!"DBG[2]: App.lean:340 (after let p? ← mkAppEqProof meth tfType.toPE…)"
+      meth.trace s!"DBG[42]: App.lean:368 (after let p? ← mkAppEqProof meth tfType.toPE…)"
+      -- meth.trace s!"DBG[2]: App.lean:340 (after let p? ← mkAppEqProof meth tfType.toPE…)"
       pure p?
     else
       pure none
@@ -362,13 +389,17 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
   let mut tEtaVars : Nat := 0 -- number of vars that can be eliminated from the lambda by eta reduction
   let mut sEtaVars : Nat := 0
   let mut absArgs : Std.HashSet Nat := default
+  meth.trace s!"DBG[1]: App.lean:364 (after let mut absArgs : Std.HashSet Nat := def…)"
   let mut tfT ← meth.inferTypePure 223 tBodFun -- FIXME avoid when possible
   let mut sfT ← meth.inferTypePure 224 sBodFun
+  meth.trace s!"DBG[2]: App.lean:367 (after let mut sfT ← meth.inferTypePure 224 s…)"
   let mut tBodT := tfT
   let mut sBodT := sfT
   let mut taEqsas' := #[]
+  meth.trace s!"DBG[3]: App.lean:371 (after let mut taEqsas := #[])"
 
   for idx in [:tArgs.size] do
+    meth.trace s!"DBG[4]: App.lean:374 (after for idx in [:tArgs.size] do)"
     let (tBodDom, tDomName, sBodDom, sDomName) ← do
       let ok? ←
         if idx == 0 && tfEqsf?.isSome then
@@ -378,7 +409,7 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
           let sBodT' ← meth.whnfPure 226 sBodT
           match tBodT'.toExpr, sBodT'.toExpr with
             | .forallE tDomName tDom _ _, .forallE sDomName sDom _ _ =>
-              if tArgsVars.any fun id => tDom.containsFVar id || sArgsVars.any fun id => sDom.containsFVar id then
+              if tArgsVars.any fun id => tDom.containsFVar' id || sArgsVars.any fun id => sDom.containsFVar' id then
                 absArgs := absArgs.insert idx
               pure $ .some (tDom, tDomName, sDom, sDomName)
             | _, _ => pure none
@@ -427,6 +458,7 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
           | _, _ => unreachable!
     let ta := tArgs[idx]!
     let sa := sArgs[idx]!
+    meth.trace s!"DBG[5]: App.lean:433 (after let sa := sArgs[idx]!)"
 
     let mut taEqsa? := none
     if let some _p? := targsEqsargs?.get? idx then
@@ -436,6 +468,7 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
       taEqsa? := _p?
     let taEqsaData? := taEqsa?.map (ta, sa, ·)
     taEqsaDatas := taEqsaDatas.push taEqsaData?
+    meth.trace s!"DBG[6]: App.lean:443 (after taEqsaDatas := taEqsaDatas.push taEqsaDa…)"
 
     let (tBoda, sBoda) ← if taEqsa?.isSome || absArgs.contains idx then
       tArgs' := tArgs'.push ta
@@ -451,6 +484,7 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
       sArgsVars := sArgsVars.push sVar.1
       tEtaVars := tEtaVars + 1
       sEtaVars := sEtaVars + 1
+      meth.trace s!"DBG[7]: App.lean:459 (after sEtaVars := sEtaVars + 1)"
 
       pure (Expr.fvar tVar.1 |>.toPExpr, Expr.fvar sVar.1 |>.toPExpr)
     else 
@@ -458,6 +492,7 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
       sEtaVars := 0
       pure (ta, sa)
 
+    meth.trace s!"DBG[8]: App.lean:467 (after pure (ta, sa))"
     tBodArgs := tBodArgs.push tBoda
     sBodArgs := sBodArgs.push sBoda
 
@@ -470,9 +505,12 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
       | .forallE _ _ tBody _, .forallE _ _ sBody _ =>
         pure $ (tBody.instantiate1 tBoda |>.toPExpr, sBody.instantiate1 sBoda |>.toPExpr)
       | _, _ => unreachable!
+      meth.trace s!"DBG[9]: App.lean:480 (after | _, _ => unreachable!)"
 
+  meth.trace s!"DBG[10]: App.lean:482 (after meth.trace s!DBG[9]: App.lean:480 (after …)"
   let tEqs? ← mkAppEqProof' tVars sVars tArgs' sArgs' taEqsas' tBodFun sBodFun tBodArgs sBodArgs tArgsVars sArgsVars tBodT sBodT tEtaVars sEtaVars tArgs'.size
   -- TODO(perf) restrict data collection to the case of `taEqsa?.isSome || ret?.isSome`
+  meth.trace s!"DBG[11]: App.lean:485 (after -- TODO(perf) restrict data collection t…)"
   return (true, (tEqs?.map fun tEqs => (tEqs, taEqsaDatas)))
 
 def isDefEqApp''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)

@@ -8,9 +8,18 @@ namespace Lean4Less
 def mkLambda (vars : Array LocalDecl) (b : Expr) : PExpr := LocalContext.mkLambda (vars.foldl (init := default) fun lctx decl => lctx.addDecl decl) (vars.map (·.toExpr)) b |>.toPExpr
 def mkForall (vars : Array LocalDecl) (b : Expr) : PExpr := LocalContext.mkForall (vars.foldl (init := default) fun lctx decl => lctx.addDecl decl) (vars.map (·.toExpr)) b |>.toPExpr
 
+/--
+  Optimized version of Lean.Expr.replaceFVar, assuming no bound vars in `e`.
+-/
+def _root_.Lean.Expr.containsFVar' (e : Expr) (fv : FVarId) : Bool :=
+  (e.replaceFVar (.fvar fv) (Expr.bvar 0)).hasLooseBVars
+
+def PExpr.containsFVar' (e : PExpr) (fv : LocalDecl) : Bool := -- optimized version of Lean.Expr.containsFVar
+  e.toExpr.containsFVar' fv.fvarId
+
 def getMaybeDepLemmaApp (Uas : Array PExpr) (as : Array LocalDecl) : Array PExpr × Bool :=
   let dep := Uas.zip as |>.foldl (init := false) fun acc (Ua, a) =>
-    Ua.toExpr.containsFVar a.fvarId || acc
+    Ua.toExpr.containsFVar' a.fvarId || acc
   let ret := Uas.zip as |>.map fun (Ua, a) =>
     if dep then
       mkLambda #[a] Ua

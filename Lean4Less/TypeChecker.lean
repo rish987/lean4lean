@@ -27,11 +27,10 @@ structure TypeChecker.State where
   inferTypeC : InferCache := {}
   whnfCoreCache : Std.HashMap PExpr (PExpr × Option EExpr) := {}
   whnfCache : Std.HashMap (PExpr × Bool) (PExpr × Option EExpr) := {}
-  isDefEqCache : Std.HashMap (PExpr × PExpr) EExpr := {}
+  isDefEqCache : Std.HashMap (PExpr × PExpr) EExpr := Std.HashMap.empty (capacity := 1000)
   fvarRegistry : Std.HashMap Name Nat := {} -- for debugging purposes
   eqvManager : EquivManager := {}
   numCalls : Nat := 0
-  printedDbg : Bool := false
   leanMinusState : Lean.TypeChecker.State := {}
   failure : Std.HashSet (Expr × Expr) := {}
 
@@ -91,6 +90,8 @@ structure TypeChecker.Context where
   -/
   eqFVars : Std.HashMap (FVarId × FVarId) (LocalDecl × LocalDecl) := {}
   safety : DefinitionSafety := .safe
+  callId : Nat := 0
+  dbgCallId : Option Nat := none
   cheapK := false
   callStack : Array (Nat × CallData) := #[]
   lparams : List Name := []
@@ -140,6 +141,10 @@ abbrev RecEE := RecM (PExpr × (Option EExpr))
 abbrev RecB := RecM (Bool × (Option EExpr))
 abbrev RecLB := RecM (LBool × (Option EExpr))
 
+def trace (msg : String) : RecM Unit := do
+  if (← readThe Context).callId == (← readThe Context).dbgCallId then
+    dbg_trace msg
+
 def mkId (n : Nat) : RecM Name := do
   let id ← mkFreshId
   modify fun st => { st with fvarRegistry := st.fvarRegistry.insert id n }
@@ -188,6 +193,12 @@ def whnfPure (n : Nat) (e : PExpr) : RecM PExpr := fun m => m.whnfPure n e
 
 @[inline] def withCallData [MonadWithReaderOf Context m] (i : Nat) (d : CallData) (x : m α) : m α :=
   withReader (fun c => {c with callStack := c.callStack.push (i, d)}) x
+
+@[inline] def withCallId [MonadWithReaderOf Context m] (id : Nat) (dbgCallId : Option Nat := none) (x : m α) : m α :=
+  withReader (fun c => {c with callId := id, dbgCallId}) x
+
+@[inline] def withCallIdx [MonadWithReaderOf Context m] (i : Nat) (x : m α) : m α :=
+  withReader (fun c => {c with callStack := c.callStack.push (i, default)}) x
 
 @[inline] def withForallOpt [MonadWithReaderOf Context m] (x : m α) : m α :=
   withReader (fun l => {l with forallOpt := true}) x
@@ -433,6 +444,7 @@ def meths : ExtMethods RecM := {
     appPrfIrrel := appPrfIrrel
     appHEqTrans? := appHEqTrans?
     withPure := withPure
+    trace := trace
   }
 
 def isDefEqForall' (t s : PExpr) (numBinds : Nat) (f : Option EExpr → RecM (Option T)) (explicit := false) : RecM (Bool × Option T) := do
@@ -1171,10 +1183,11 @@ Otherwise, defers to the calling function.
 -/
 def quickIsDefEq' (t s : PExpr) (useHash := false) : RecLB := do
   -- optimization for terms that are already α-equivalent
-  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 (eqvManager := m)) => -- TODO why do I have to list these?
+  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 (eqvManager := m)) => -- TODO why do I have to list these?
     let (b, m) := m.isEquiv useHash t s
-    (b, .mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 (eqvManager := m))
-  then return (.true, none)
+    (b, .mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 (eqvManager := m))
+  then
+    return (.true, none)
   let res : Option (Bool × PExpr) ← match t.toExpr, s.toExpr with
   | .lam .., .lam .. => pure $ some $ ← isDefEqLambda t s
   | .fvar idt, .fvar ids =>
@@ -1601,8 +1614,6 @@ def isDefEqUnitLike (t s : PExpr) : RecB := do
 
 @[inherit_doc isDefEqCore]
 def isDefEqCore' (t s : PExpr) : RecB := do
-  if let some p := (← get).isDefEqCache.get? (t, s) then
-    return (true, .some p)
   -- if let some p := (← get).isDefEqCache.get? (s, t) then
   --   return (true, .some p.reverse sorry sorry sorry) -- <<< TODO
 
@@ -1614,6 +1625,9 @@ def isDefEqCore' (t s : PExpr) : RecB := do
   if !t.toExpr.hasFVar && s.toExpr.isConstOf ``true then
     let (t, p?) ← whnf 75 t
     if t.toExpr.isConstOf ``true then return (true, p?)
+
+  if let some p := (← get).isDefEqCache.get? (t, s) then
+    return (true, .some p)
 
   let (tn, tEqtn?) ← whnfCore 76 t (cheapK := true) (cheapProj := true)
   let (sn, sEqsn?) ← whnfCore 77 s (cheapK := true) (cheapProj := true)
@@ -1681,12 +1695,14 @@ def isDefEqCore' (t s : PExpr) : RecB := do
     let (true, tn''Eqsn''?) ← isDefEqCore 81 tn'' sn'' | return (false, none)
     return (true, ← mktEqs? tn'' sn'' tEqtn''? sEqsn''? tn''Eqsn''?)
 
+  trace s!"DBG[20]: TypeChecker.lean:1697 (after return (true, ← mktEqs? tn sn tEqtn? s…)"
   -- optimized by above functions using `cheapK = true`
   match ← isDefEqApp methsA tn' sn' with
   | (true, tn'Eqsn'?) =>
     return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)
   | _ =>
     pure ()
+  trace s!"DBG[21]: TypeChecker.lean:1704 (after pure ())"
 
   match ← tryEtaExpansion tn' sn' with
   | (true, tn'Eqsn'?) => return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)
