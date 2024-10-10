@@ -88,7 +88,7 @@ structure TypeChecker.Context where
   Mapping from free variables to proofs of their equality,
   introduced by isDefEqLambda.
   -/
-  eqFVars : Std.HashMap (FVarId × FVarId) (LocalDecl × LocalDecl) := {}
+  eqFVars : Std.HashMap (FVarId × FVarId) (LocalDecl × EExpr) := {}
   safety : DefinitionSafety := .safe
   callId : Nat := 0
   dbgCallId : Option Nat := none
@@ -122,7 +122,7 @@ instance [Monad m] : MonadNameGenerator (StateT State m) where
 instance (priority := low) : MonadWithReaderOf LocalContext M where
   withReader f := withReader fun s => { s with lctx := f s.lctx }
 
-instance (priority := low) : MonadWithReaderOf (Std.HashMap (FVarId × FVarId) (LocalDecl × LocalDecl)) M where
+instance (priority := low) : MonadWithReaderOf (Std.HashMap (FVarId × FVarId) (LocalDecl × EExpr)) M where
   withReader f := withReader fun s => { s with eqFVars := f s.eqFVars }
 
 structure Methods where
@@ -388,7 +388,7 @@ def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : P
             withLCtx ((← getLCtx).mkLocalDecl idsEqt default seqtType default) do
               let some vtEqs := (← getLCtx).find? idtEqs | unreachable!
               let some vsEqt := (← getLCtx).find? idsEqt | unreachable!
-              withEqFVar idt ids (vtEqs, vsEqt) do
+              withEqFVar idt ids (vtEqs, (vtEqs.toExpr.toEExpr.reverse tvar.toExpr.toPExpr svar.toExpr.toPExpr tDom sDom lvl)) do
                 cont (.some (svar, vtEqs, vsEqt, p?)) svar 
       else
         cont none tvar
@@ -1168,12 +1168,10 @@ def isDefEqLambda (t s : PExpr) : RecB := do
     pure faEqgx?
 
 def isDefEqFVar (idt ids : FVarId) : RecLB := do
-  if let some (tEqs, sEqt) := (← readThe Context).eqFVars.get? (idt, ids) then
-    let p := .fvar {aEqb := tEqs, bEqa := sEqt}
-    return (.true, some p)
-  else if let some (sEqt, tEqs) := (← readThe Context).eqFVars.get? (ids, idt) then
-    let p := .fvar {aEqb := tEqs, bEqa := sEqt }
-    return (.true, .some p)
+  if let some (tEqs, _) := (← readThe Context).eqFVars.get? (idt, ids) then
+    return (.true, some tEqs.toExpr.toEExpr)
+  else if let some (_, tEqs) := (← readThe Context).eqFVars.get? (ids, idt) then
+    return (.true, some tEqs)
   return (.undef, none)
 
 /--

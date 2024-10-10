@@ -16,7 +16,7 @@ structure ExtMethodsA (m : Type → Type u) extends ExtMethods m where
   alignForAll (numBinds : Nat) (ltl ltr : Expr) : m (Expr × Expr)
   opt : Bool := true
 
-variable [Monad m] [MonadLCtx m] [MonadExcept KernelException m] [MonadNameGenerator m] [MonadWithReaderOf LocalContext m] [MonadWithReaderOf (Std.HashMap (FVarId × FVarId) (LocalDecl × LocalDecl)) m] (env : Environment)
+variable [Monad m] [MonadLCtx m] [MonadExcept KernelException m] [MonadNameGenerator m] [MonadWithReaderOf LocalContext m] [MonadWithReaderOf (Std.HashMap (FVarId × FVarId) (LocalDecl × EExpr)) m] (env : Environment)
   (meth : ExtMethodsA m)
 
 def mkAppEqProof? (aVars bVars : Array LocalDecl) (us vs : Array Level) (Uas Vbs : Array PExpr) (UasEqVbs? : Array (Option EExpr))(ds? : Array (Option (LocalDecl × LocalDecl × EExpr))) (as bs : Array PExpr) (asEqbs? : Array (Option EExpr)) (f g : PExpr) (fEqg? : Option EExpr := none)
@@ -210,7 +210,7 @@ def mkAppEqProof (T S : PExpr) (TEqS? : Option EExpr) (as bs : Array PExpr) (asE
             withLCtx ((← getLCtx).mkLocalDecl idbEqa default seqtType default) do
               let some vaEqb := (← getLCtx).find? idaEqb | unreachable!
               let some vbEqa := (← getLCtx).find? idbEqa | unreachable!
-              withEqFVar ida idb (vaEqb, vbEqa) do
+              withEqFVar ida idb (vaEqb, (vaEqb.toExpr.toEExpr.reverse aVar.toExpr.toPExpr bVar.toExpr.toPExpr A B u)) do
                 let d := (vaEqb, vbEqa, AEqB)
                 cont (.some d) bVar
       else
@@ -316,6 +316,7 @@ def forallAbs (max : Nat) (tfT sfT : Expr) : m
               tName sName
 
           withLCtx ((← getLCtx).mkLocalDecl idt tName tDom tBi) do
+            let some tVar := (← getLCtx).find? idt | unreachable!
             if tDomEqsDom?.isSome then
               let ids := ⟨← meth.mkId 210⟩
               let idtEqs := ⟨← meth.mkId 211⟩
@@ -325,11 +326,12 @@ def forallAbs (max : Nat) (tfT sfT : Expr) : m
               let teqsType := mkAppN (.const `HEq [lvl]) #[tDom, (.fvar idt), sDom, (.fvar ids)]
               let seqtType := mkAppN (.const `HEq [lvl]) #[sDom, (.fvar ids), tDom, (.fvar idt)]
               withLCtx ((← getLCtx).mkLocalDecl ids sName sDom sBi) do
+                let some sVar := (← getLCtx).find? idt | unreachable!
                 withLCtx ((← getLCtx).mkLocalDecl idtEqs default teqsType default) do
                   withLCtx ((← getLCtx).mkLocalDecl idsEqt default seqtType default) do
                     let some vtEqs := (← getLCtx).find? idtEqs | unreachable!
-                    let some vsEqt := (← getLCtx).find? idsEqt | unreachable!
-                    withEqFVar idt ids (vtEqs, vsEqt) do
+                    -- let some vsEqt := (← getLCtx).find? idsEqt | unreachable!
+                    withEqFVar idt ids (vtEqs, (vtEqs.toExpr.toEExpr.reverse tVar.toExpr.toPExpr sVar.toExpr.toPExpr tDom.toPExpr sDom.toPExpr lvl)) do -- TODO verify that we actually need this
                       cont' ids
             else
               cont' idt

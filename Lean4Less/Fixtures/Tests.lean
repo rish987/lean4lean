@@ -24,7 +24,7 @@ def forallEx'' : Q q → Q q :=
 -- #check_off forallEx''
 set_option pp.all true
 -- #print Std.Tactic.BVDecide.BVExpr.bitblast.go
-#check Decidable.rec
+#check_only Std.Sat.AIG.toCNF.State.addGate
 
 axiom Qp : Q p
 axiom Qq : Q q

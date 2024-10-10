@@ -140,7 +140,6 @@ def check (e : Expr) (lps : List Name) : MPE := do
         throw $ .other s!"possible patching loop detected ({c})"
 
   pure ret
-  
 
 def checkPure (e : Expr) (lps : List Name) : M PExpr :=
   withReader ({ · with lparams := lps }) (inferTypePure 83 e.toPExpr).run

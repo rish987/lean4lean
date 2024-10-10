@@ -270,7 +270,6 @@ inductive EExpr where
 | symm     : SymmData EExpr → EExpr
 | refl     : ReflData → EExpr
 | prfIrrel : PIData EExpr → EExpr
-| fvar     : FVarData → EExpr
 | sry      : SorryData → EExpr
 deriving Inhabited
 
@@ -371,7 +370,6 @@ def EExpr.replaceFVar (fvar val : PExpr) : EExpr → EExpr
 | .symm d     => .symm $ d.replaceFVar fvar val
 | .refl d     => .refl $ d.replaceFVar fvar val
 | .prfIrrel d => .prfIrrel $ d.replaceFVar fvar val
-| .fvar d     => .fvar $ d.replaceFVar fvar val
 | .sry d      => .sry $ d.replaceFVar fvar val
 
 end
@@ -480,7 +478,7 @@ def AppData.toExpr : AppData EExpr → Expr
   | .AB {B, hAB, g, fEqg, b, aEqb} => 
     let U := U.1
     (#[A, B, U, hAB.toExpr, f, g, a, b, fEqg.toExpr, aEqb.toExpr], false)
-  | .none {g, fEqg, b, aEqb} => -- FIXME fails to show termination if doing nested match?
+  | .none {g, fEqg, b, aEqb} => -- TODO fails to show termination if doing nested match?
     let (U, dep) := getMaybeDepLemmaApp1 U
     (#[A, U, f, g, a, b, fEqg.toExpr, aEqb.toExpr], dep)
   | .Fun {g, fEqg} =>
@@ -525,24 +523,22 @@ def EExpr.toExpr : EExpr → Expr
 | .symm d
 | .refl d
 | .prfIrrel d
-| .fvar d
 | .sry d  => d.toExpr
 
 end
 
 mutual
 
-abbrev revaEqb aEqb (a b A B : PExpr) u := EExpr.reverse a b A B u aEqb
-
 def FVarData.reverse : FVarData → FVarData
-| {aEqb, bEqa} => {aEqb := bEqa, bEqa := aEqb} 
+| {aEqb, bEqa} => Id.run $ do
+  pure {aEqb := bEqa, bEqa := aEqb} 
 
 def LamData.reverse : LamData EExpr → EExpr
 | {u, v, A, U, f, a, g, faEqgx, extra} =>
   Id.run $ do 
-    let (extra, newA, newU, newa) := match extra with
-    | .ABUV {b, B, vaEqb, hAB} {V} =>
-        (.ABUV {b := a, B := A, vaEqb := vaEqb.reverse, hAB := EExpr.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ hAB} {V := U}, B, V, b)
+    let (extra, newA, newU, newa) ← match extra with
+    | .ABUV {b, B, vaEqb, hAB} {V} => do
+      pure (.ABUV {b := a, B := A, vaEqb := vaEqb.reverse, hAB := (EExpr.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ hAB).replaceFVar (vaEqb.aEqb.toExpr.toPExpr) (vaEqb.bEqa.toExpr.toPExpr)} {V := U}, B, V, b)
     | .UV {V} => (.UV {V := U}, A, V, a)
     | .none => (.none, A, U, a)
 
@@ -551,18 +547,19 @@ def LamData.reverse : LamData EExpr → EExpr
 
 
 def HUVData.reverse (Ua Vb : PExpr) (v : Level) : HUVData EExpr → HUVData EExpr
-| {a, UaEqVb, extra} =>
+| {a, UaEqVb, extra} => Id.run $
   let newUaEqVb := UaEqVb.reverse Ua Vb (Expr.sort v).toPExpr (Expr.sort v).toPExpr v.succ
   match extra with
-  | .some {b, vaEqb} => {a := b, UaEqVb := newUaEqVb, extra := .some {b := a, vaEqb := vaEqb.reverse}}
+  | .some {b, vaEqb} => do
+    pure {a := b, UaEqVb := newUaEqVb.replaceFVar (vaEqb.aEqb.toExpr.toPExpr) (vaEqb.bEqa.toExpr.toPExpr), extra := .some {b := a, vaEqb := vaEqb.reverse}}
   | .none => {a, UaEqVb := newUaEqVb, extra := .none}
 
 def ForallData.reverse : ForallData EExpr → EExpr
 | {u, v, A, U, V, a, UaEqVx, extra} =>
   Id.run $ do 
-    let (extra, newA, newa) := match extra with
-    | .AB {b, B, hAB, vaEqb} => 
-      (.AB {b := a, B := A, hAB := hAB.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ, vaEqb := vaEqb.reverse}, B, b)
+    let (extra, newA, newa) ← match extra with
+    | .AB {b, B, hAB, vaEqb} => do
+      pure (.AB {b := a, B := A, hAB := (hAB.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ).replaceFVar (vaEqb.aEqb.toExpr.toPExpr) (vaEqb.bEqa.toExpr.toPExpr), vaEqb := vaEqb.reverse}, B, b)
     | .ABApp {b, vaEqb} => 
       (.ABApp {b := a, vaEqb := vaEqb.reverse}, A, b)
     | .none =>
@@ -620,9 +617,7 @@ def EExpr.reverse (t s tType sType : PExpr) (lvl : Level) : EExpr → EExpr
 | .symm d
 | .refl d
 | .prfIrrel d
-| .sry d  =>
-  d.reverse
-| .fvar d  => .fvar d.reverse
+| .sry d  => d.reverse
 
 end
 

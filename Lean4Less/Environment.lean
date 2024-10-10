@@ -53,6 +53,10 @@ def patchDefinition (env : Environment) (v : DefinitionVal) (allowAxiomReplace :
       checkNoMVarNoFVar env v.name v.value
       -- dbg_trace s!"DBG[34]: Environment.lean:52 (after checkNoMVarNoFVar env v.name v.value)"
       let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
+      if let some value' := value'? then
+        for (fvar, n) in  (← get).fvarRegistry do
+          if value'.toExpr.containsFVar' (.mk fvar) then
+            dbg_trace s!"DBG[45]: Environment.lean:44 {fvar}, {n}"
       -- dbg_trace s!"DBG[98]: Environment.lean:54: valueType={valueType}"
       let value' := value'?.getD v.value.toPExpr
       -- dbg_trace s!"DBG[33]: Environment.lean:54 (after let value := value?.getD v.value.toPExpr)"
