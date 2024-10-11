@@ -31,4 +31,6 @@ instance : Coe PExpr Expr := ⟨(PExpr.toExpr)⟩
 def PExpr.instantiateRev (e : PExpr) (subst : Array PExpr) : PExpr :=
   e.toExpr.instantiateRev (subst.map (·.toExpr)) |>.toPExpr
 
+def PExpr.app (t s : PExpr) := Lean.mkApp t.toExpr s.toExpr |>.toPExpr
+
 end Lean4Less

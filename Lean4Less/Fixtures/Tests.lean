@@ -24,7 +24,7 @@ def forallEx'' : Q q → Q q :=
 -- #check_off forallEx''
 set_option pp.all true
 -- #print Std.Tactic.BVDecide.BVExpr.bitblast.go
-#check_only Std.Sat.AIG.toCNF.State.addGate
+-- #check_only Std.Sat.AIG.toCNF.State.addGate
 
 axiom Qp : Q p
 axiom Qq : Q q
@@ -109,6 +109,19 @@ axiom D : (i : I) → Nat → Nat → Nat → ITD i
 axiom Dq : D (.left q) 0 0 0 0 Qq 0
 
 theorem absDemoD : D (.left p) 0 0 0 0 Qp 0 := Dq
+
+inductive I' : Type where
+| left  : P → P → I'
+| right : P → P → I'
+
+def IT' : I' → Type
+| .left _ _  => Unit
+| .right _ _ => Bool
+
+axiom E : (i : I') → Nat → Nat → Nat → IT' i → Nat → Nat → Nat → Prop
+axiom Eq : E (.left q q) 0 0 0 () 0 0 0
+
+theorem absDemoE : E (.left p p) 0 0 0 () 0 0 0 := Eq
 end Demo
 
 -- def IT : I → Type

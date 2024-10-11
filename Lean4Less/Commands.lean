@@ -79,7 +79,7 @@ def transL4L' (ns : Array Name) (env : Environment) (pp := false) (printProgress
   let map := ns.foldl (init := default) fun acc n => .insert acc n
   let (_, newEnv) ← checkConstants (printErr := true) env map @Lean4Less.addDecl (initConsts := patchConsts) (op := "patch") (printProgress := printProgress)
   for n in ns do
-    if false then
+    if pp then
       ppConst newEnv n
   pure newEnv
 
