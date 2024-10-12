@@ -877,7 +877,7 @@ def inferType' (e : Expr) (_dbg := false) : RecPE := do
       -- for some universe level `l`, so this use of `isDefEq` is valid
       let ((true, pa'?), a') ← smartCast' aType dType (a'?.getD a.toPExpr) 19 |
         -- if e'.isApp then if let .const `Bool.casesOn _ := e'.withApp fun f _ => f then
-        -- dbg_trace s!"dbg: {e}, {fType}, {aType}"
+        dbg_trace s!"dbg: {e}"
         throw <| .appTypeMismatch (← getEnv) (← getLCtx) e fType' aType
 
       let patch := if f'?.isSome || a'?.isSome || pf'?.isSome || pa'?.isSome then .some (Expr.app f' a').toPExpr else none

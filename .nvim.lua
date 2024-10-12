@@ -36,7 +36,7 @@ local templates = {
         cmd = { "lake" },
         args = { "exe", "lean4less", params.mod},
         components = {
-          { "restart_on_save", paths = lean_files}, -- TODO "intelligently" switch task to check if a dk file was modified
+          -- { "restart_on_save", paths = lean_files}, -- TODO "intelligently" switch task to check if a dk file was modified
           "default",
         },
       }
@@ -48,7 +48,7 @@ local templates = {
         cmd = { "lake" },
         args = { "exe", "lean4less", params.mod, "--only", params.only},
         components = {
-          { "restart_on_save", paths = lean_files},
+          -- { "restart_on_save", paths = lean_files},
           "default",
         },
       }
