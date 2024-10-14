@@ -36,10 +36,11 @@ match fuel with
     --   
 
     let mut printedTrace := false
-    -- if s.numCalls >= 57836 /- && not s.printedDbg -/ then -- TODO static variables?
-    --   if s.numCalls % 1 == 0 then
-    --     printedTrace := true
-    --     dbg_trace s!"calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}"
+    if false && s.numCalls >= 0 /- && not s.printedDbg -/ then -- TODO static variables?
+      if s.numCalls % 1 == 0 then
+        printedTrace := true
+        dbg_trace s!"calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}, {(← readThe Context).callId}"
+    
     let meth := Methods.withFuel fuel'
     -- if s.isDefEqCache.size > 300 then
     --   modify fun s => {s with isDefEqCache := Std.HashMap.empty (capacity := 1000)} 
@@ -90,10 +91,10 @@ match fuel with
       --   | _ => unreachable!
       -- dbg_trace s!"{s.numCalls}: {stack[9]!.2}, {stack.map (·.1)}"
     try
-      let ret ← withCallId s.numCalls (.some 8865) do
+      let ret ← withCallId s.numCalls (.some 0) do
         withCallData idx d $ m (Methods.withFuel fuel')
       if printedTrace then
-        dbg_trace s!"end of    {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}"
+        dbg_trace s!"end of    {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}, {(← readThe Context).callId}"
       pure ret
     catch e =>
       dbg_trace s!"calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}"
@@ -132,12 +133,12 @@ Use `inferType` to infer type alone.
 -/
 def check (e : Expr) (lps : List Name) : MPE := do
   let ret ← withReader ({ · with lparams := lps }) (inferType 82 e).run
-  let (_, e'?) := ret
+  -- let (_, e'?) := ret
 
-  if let some e' := e'? then
-    for c in e'.toExpr.getUsedConstants do
-      if not ((← getEnv).find? c).isSome then
-        throw $ .other s!"possible patching loop detected ({c})"
+  -- if let some e' := e'? then
+  --   for c in e'.toExpr.getUsedConstants do
+  --     if not ((← getEnv).find? c).isSome then
+  --       throw $ .other s!"possible patching loop detected ({c})"
 
   pure ret
 

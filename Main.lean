@@ -15,6 +15,8 @@ open Lean
 open Lean4Lean
 open Cli
 
+open private add from Lean.Environment
+
 def outDir : System.FilePath := System.mkFilePath [".", "out"]
 
 /--
@@ -35,13 +37,18 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
   match mod with
     | .anonymous => throw <| IO.userError s!"Could not resolve module: {mod}"
     | m =>
+      let (lemmEnv, success) ← Lean.Elab.runFrontend (include_str "patch" / "PatchTheoremsAx.lean") default default `Patch
+      if not success then
+        throw $ IO.userError $ "elab of patching defs failed"
       if let some onlyConsts := onlyConsts? then
-        Lean.withImportModules #[{module := mod}, {module := `patch.PatchTheoremsAx}] {} 0 fun env => do
+        Lean.withImportModules #[{module := mod}] {} 0 fun env => do
+          let mut env := env
+          for (_, c) in lemmEnv.constants do
+            env := add env c
           _ ← Lean4Less.checkL4L (onlyConsts.map (·.toName)) env (printProgress := true)
       else
-        replayFromFresh' Lean4Less.addDecl `patch.PatchTheoremsAx (onlyConsts? := Lean4Less.patchConsts) (op := "patch") fun env =>
-          replayFromInit' Lean4Less.addDecl m env (op := "patch") fun env' =>
-            replayFromEnv Lean4Lean.addDecl m env' (op := "typecheck") (opts := {proofIrrelevance := false, kLikeReduction := false})
+        replayFromInit' Lean4Less.addDecl m lemmEnv (op := "patch") fun env' =>
+          replayFromEnv Lean4Lean.addDecl m env' (op := "typecheck") (opts := {proofIrrelevance := false, kLikeReduction := false})
   return 0
 
 unsafe def transCmd : Cmd := `[Cli|

@@ -13,7 +13,7 @@ namespace Lean4Less.TypeChecker.Inner
 
 structure ExtMethodsA (m : Type → Type u) extends ExtMethods m where
   isDefEqForall (t s : PExpr) (numBinds : Nat) (f : Option EExpr → m (Option T)) : m (Bool × Option T)
-  alignForAll (numBinds : Nat) (ltl ltr : Expr) : m (Expr × Expr)
+  -- alignForAll (numBinds : Nat) (ltl ltr : Expr) : m (Expr × Expr)
   opt : Bool := true
 
 variable [Monad m] [MonadLCtx m] [MonadExcept KernelException m] [MonadNameGenerator m] [MonadWithReaderOf LocalContext m] [MonadWithReaderOf (Std.HashMap (FVarId × FVarId) (LocalDecl × EExpr)) m] (env : Environment)

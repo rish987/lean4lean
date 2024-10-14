@@ -18,13 +18,21 @@ def ppConst (env : Environment) (n : Name) : IO Unit := do
     IO.print s!"patched {info.name}: {← (PrettyPrinter.ppExprLegacy env default default options info.type)}"
 
     match info.value? with
-    | .some v => IO.println s!"\n{← (PrettyPrinter.ppExprLegacy env default default options v)}"
+    | .some v =>
+      if v.approxDepth < 100 then
+        IO.println s!"\n{← (PrettyPrinter.ppExprLegacy env default default options v)}"
+      else
+        IO.println s!"\n [[[expression too large]]]"
     | _ => IO.println ""
   catch
   | _ =>
     IO.print s!"patched {info.name}: {info.type}"
     match info.value? with
-    | .some v => IO.println s!"\n{v}"
+    | .some v =>
+      if v.approxDepth < 100 then
+        IO.println s!"\n{v}"
+      else
+        IO.println s!"\n [[[expression too large]]]"
     | _ => IO.println ""
 
 /--

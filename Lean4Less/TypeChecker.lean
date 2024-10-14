@@ -141,6 +141,10 @@ abbrev RecEE := RecM (PExpr × (Option EExpr))
 abbrev RecB := RecM (Bool × (Option EExpr))
 abbrev RecLB := RecM (LBool × (Option EExpr))
 
+def traceM (msg : String) : M Unit := do
+  if (← readThe Context).callId == (← readThe Context).dbgCallId then
+    dbg_trace msg
+
 def trace (msg : String) : RecM Unit := do
   if (← readThe Context).callId == (← readThe Context).dbgCallId then
     dbg_trace msg
@@ -148,9 +152,7 @@ def trace (msg : String) : RecM Unit := do
 def mkId (n : Nat) : RecM Name := do
   let id ← mkFreshId
   -- if id == "_kernel_fresh.879".toName then
-  --   dbg_trace s!"DBG[9]: TypeChecker.lean:150 {n}"
   -- else if id == "_kernel_fresh.877".toName then
-  --   dbg_trace s!"DBG[10]: TypeChecker.lean:153 {n}"
   modify fun st => { st with fvarRegistry := st.fvarRegistry.insert id n }
   pure id
 
@@ -342,7 +344,6 @@ def isDefEq (n : Nat) (t s : PExpr) : RecB := do
     else
       modify fun st => { st with eqvManager := st.eqvManager.addEquiv t s }
   -- else if result && p?.isSome then
-  --   dbg_trace s!"DBG[2]: TypeChecker.lean:242 {t} {s}"
   pure r
 
 def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : PExpr)
@@ -501,7 +502,6 @@ def isDefEqForall' (t s : PExpr) (numBinds : Nat) (f : Option EExpr → RecM (Op
       Vx := (← getLCtx).mkForall #[x.toExpr] Vx |>.toPExpr
 
     -- if as.any fun a => a.toExpr.isFVar && a.toExpr.fvarId!.name == "_kernel_fresh.104".toName then
-    --   dbg_trace s!"DBG[7]: TypeChecker.lean:418 (after sorry) {UaEqVx?.map (·.reverse default default default default default)}\n\n"
 
     f UaEqVx?
 
@@ -510,7 +510,7 @@ def lamCount : Expr → Nat
     lamCount b + 1
   | _ => 0
 
-def alignForAll (numBinds : Nat) (ltl ltr : Expr) : RecM (Expr × Expr) := do
+def alignForAll (numBinds : Nat) (ltl ltr : Expr) : RecM (Expr × Expr × Nat) := do
   match numBinds with
   | numBinds' + 1 => do
     match (← whnfPure 11 ltl.toPExpr).toExpr, (← whnfPure 12 ltr.toPExpr).toExpr with
@@ -521,18 +521,18 @@ def alignForAll (numBinds : Nat) (ltl ltr : Expr) : RecM (Expr × Expr) := do
         withLCtx ((← getLCtx).mkLocalDecl idr nr tdr bir) do
           let ntbl := tbl.instantiate1 (.fvar idl)
           let ntbr := tbr.instantiate1 (.fvar idr)
-          let (atbl, atbr) ← alignForAll numBinds' ntbl ntbr
+          let (atbl, atbr, n) ← alignForAll numBinds' ntbl ntbr
           let nltl := (← getLCtx).mkForall #[(.fvar idl)] atbl
           let nltr := (← getLCtx).mkForall #[(.fvar idr)] atbr
-          pure (nltl, nltr)
-    | _, _ => unreachable!
-  | _ => pure (ltl, ltr)
+          pure (nltl, nltr, n + 1)
+    | _, _ => pure (ltl, ltr, 0)
+  | _ => pure (ltl, ltr, 0)
 
 def methsA : ExtMethodsA RecM := {
     meths with
     opt := true
     isDefEqForall := isDefEqForall' (explicit := true)
-    alignForAll := alignForAll 
+    -- alignForAll := alignForAll 
   }
 
 def isDefEqForallOpt' (t s : PExpr) : RecB := do
@@ -569,7 +569,8 @@ def isDefEqForall (t s : PExpr) (numBinds := 0) : RecB := do
 
 def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((Bool × Option EExpr) × PExpr) := do
   let mkCast'' n tl tr p e (prfVars prfVals : Array Expr) (lvl : Level) := do
-    pure $ (Lean.mkAppN (← getConst n [lvl]) #[tl, tr, p, e]).replaceFVars prfVars prfVals
+    let app := Lean.mkAppN (← getConst n [lvl]) #[tl, tr, p.toExpr, e]
+    pure $ app.replaceFVars prfVars prfVals
 
   let mkCast' n tl tr p e (prfVars prfVals : Array Expr) := do
     let sort ← inferTypePure 13 tr.toPExpr
@@ -613,7 +614,11 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
       pure $ (true, .some p)
     else
       let nLams := lamCount e
-      let (tl', tr') ← alignForAll nLams tl tr
+      let (tl', tr', nLams) ← try 
+        alignForAll nLams tl tr
+      catch ex =>
+        dbg_trace s!"smartCast error: {n}, {nLams}"
+        throw ex
       let tl' := tl'.toPExpr
       let tr' := tr'.toPExpr
       if nLams > 0 then
@@ -623,7 +628,11 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
   pure $ (p?, (← p?.2.mapM (fun (p : EExpr) => do pure (← loop e.toExpr tl.toExpr tr.toExpr #[] #[] #[] p).toPExpr)).getD e)
 
 def smartCast (n : Nat) (tl tr e : PExpr) (p? : Option EExpr := none) : RecM (Bool × PExpr) := do
-  let ret ← smartCast' tl tr e n p?
+  let ret ← try
+    smartCast' tl tr e n p?
+  catch ex =>
+    dbg_trace s!"smartCast error: {n}"
+    throw ex
   pure (ret.1.1, ret.2)
 
 def maybeCast (n : Nat) (p? : Option EExpr) (typLhs typRhs e : PExpr) : RecM PExpr := do

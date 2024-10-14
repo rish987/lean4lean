@@ -1,5 +1,4 @@
-import Lean4Less.Commands
-import patch.PatchTheoremsAx
+import Std
 
 universe u v
 
@@ -13,14 +12,14 @@ axiom X : (p : P) → Q p → Q p
 
 def forallEx : Q q → Q q := fun (qp : Q p) => X p qp 
 
-def forallEx' : Q q → Q q :=
-@L4L.castHEq (Q p → Q p) (Q q → Q q)
-  (@L4L.forallHEqAB (Q p) (Q q) (Q p) (Q q) (@L4L.appArgHEq P Prop Q p q (L4L.prfIrrel p q))
-    (@L4L.appArgHEq P Prop Q p q (L4L.prfIrrel p q)))
-  fun (qp : Q p) => X p qp
-def forallEx'' : Q q → Q q :=
-  fun (qq : Q q) => @L4L.castHEq (Q p) (Q q) (@L4L.appArgHEq P Prop Q p q (L4L.prfIrrel p q))
-                      (X p (@L4L.castHEq (Q q) (Q p) (@L4L.appArgHEq P Prop Q q p (L4L.prfIrrel q p)) qq)) 
+-- def forallEx' : Q q → Q q :=
+-- @L4L.castHEq (Q p → Q p) (Q q → Q q)
+--   (@L4L.forallHEqAB (Q p) (Q q) (Q p) (Q q) (@L4L.appArgHEq P Prop Q p q (L4L.prfIrrel p q))
+--     (@L4L.appArgHEq P Prop Q p q (L4L.prfIrrel p q)))
+--   fun (qp : Q p) => X p qp
+-- def forallEx'' : Q q → Q q :=
+--   fun (qq : Q q) => @L4L.castHEq (Q p) (Q q) (@L4L.appArgHEq P Prop Q p q (L4L.prfIrrel p q))
+--                       (X p (@L4L.castHEq (Q q) (Q p) (@L4L.appArgHEq P Prop Q q p (L4L.prfIrrel q p)) qq)) 
 -- #check_off forallEx''
 set_option pp.all true
 -- #print Std.Tactic.BVDecide.BVExpr.bitblast.go
@@ -153,6 +152,9 @@ axiom k : K
 axiom k' : K 
 axiom BK : Bool → Type
 axiom hk : BK (@K.rec (fun _ => Bool) true k)
+def KT : Type := (@K.rec (fun _ => Type) (Nat → Prop) k)
+axiom Temp : (Nat → KT) → Type
+def temp : Type := Temp (fun n m => P)
 
 abbrev gcd (m : @& Nat) : Nat :=
   if let Nat.succ m' := m then
@@ -185,25 +187,25 @@ def h2 := forall {α : Type u} {β : α -> Type v} [A : BEq.{u} α] [B : Hashabl
   @Eq (Option.{v} (β a)) (@Std.DHashMap.get?.{u, v} α β A B C (@Std.DHashMap.empty.{u, v} α β A B c) a)
     (@Std.DHashMap.Internal.Raw₀.get?.{u, v} α β A C B (@Std.DHashMap.Internal.Raw₀.empty.{u, v} α β c) a)
 
-theorem HashMapTest' {α : Type u} {β : α → Type v} [inst : BEq α] [inst_1 : Hashable α] [inst_2 : @LawfulBEq α inst] {a : α} {c : Nat} :
-  @Eq (Option (β a)) (@Std.DHashMap.get? α β inst inst_1 inst_2 (@Std.DHashMap.empty α β inst inst_1 c) a)
-    (@Std.DHashMap.Internal.Raw₀.get? α β inst inst_2 inst_1 (@Std.DHashMap.Internal.Raw₀.empty α β c) a) :=
-  @L4L.castHEq _ _
-    (@L4L.appArgHEq _ Prop
-      (@Eq _ (@Std.DHashMap.get? α β inst inst_1 inst_2 (@Std.DHashMap.empty α β inst inst_1 c) a)) _ _
-      (@L4L.appArgHEq (Std.DHashMap.Internal.Raw₀ α β) (Option (β a))
-        (fun (m : Std.DHashMap.Internal.Raw₀ α β) => @Std.DHashMap.Internal.Raw₀.get? α β inst inst_2 inst_1 m a)
-        (@Subtype.mk (Std.DHashMap.Raw α β)
-          (fun (m : Std.DHashMap.Raw α β) =>
-            @LT.lt Nat instLTNat 0
-              (@Array.size (Std.DHashMap.Internal.AssocList α β) (@Std.DHashMap.Raw.buckets α β m)))
-          (@Subtype.val (Std.DHashMap.Raw α β)
-            (fun (m : Std.DHashMap.Raw α β) => @Std.DHashMap.Raw.WF α β inst inst_1 m)
-            (@Std.DHashMap.empty α β inst inst_1 c))
-          (@Std.DHashMap.get?.proof_1 α β inst inst_1 (@Std.DHashMap.empty α β inst inst_1 c)))
-        (@Std.DHashMap.Internal.Raw₀.empty α β c)
-        sorry))
-    (@rfl (Option (β a)) (@Std.DHashMap.get? α β inst inst_1 inst_2 (@Std.DHashMap.empty α β inst inst_1 c) a))
+-- theorem HashMapTest' {α : Type u} {β : α → Type v} [inst : BEq α] [inst_1 : Hashable α] [inst_2 : @LawfulBEq α inst] {a : α} {c : Nat} :
+--   @Eq (Option (β a)) (@Std.DHashMap.get? α β inst inst_1 inst_2 (@Std.DHashMap.empty α β inst inst_1 c) a)
+--     (@Std.DHashMap.Internal.Raw₀.get? α β inst inst_2 inst_1 (@Std.DHashMap.Internal.Raw₀.empty α β c) a) :=
+--   @L4L.castHEq _ _
+--     (@L4L.appArgHEq _ Prop
+--       (@Eq _ (@Std.DHashMap.get? α β inst inst_1 inst_2 (@Std.DHashMap.empty α β inst inst_1 c) a)) _ _
+--       (@L4L.appArgHEq (Std.DHashMap.Internal.Raw₀ α β) (Option (β a))
+--         (fun (m : Std.DHashMap.Internal.Raw₀ α β) => @Std.DHashMap.Internal.Raw₀.get? α β inst inst_2 inst_1 m a)
+--         (@Subtype.mk (Std.DHashMap.Raw α β)
+--           (fun (m : Std.DHashMap.Raw α β) =>
+--             @LT.lt Nat instLTNat 0
+--               (@Array.size (Std.DHashMap.Internal.AssocList α β) (@Std.DHashMap.Raw.buckets α β m)))
+--           (@Subtype.val (Std.DHashMap.Raw α β)
+--             (fun (m : Std.DHashMap.Raw α β) => @Std.DHashMap.Raw.WF α β inst inst_1 m)
+--             (@Std.DHashMap.empty α β inst inst_1 c))
+--           (@Std.DHashMap.get?.proof_1 α β inst inst_1 (@Std.DHashMap.empty α β inst inst_1 c)))
+--         (@Std.DHashMap.Internal.Raw₀.empty α β c)
+--         sorry))
+--     (@rfl (Option (β a)) (@Std.DHashMap.get? α β inst inst_1 inst_2 (@Std.DHashMap.empty α β inst inst_1 c) a))
 
 axiom tP : Nat → Prop
 axiom tempaux : tP 0
@@ -212,7 +214,7 @@ set_option pp.all true
 -- -- #check_off eq_of_heq
 -- #check_off Std.Sat.AIG.denote.go_eq_of_isPrefix._unary
 
-def temp : Q p := X p Qq
+-- def temp : Q p := X p Qq
 -- #print UInt16.ofNat_one
 
 
