@@ -4,7 +4,7 @@ import Lean4Less.EExpr
 import Lean4Less.Ext
 
 -- 241
--- mkId 216
+-- mkId 218
 
 open Lean
 
@@ -104,14 +104,14 @@ deriving Inhabited
 
 def mkAppEqProof (T S : PExpr) (TEqS? : Option EExpr) (as bs : Array PExpr) (asEqbs? : Array (Option EExpr)) (f g : PExpr) (fEqg? : Option EExpr := none) : m (Option EExpr) := do
   let rec loop idx T S aVars bVars Uas Vbs UasEqVbs? ds? us vs : m (Option EExpr) := do
-    try
-      let fType ← meth.inferTypePure 2071 (Lean.mkAppN f.toExpr (as[:idx].toArray.map (·.toExpr))).toPExpr -- sanity check TODO remove
-      let .true ← meth.isDefEqPure 209 T fType | do
-        -- throw $ .other s!"expected 3 ({idx}): {T}\n inferred: {fType}\n f: {f}"
-        throw $ .other s!"expected 3 ({idx})"
-    catch e =>
-      dbg_trace s!"DBG[1]: App.lean:113 {idx}, {(Lean.mkAppN f.toExpr (as[:idx].toArray.map (·.toExpr))).toPExpr}"
-      throw e
+    -- try
+    --   let fType ← meth.inferTypePure 2071 (Lean.mkAppN f.toExpr (as[:idx].toArray.map (·.toExpr))).toPExpr -- sanity check TODO remove
+    --   let .true ← meth.isDefEqPure 209 T fType | do
+    --     -- throw $ .other s!"expected 3 ({idx}): {T}\n inferred: {fType}\n f: {f}"
+    --     throw $ .other s!"expected 3 ({idx})"
+    -- catch e =>
+    --   -- dbg_trace s!"DBG[1]: App.lean:113 {idx}, {(Lean.mkAppN f.toExpr (as[:idx].toArray.map (·.toExpr))).toPExpr}"
+    --   throw e
 
     let (T', dA, S', dB) ← match (← meth.whnfPure 205 T).toExpr, (← meth.whnfPure 206 S).toExpr with
       | .forallE tName tDom tBody tBi, .forallE sName sDom sBody sBi =>
@@ -336,8 +336,8 @@ mutual
 def deconstructAppHEq' (n : Nat) (t s : PExpr) (tEqs : EExpr) (T? : Option PExpr) : m (Option (Array PExpr × Array PExpr × Array (Option EExpr) × Array (FVarId × Name × PExpr) × Array (FVarId × Name × PExpr) × PExpr × PExpr)) :=
   let defCase := do
     if let some T := T? then
-      let tVar := (⟨← meth.mkId 215⟩, default, T)
-      let sVar := (⟨← meth.mkId 216⟩, default, T) -- TODO get the names somehow?
+      let tVar := (⟨← meth.mkId 217⟩, default, T)
+      let sVar := (⟨← meth.mkId 218⟩, default, T) -- TODO get the names somehow?
       pure $ .some (#[t], #[s], #[.some tEqs], #[tVar], #[sVar], Expr.fvar tVar.1 |>.toPExpr, Expr.fvar sVar.1 |>.toPExpr)
     else pure none
   do match tEqs with
@@ -353,11 +353,27 @@ def deconstructAppHEq : AppData EExpr
   → m (Option (Array PExpr × Array PExpr × Array (Option EExpr) × Array (FVarId × Name × PExpr) × Array (FVarId × Name × PExpr) × PExpr × PExpr))
 | {f, a, extra, A, U, ..} => do
   match extra with
-  | .ABUV {g, fEqg, b, aEqb, ..} => do
+  | .UVFun {g, fEqg, ..}            => 
+    let some (tas, sas, taEqsas?, tVars, sVars, f', g') ← deconstructAppHEq' 8 f g fEqg none | return none
+    return (tas, sas, taEqsas?, tVars, sVars, f'.app a, g'.app a)
+  | .Fun {g, fEqg, ..}                 => 
+    let some (tas, sas, taEqsas?, tVars, sVars, f', g') ← deconstructAppHEq' 9 f g fEqg (mkForall #[U.2] U.1) | return none
+    return (tas, sas, taEqsas?, tVars, sVars, f'.app a, g'.app a)
+  | _ => pure ()
+
+  if U.1.containsFVar' U.2 then -- TODO is this too conservative?
+    return none
+
+  match extra with
+  | .ABUV {g, fEqg, b, aEqb, V, ..} => do
+    if V.1.containsFVar' V.2 then
+      return none
     let some (tas, sas, taEqsas?, tVars, sVars, f', g') ← deconstructAppHEq' 0 f g fEqg none | return none
     let some (tas', sas', taEqsas?', tVars', sVars', a', b') ← deconstructAppHEq' 1 a b aEqb none | return none
     pure (tas ++ tas', sas ++ sas', taEqsas? ++ taEqsas?', tVars ++ tVars', sVars ++ sVars', f'.app a', g'.app b')
-  | .UV {g, fEqg, b, aEqb, ..}      =>
+  | .UV {g, fEqg, b, aEqb, V, ..}      =>
+    if V.1.containsFVar' V.2 then
+      return none
     let some (tas, sas, taEqsas?, tVars, sVars, f', g') ← deconstructAppHEq' 2 f g fEqg none | return none
     let some (tas', sas', taEqsas?', tVars', sVars', a', b') ← deconstructAppHEq' 3 a b aEqb A | return none
     pure (tas ++ tas', sas ++ sas', taEqsas? ++ taEqsas?', tVars ++ tVars', sVars ++ sVars', f'.app a', g'.app b')
@@ -369,15 +385,10 @@ def deconstructAppHEq : AppData EExpr
     let some (tas, sas, taEqsas?, tVars, sVars, f', g') ← deconstructAppHEq' 6 f g fEqg (mkForall #[U.2] U.1) | return none
     let some (tas', sas', taEqsas?', tVars', sVars', a', b') ← deconstructAppHEq' 7 a b aEqb A | return none
     pure (tas ++ tas', sas ++ sas', taEqsas? ++ taEqsas?', tVars ++ tVars', sVars ++ sVars', f'.app a', g'.app b')
-  | .UVFun {g, fEqg, ..}            => 
-    let some (tas, sas, taEqsas?, tVars, sVars, f', g') ← deconstructAppHEq' 8 f g fEqg none | return none
-    pure (tas, sas, taEqsas?, tVars, sVars, f'.app a, g'.app a)
-  | .Fun {g, fEqg, ..}                 => 
-    let some (tas, sas, taEqsas?, tVars, sVars, f', g') ← deconstructAppHEq' 9 f g fEqg (mkForall #[U.2] U.1) | return none
-    pure (tas, sas, taEqsas?, tVars, sVars, f'.app a, g'.app a)
   | .Arg {b, aEqb, ..}                 =>
     let some (tas', sas', taEqsas?', tVars', sVars', a', b') ← deconstructAppHEq' 10 a b aEqb A | return none
     pure (tas', sas', taEqsas?', tVars', sVars', f.app a', f.app b')
+  | _ => unreachable!
 end
 
 
@@ -516,27 +527,30 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
         let sVar := (⟨← meth.mkId 216⟩, sDomName, sBodDom)
         pure ((#[ta], #[sa], #[taEqsa?], #[tVar], #[sVar], Expr.fvar tVar.1 |>.toPExpr, Expr.fvar sVar.1 |>.toPExpr), tEtaVars + 1, sEtaVars + 1)
       let ((tas', sas', taEqsas'?, tVars', sVars', tBoda', sBoda'), tEtaVars', sEtaVars') ←
+        if not (absArgs.contains idx) then -- TODO should we do an abstraction of the partial application here instead?
           if let some taEqsa := taEqsa? then
             match taEqsa with
             | .app d =>
               let some ret ← deconstructAppHEq meth d | getDefVals
 
-              let (tas', sas', taEqsas'?, tVars', sVars', tBoda', sBoda') := ret
-              let tLCtx := (tVars ++ tVars').foldl (init := (← getLCtx)) fun acc (id, n, (type : PExpr)) => LocalContext.mkLocalDecl acc id n type default
-
-              withLCtx tLCtx do
-                try
-                  let iT ← meth.inferTypePure 2222 (Lean.mkAppN tBodFun ((tBodArgs.push tBoda').map (·.toExpr))).toPExpr -- sanity check
-                catch ex =>
-                  dbg_trace s!"DBG[5]: App.lean:533 {← meth.isDefEqPure 0 (← meth.inferTypePure 0 ta) $ ← meth.inferTypePure 0 $ tBoda'.toExpr.replaceFVars ((tVars ++ tVars').map (.fvar ·.1)) ((tArgs' ++ tas').map (·.toExpr)) |>.toPExpr}"
-                  dbg_trace s!"DBG[6]: App.lean:533 {← meth.isDefEqPure 0 (← meth.inferTypePure 0 ta) $ ← meth.inferTypePure 0 $ tBoda'.toExpr |>.toPExpr}"
-                  dbg_trace s!"DBG[7]: App.lean:533 {← meth.inferTypePure 0 $ tBoda'.toExpr.replaceFVars ((tVars ++ tVars').map (.fvar ·.1)) ((tArgs' ++ tas').map (·.toExpr)) |>.toPExpr} {← meth.inferTypePure 0 $ tBoda'.toExpr |>.toPExpr}"
-                  -- dbg_trace s!"DBG[7]: App.lean:533 {← meth.whnfPure 0 $ ta}\n\n{← meth.whnfPure 0 $ tBoda'.toExpr.replaceFVars ((tVars ++ tVars').map (.fvar ·.1)) ((tArgs' ++ tas').map (·.toExpr)) |>.toPExpr}"
-                  throw ex
+              -- let (tas', sas', taEqsas'?, tVars', sVars', tBoda', sBoda') := ret
+              -- let tLCtx := (tVars ++ tVars').foldl (init := (← getLCtx)) fun acc (id, n, (type : PExpr)) => LocalContext.mkLocalDecl acc id n type default
+              --
+              -- withLCtx tLCtx do
+              --   try
+              --     _ ← meth.inferTypePure 2222 tBoda' -- sanity check
+              --   catch ex =>
+              --     -- dbg_trace s!"DBG[8]: App.lean:531 {tBoda'}"
+              --     -- dbg_trace s!"DBG[7]: App.lean:533 {tBodDom} {← meth.inferTypePure 0 $ tBoda'.toExpr |>.toPExpr}"
+              --     -- dbg_trace s!"DBG[6]: App.lean:533 {← meth.isDefEqPure 0 tBodDom $ ← meth.inferTypePure 0 $ tBoda'.toExpr |>.toPExpr}"
+              --     -- dbg_trace s!"DBG[7]: App.lean:533 {← meth.whnfPure 0 $ ta}\n\n{← meth.whnfPure 0 $ tBoda'.toExpr.replaceFVars ((tVars ++ tVars').map (.fvar ·.1)) ((tArgs' ++ tas').map (·.toExpr)) |>.toPExpr}"
+              --     throw ex
               pure (ret, 0, 0) -- TODO why does this make the extra parentheses necessary in the match above?
             | _ => getDefVals
           else
             getDefVals
+        else
+          getDefVals
 
       tArgs' := tArgs' ++ tas'
       sArgs' := sArgs' ++ sas'

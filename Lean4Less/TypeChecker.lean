@@ -147,6 +147,10 @@ def trace (msg : String) : RecM Unit := do
 
 def mkId (n : Nat) : RecM Name := do
   let id ← mkFreshId
+  -- if id == "_kernel_fresh.879".toName then
+  --   dbg_trace s!"DBG[9]: TypeChecker.lean:150 {n}"
+  -- else if id == "_kernel_fresh.877".toName then
+  --   dbg_trace s!"DBG[10]: TypeChecker.lean:153 {n}"
   modify fun st => { st with fvarRegistry := st.fvarRegistry.insert id n }
   pure id
 
@@ -1693,14 +1697,12 @@ def isDefEqCore' (t s : PExpr) : RecB := do
     let (true, tn''Eqsn''?) ← isDefEqCore 81 tn'' sn'' | return (false, none)
     return (true, ← mktEqs? tn'' sn'' tEqtn''? sEqsn''? tn''Eqsn''?)
 
-  trace s!"DBG[20]: TypeChecker.lean:1697 (after return (true, ← mktEqs? tn sn tEqtn? s…)"
   -- optimized by above functions using `cheapK = true`
   match ← isDefEqApp methsA tn' sn' with
   | (true, tn'Eqsn'?) =>
     return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)
   | _ =>
     pure ()
-  trace s!"DBG[21]: TypeChecker.lean:1704 (after pure ())"
 
   match ← tryEtaExpansion tn' sn' with
   | (true, tn'Eqsn'?) => return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)

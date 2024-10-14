@@ -122,6 +122,11 @@ axiom E : (i : I') → Nat → Nat → Nat → IT' i → Nat → Nat → Nat →
 axiom Eq : E (.left q q) 0 0 0 () 0 0 0
 
 theorem absDemoE : E (.left p p) 0 0 0 () 0 0 0 := Eq
+
+axiom F : (p : P) → Nat
+axiom P : Nat → Prop
+axiom Pq : P (F q)
+theorem absDemoF : P (F p) := Pq
 end Demo
 
 -- def IT : I → Type
