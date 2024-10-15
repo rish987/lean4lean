@@ -91,7 +91,7 @@ match fuel with
       --   | _ => unreachable!
       -- dbg_trace s!"{s.numCalls}: {stack[9]!.2}, {stack.map (·.1)}"
     try
-      let ret ← withCallId s.numCalls (.some 0) do
+      let ret ← withCallId s.numCalls (.none) do
         withCallData idx d $ m (Methods.withFuel fuel')
       if printedTrace then
         dbg_trace s!"end of    {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}, {(← readThe Context).callId}"

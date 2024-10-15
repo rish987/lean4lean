@@ -149,6 +149,10 @@ def trace (msg : String) : RecM Unit := do
   if (← readThe Context).callId == (← readThe Context).dbgCallId then
     dbg_trace msg
 
+def dotrace (msg : Unit → RecM String) : RecM Unit := do
+  if (← readThe Context).callId == (← readThe Context).dbgCallId then
+    dbg_trace (← msg ())
+
 def mkId (n : Nat) : RecM Name := do
   let id ← mkFreshId
   -- if id == "_kernel_fresh.879".toName then
@@ -567,16 +571,40 @@ def isDefEqForall (t s : PExpr) (numBinds := 0) : RecB := do
   else
     isDefEqForall' t s numBinds fun tEqs? => pure tEqs?
 
+inductive WhnfIndex where
+| fn : WhnfIndex
+| arg (i : Nat) : WhnfIndex
+| proj (i : Nat) : WhnfIndex
+
+def _root_.Lean4Less.PExpr.getWhnfAt (l : List WhnfIndex) (e : PExpr) : RecM PExpr := do
+  let e ← whnfPure 0 e
+  match l with
+  | i :: l =>
+    match i with
+    | .fn => getWhnfAt l e.toExpr.getAppFn.toPExpr
+    | .arg i => getWhnfAt l e.toExpr.getAppArgs[i]!.toPExpr
+    | .proj _ => match e.toExpr with
+      | .proj _ _ e' =>
+        getWhnfAt l e'.toPExpr
+      | _ => unreachable!
+  | [] => whnfPure 0 e
+
+instance : OfNat WhnfIndex n where
+ofNat := .arg n
+
 def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((Bool × Option EExpr) × PExpr) := do
-  let mkCast'' n tl tr p e (prfVars prfVals : Array Expr) (lvl : Level) := do
-    let app := Lean.mkAppN (← getConst n [lvl]) #[tl, tr, p.toExpr, e]
+  let getLvl tl tr := do
+    let sort ← inferTypePure 13 tr
+    let sort' ← ensureSortCorePure sort tl
+    pure sort'.toExpr.sortLevel!
+
+  let mkCast'' nm tl tr p e (prfVars prfVals : Array Expr) (lvl : Level) := do
+    let app := Lean.mkAppN (← getConst nm [lvl]) #[tl, tr, p.toExpr, e]
     pure $ app.replaceFVars prfVars prfVals
 
-  let mkCast' n tl tr p e (prfVars prfVals : Array Expr) := do
-    let sort ← inferTypePure 13 tr.toPExpr
-    let sort' ← ensureSortCorePure sort tl.toPExpr
-    let lvl := sort'.toExpr.sortLevel!
-    mkCast'' n tl tr p e prfVars prfVals lvl
+  let mkCast' nm tl tr p e (prfVars prfVals : Array Expr) := do
+    let lvl ← getLvl tl.toPExpr tr.toPExpr
+    mkCast'' nm tl tr p e prfVars prfVals lvl
 
   let rec loop e tl tr (lamVars prfVars prfVals : Array Expr) p : RecM Expr := do
     pure ()
@@ -608,7 +636,7 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
       let cast ← mkCast' `L4L.castHEq tl tr p e prfVars prfVals
       pure $ (← getLCtx).mkLambda lamVars cast
 
-  let p? ← do
+  let tlEqtr? ← do
     pure ()
     if let some p := p? then
       pure $ (true, .some p)
@@ -625,7 +653,18 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
         isDefEqForall tl' tr' nLams
       else
         isDefEq (1000 + n) tl tr
-  pure $ (p?, (← p?.2.mapM (fun (p : EExpr) => do pure (← loop e.toExpr tl.toExpr tr.toExpr #[] #[] #[] p).toPExpr)).getD e)
+
+  -- if let (true, some tlEqtr) := tlEqtr? then -- sanity check (TODO delete)
+  --   let pT ← inferTypePure 0 tlEqtr
+  --   let lvl ← getLvl tl tr
+  --   let heq := (Lean.mkAppN (← getConst `HEq [.succ lvl]) #[(Expr.sort lvl).toPExpr, tl, (Expr.sort lvl).toPExpr, tr]).toPExpr
+  --   if not (← isDefEqPure 0 pT heq) then
+  --     dbg_trace s!"DBG[2]: TypeChecker.lean:292 {p?.isSome} {(← pT.getWhnfAt [3, .fn])}"
+  --     dbg_trace s!"DBG[3]: TypeChecker.lean:292 {(← heq.getWhnfAt [3, .fn]).toExpr.ctorName}\n"
+  --     dbg_trace s!"DBG[1]: TypeChecker.lean:657 {(← get).numCalls}"
+  --     let (true, some tlEqtr) ← isDefEq (1000 + n) tl tr | unreachable!
+  --     throw $ .other s!"cast equality does not have expected type"
+  pure $ (tlEqtr?, (← tlEqtr?.2.mapM (fun (p : EExpr) => do pure (← loop e.toExpr tl.toExpr tr.toExpr #[] #[] #[] p).toPExpr)).getD e)
 
 def smartCast (n : Nat) (tl tr e : PExpr) (p? : Option EExpr := none) : RecM (Bool × PExpr) := do
   let ret ← try
@@ -972,6 +1011,9 @@ constructor application).
 -/
 def reduceProj (structName : Name) (projIdx : Nat) (struct : PExpr) (cheapK : Bool) (cheapProj : Bool) : RecM (Option (PExpr × Option EExpr)) := do
   let mut (structN, structEqc?) ← (if cheapProj then whnfCore 35 struct cheapK cheapProj else whnf 305 struct (cheapK := cheapK))
+  -- if structEqc?.isNone then
+  --   if not (← isDefEqPure 0 struct structN) then
+  --     throw $ .other s!"reduceProj failed sanity check {(← get).numCalls}"
 
   -- -- TODO is this necessary? can we assume the type of c and struct are the same?
   -- -- if not, we will need to use a different patch theorem
@@ -1300,8 +1342,8 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
       modify fun s => { s with whnfCoreCache := s.whnfCoreCache.insert e r }
       if cheapK && r.2.isNone then
         modify fun s => { s with whnfCoreCache := s.whnfCoreCache.insert e r }
-    return r
-  match e' with
+    pure r
+  let ret ← match e' with
   | .bvar .. | .sort .. | .mvar .. | .forallE .. | .const .. | .lam .. | .lit ..
   | .mdata .. => throw $ .other "unreachable 9"
   | .fvar _ => return ← whnfFVar e cheapK cheapProj
@@ -1327,7 +1369,13 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
           let eEqfrargs'? := data?.map (·.1)
           pure (frargs', rargs', eEqfrargs'?)
         else
-          pure (frargs, rargs, none)
+          let mut m := default
+          for i in [:rargs.size] do
+            m := m.insert i none
+          let (.true, data?) ← isDefEqApp'' methsA f0 f (rargs.map (·.toPExpr)).reverse (rargs.map (·.toPExpr)).reverse (tfEqsf? := pf0Eqf?) (targsEqsargs? := m)|
+            throw $ .other "unreachable 10"
+          let eEqfrargs'? := data?.map (·.1)
+          pure (frargs, rargs, eEqfrargs'?)
       else
         pure (frargs, rargs, none)
 
@@ -1367,6 +1415,11 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
       save (r', eEqr'?)
     else
       save (e, none)
+  -- let (eNew, p?) := ret
+  -- if p?.isNone then
+  --   if not (← isDefEqPure 0 eNew e) then
+  --     throw $ .other s!"whnfCore failed sanity check 3 {(← readThe Context).callId} {e'.ctorName}"
+  pure ret
 
 @[inherit_doc whnfCore]
 def whnfCore' (e : PExpr) (cheapK := false) (cheapProj := false) : RecEE :=
@@ -1466,16 +1519,28 @@ def lazyDeltaReductionStep (ltn lsn : PExpr) : RecM ReductionStatus := do
   let deltaCont_t := do
     pure () -- FIXME why is this needed to block `delta` below from being run immediately in the outer monad context?
     let (nltn, pltnEqnltn?) ← delta ltn
+    -- if pltnEqnltn?.isNone then
+    --   if not (← isDefEqPure 0 ltn nltn) then
+    --     throw $ .other "lazyDeltaReduction failed sanity check 3"
     let ret ← cont nltn lsn pltnEqnltn? none
     pure ret
   let deltaCont_s := do
     pure ()
     let (nlsn, plsnEqnlsn?) ← delta lsn
+    -- if plsnEqnlsn?.isNone then
+    --   if not (← isDefEqPure 0 lsn nlsn) then
+    --     throw $ .other "lazyDeltaReduction failed sanity check 4"
     cont ltn nlsn none plsnEqnlsn?
   let deltaCont_both := do
     pure ()
     let (nltn, pltnEqnltn?) ← delta ltn
     let (nlsn, plsnEqnlsn?) ← delta lsn
+    -- if pltnEqnltn?.isNone then
+    --   if not (← isDefEqPure 0 ltn nltn) then
+    --     throw $ .other "lazyDeltaReduction failed sanity check 5"
+    -- if plsnEqnlsn?.isNone then
+    --   if not (← isDefEqPure 0 lsn nlsn) then
+    --     throw $ .other s!"lazyDeltaReduction failed sanity check 6 {(← get).numCalls}"
     cont nltn nlsn pltnEqnltn? plsnEqnlsn?
   match isDelta env ltn, isDelta env lsn with
   | none, none => return .notDelta
@@ -1574,6 +1639,9 @@ def lazyDeltaReduction (tn sn : PExpr) : RecM ReductionStatus := loop tn sn none
 
     match ← lazyDeltaReductionStep ltn lsn with
     | .continue nltn nlsn ltnEqnltn? lsnEqnlsn? =>
+      -- if lsnEqnlsn?.isNone then
+      --   if not (← isDefEqPure 0 lsn nlsn) then
+      --     throw $ .other "lazyDeltaReduction failed sanity check 1"
 
       let tnEqnltn? ← appHEqTrans? tn ltn nltn tnEqltn? ltnEqnltn?
       let snEqnlsn? ← appHEqTrans? sn lsn nlsn snEqlsn? lsnEqnlsn?
@@ -1583,6 +1651,9 @@ def lazyDeltaReduction (tn sn : PExpr) : RecM ReductionStatus := loop tn sn none
     | .notDelta =>
       return .unknown ltn lsn tnEqltn? snEqlsn?
     | .bool .true ltnEqlsn? =>
+      -- if ltnEqlsn?.isNone then
+      --   if not (← isDefEqPure 0 ltn lsn) then
+      --     throw $ .other "lazyDeltaReduction failed sanity check 2"
       return .bool .true (← appHEqTrans? tn ltn sn tnEqltn? <| ← appHEqTrans? ltn lsn sn ltnEqlsn? <| ← appHEqSymm? sn lsn snEqlsn?)
     | .bool .false _ =>
       return .bool .false none
@@ -1664,6 +1735,9 @@ def isDefEqCore' (t s : PExpr) : RecB := do
   | .bool b tnEqsn? =>
     return (b, ← mktEqs? tn sn tEqtn? sEqsn? tnEqsn?)
   | .unknown tn' sn' tnEqtn'? snEqsn'? =>
+  -- if snEqsn'?.isNone then
+  --   if not (← isDefEqPure 0 sn sn') then
+  --     throw $ .other "lazyDeltaReduction failed sanity check"
 
   let tEqtn'? ← appHEqTrans? t tn tn' tEqtn? tnEqtn'?
   let sEqsn'? ← appHEqTrans? s sn sn' sEqsn? snEqsn'?
