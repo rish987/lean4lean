@@ -14,7 +14,7 @@ match fuel with
     dbg_trace s!"deep recursion callstack: {(← readThe Context).callStack.map (·.1)}"
     throw .deepRecursion
   | fuel' + 1 =>
-    let recDepth := (defFuel - fuel)
+    -- let recDepth := (defFuel - fuel)
     let m : RecM (CallDataT d):=
       match d with
       | .isDefEqCore t s => isDefEqCore' t s
@@ -36,21 +36,16 @@ match fuel with
     --   
 
     let mut printedTrace := false
-    if false && s.numCalls >= 0 /- && not s.printedDbg -/ then -- TODO static variables?
+    if false && s.numCalls >= 1100 /- && not s.printedDbg -/ then -- TODO static variables?
       if s.numCalls % 1 == 0 then
         printedTrace := true
         dbg_trace s!"calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}, {(← readThe Context).callId}"
     
-    let meth := Methods.withFuel fuel'
+    -- let meth := Methods.withFuel fuel'
     -- if s.isDefEqCache.size > 300 then
     --   modify fun s => {s with isDefEqCache := Std.HashMap.empty (capacity := 1000)} 
 
 
-    -- if s.numCalls == 176200 /- && not s.printedDbg -/ then -- TODO static variables?
-    --   let stack := (← readThe Context).callStack
-    --   let x := stack[14]!.2
-    --   dbg_trace s!"{s.numCalls}: {stack.map (·.1)}"
-    --   dbg_trace s!"a"
     --
     --   -- pure ()
     --
@@ -91,8 +86,13 @@ match fuel with
       --   | _ => unreachable!
       -- dbg_trace s!"{s.numCalls}: {stack[9]!.2}, {stack.map (·.1)}"
     try
-      let ret ← withCallId s.numCalls (.none) do
-        withCallData idx d $ m (Methods.withFuel fuel')
+      let ret ← withCallId s.numCalls (.some 15061) do
+        withCallData idx s.numCalls d do 
+          if s.numCalls == 15061 then
+            let stack := (← readThe Context).callStack
+            dbg_trace s!"{s.numCalls}: {stack.map (·.1)}"
+
+          m (Methods.withFuel fuel')
       if printedTrace then
         dbg_trace s!"end of    {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}, {(← readThe Context).callId}"
       pure ret
