@@ -9,9 +9,11 @@ def defFuel := 1000
 
 mutual
 def fuelWrap (idx : Nat) (fuel : Nat) (d : CallData) : M (CallDataT d) := do
+-- let trace := (← readThe Context).trace
+let trace := (← readThe Context).trace
 match fuel with
   | 0 =>
-    dbg_trace s!"deep recursion callstack: {(← readThe Context).callStack.map (·.1)}"
+    -- dbg_trace s!">deep recursion callstack: {(← readThe Context).callStack.map (·.1)}"
     throw .deepRecursion
   | fuel' + 1 =>
     let m : RecM (CallDataT d):=
@@ -23,20 +25,22 @@ match fuel with
     modify fun s => {s with numCalls := s.numCalls + 1} 
     let s ← get
     let mut printedTrace := false
-    if false && s.numCalls >= 1100 /- && not s.printedDbg -/ then -- TODO static variables?
+    if false && trace then
       if s.numCalls % 1 == 0 then
         printedTrace := true
-        dbg_trace s!"calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}, {(← readThe Context).callId}"
-    
+        let l := (← readThe Context).callStack.map fun d => s!"{d.1}/{d.2.1}"
+        dbg_trace s!">calltrace {s.numCalls}: {l}, {idx}, {(← readThe Context).callId}"
     try
-      let ret ← withCallId s.numCalls (.none) do
-        -- withCallData idx d $ m (Methods.withFuel fuel')
-        m (Methods.withFuel fuel')
+      let ret ← withCallId s.numCalls (.some 22160) do
+        if trace then
+          withCallData idx s.numCalls d $ m (Methods.withFuel fuel')
+        else
+          m (Methods.withFuel fuel')
       if printedTrace then
-        dbg_trace s!"end of    {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}, {(← readThe Context).callId}"
+        dbg_trace s!">end of    {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}, {(← readThe Context).callId}"
       pure ret
     catch e =>
-      dbg_trace s!"calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}"
+      -- dbg_trace s!">calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}"
       throw e
 
 def Methods.withFuel (n : Nat) : Methods := 
@@ -62,7 +66,7 @@ def inferType (e : Expr) : M Expr := (Inner.inferType 50 e).run
 
 def inferTypeCheck (e : Expr) : M Expr := (Inner.inferType 51 e (inferOnly := false)).run
 
-def isDefEq (t s : Expr) (fuel := defFuel) : M Bool := (Inner.isDefEq t s).run fuel
+def isDefEq (t s : Expr) (fuel := defFuel) : M Bool := (Inner.isDefEq 69 t s).run fuel
 
 def isDefEqCore (t s : Expr) : M Bool := (Inner.isDefEqCore 52 t s).run
 

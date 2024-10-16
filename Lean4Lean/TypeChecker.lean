@@ -6,7 +6,7 @@ import Lean4Lean.Instantiate
 import Lean4Lean.ForEachExprV
 import Lean4Lean.EquivManager
 
--- 52
+-- 72
 
 namespace Lean
 
@@ -68,8 +68,9 @@ structure TypeChecker.Context where
   lctx : LocalContext := {}
   safety : DefinitionSafety := .safe
   callId : Nat := 0
+  trace : Bool := false
   dbgCallId : Option Nat := none
-  callStack : Array (Nat × CallData) := #[]
+  callStack : Array (Nat × Nat × CallData) := #[]
   lparams : List Name := []
 
 namespace TypeChecker
@@ -77,12 +78,12 @@ namespace TypeChecker
 abbrev M := ReaderT Context <| StateT State <| Except KernelException
 
 def M.run (env : Environment) (x : M α)
-   (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) (ngen : NameGenerator := defngen) (state : State := {}): Except KernelException (α × State) :=
-  x {env, safety, lctx, opts, lparams} |>.run {state with ngen}
+   (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) (ngen : NameGenerator := defngen) (trace := false) (state : State := {}): Except KernelException (α × State) := do
+  x {env, safety, lctx, opts, lparams, trace} |>.run {state with ngen}
 
 def M.run' (env : Environment) (x : M α)
-   (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) (ngen : NameGenerator := defngen): Except KernelException α :=
-  x { env, safety, lctx, opts, lparams } |>.run' {ngen}
+   (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) (ngen : NameGenerator := defngen) (trace := false) : Except KernelException α := do
+  x { env, safety, lctx, opts, lparams, trace} |>.run' {ngen}
 
 instance : MonadEnv M where
   getEnv := return (← read).env
@@ -106,16 +107,23 @@ structure Methods where
 
 abbrev RecM := ReaderT Methods M
 
+def callStackToStr : M String := do 
+  let l := (← readThe Context).callStack.map fun d => s!"{d.1}/{d.2.1}"
+  pure $ s!"{l}"
+
 def traceM (msg : String) : M Unit := do
   if (← readThe Context).callId == (← readThe Context).dbgCallId then
     dbg_trace msg
 
+def shouldTrace : M Bool := do
+  pure $ (← readThe Context).trace && (← readThe Context).callStack.any (·.2.1 == (← readThe Context).dbgCallId)
+
 def trace (msg : String) : RecM Unit := do
-  if (← readThe Context).callId == (← readThe Context).dbgCallId then
+  if ← shouldTrace then
     dbg_trace msg
 
 def dotrace (msg : Unit → RecM String) : RecM Unit := do
-  if (← readThe Context).callId == (← readThe Context).dbgCallId then
+  if ← shouldTrace then
     trace (← msg ())
 
 inductive ReductionStatus where
@@ -133,8 +141,10 @@ def whnf (n : Nat) (e : Expr) : RecM Expr := fun m => m.whnf n e
 @[inline] def withDbg [MonadWithReaderOf Context m] (i : Nat) (x : m α) : m α :=
   withReader (fun l => {l with dbg := i}) x
 
-@[inline] def withCallData [MonadWithReaderOf Context m] (i : Nat) (d : CallData) (x : m α) : m α :=
-  withReader (fun c => {c with callStack := c.callStack.push (i, d)}) x
+@[inline] def rctx [MonadReaderOf Context m] : m Context := (readThe Context)
+
+@[inline] def withCallData [MonadWithReaderOf Context m] (i : Nat) (id : Nat) (d : CallData) (x : m α) : m α :=
+  withReader (fun c => {c with callStack := c.callStack.push (i, id, d)}) x
 
 @[inline] def withCallId [MonadWithReaderOf Context m] (id : Nat) (dbgCallId : Option Nat := none) (x : m α) : m α :=
   withReader (fun c => {c with callId := id, dbgCallId}) x
@@ -213,8 +223,8 @@ def inferForall (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] #[] e wher
 
 def isDefEqCore (n : Nat) (t s : Expr) : RecM Bool := fun m => m.isDefEqCore n t s
 
-def isDefEq (t s : Expr) : RecM Bool := do
-  let r ← isDefEqCore 7 t s
+def isDefEq (n : Nat) (t s : Expr) : RecM Bool := do
+  let r ← isDefEqCore n t s
   if r then
     modify fun st => { st with eqvManager := st.eqvManager.addEquiv t s }
   pure r
@@ -257,7 +267,7 @@ def inferLet (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] #[] e where
       if !inferOnly then
         _ ← ensureSortCore (← inferType 9 type inferOnly) type
         let valType ← inferType 10 val inferOnly
-        if !(← isDefEq valType type) then
+        if !(← isDefEq 53 valType type) then
           throw <| .letTypeMismatch (← getEnv) (← getLCtx) name valType type
       loop fvars vals body
   | e => do
@@ -343,7 +353,7 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
   let r ← match e with
     | .lit l => pure l.type
     | .mdata _ e => inferType' e inferOnly
-    | .proj s idx e => inferProj s idx e (← inferType' e inferOnly)
+    | .proj s idx e => inferProj s idx e (← inferType 71 e inferOnly)
     | .fvar n => inferFVar (← readThe Context) n
     | .mvar _ => throw <| .other "kernel type checker does not support meta variables"
     | .bvar _ => unreachable!
@@ -358,14 +368,16 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
       if inferOnly then
         inferApp e
       else
-        let fType ← ensureForallCore (← inferType' f inferOnly) e
-        let aType ← inferType' a inferOnly
+        let fType ← ensureForallCore (← inferType 70 f inferOnly) e
+        let aType ← inferType 72 a inferOnly
         let dType := fType.bindingDomain!
-        if !(← isDefEq dType aType) then
+        trace s!"DBG[4]: {(← rctx).callId}, {← callStackToStr}, {e.getAppArgs.size}, {e.getAppFn} \n\n{dType}\n\n{aType}"
+        if !(← isDefEq 54 dType aType) then
           -- dbg_trace s!"DBG: {a}\n\n{aType}\n"
           -- dbg_trace s!"DBG[2]: TypeChecker.lean:292 {(← aType.getWhnfAt [1, .fn])}\n"
           -- dbg_trace s!"DBG[3]: TypeChecker.lean:292 {(← dType.getWhnfAt [1, .fn, .proj 1])}\n"
           throw <| .appTypeMismatch (← getEnv) (← getLCtx) e fType aType
+        trace s!"DBG[5]: {(← rctx).callId}"
         pure <| fType.bindingBody!.instantiate1 a
     | .letE .. => inferLet e inferOnly
   modify fun s => cond inferOnly
@@ -382,7 +394,7 @@ def reduceRecursor (e : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) :
     if let some r ← quotReduceRec e (whnf 21) then
       return r
   let whnf' e := if cheapRec then whnfCore e cheapRec cheapProj else whnf 22 e
-  if let some (r, usedKLikeReduction) ← inductiveReduceRec env e whnf' (inferType 23) isDefEq (← readThe Context).opts.kLikeReduction then
+  if let some (r, usedKLikeReduction) ← inductiveReduceRec env e whnf' (inferType 23) (isDefEq 55) (← readThe Context).opts.kLikeReduction then
     if usedKLikeReduction then
       modify fun s => {s with data := {s.data with usedKLikeReduction := true}}
     return r
@@ -553,7 +565,7 @@ def isDefEqLambda (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
     let sType ← if tDom != sDom then
       let sType := sDom.instantiateRev subst
       let tType := tDom.instantiateRev subst
-      if !(← isDefEq tType sType) then return false
+      if !(← isDefEq 56 tType sType) then return false
       pure (some sType)
     else pure none
     if tBody.hasLooseBVars || sBody.hasLooseBVars then
@@ -563,7 +575,7 @@ def isDefEqLambda (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
         isDefEqLambda tBody sBody (subst.push (.fvar id))
     else
       isDefEqLambda tBody sBody (subst.push default)
-  | t, s => isDefEq (t.instantiateRev subst) (s.instantiateRev subst)
+  | t, s => isDefEq 57 (t.instantiateRev subst) (s.instantiateRev subst)
 
 def isDefEqForall (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
   match t, s with
@@ -571,7 +583,7 @@ def isDefEqForall (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
     let sType ← if tDom != sDom then
       let sType := sDom.instantiateRev subst
       let tType := tDom.instantiateRev subst
-      if !(← isDefEq tType sType) then return false
+      if !(← isDefEq 58 tType sType) then return false
       pure (some sType)
     else pure none
     if tBody.hasLooseBVars || sBody.hasLooseBVars then
@@ -581,7 +593,7 @@ def isDefEqForall (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
         isDefEqForall tBody sBody (subst.push (.fvar id))
     else
       isDefEqForall tBody sBody (subst.push default)
-  | t, s => isDefEq (t.instantiateRev subst) (s.instantiateRev subst)
+  | t, s => isDefEq 59 (t.instantiateRev subst) (s.instantiateRev subst)
 
 def quickIsDefEq (t s : Expr) (useHash := false) : RecM LBool := do
   if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 (eqvManager := m)) =>
@@ -592,7 +604,7 @@ def quickIsDefEq (t s : Expr) (useHash := false) : RecM LBool := do
   | .lam .., .lam .. => toLBoolM <| isDefEqLambda t s
   | .forallE .., .forallE .. => toLBoolM <| isDefEqForall t s
   | .sort a1, .sort a2 => pure (a1.isEquiv a2).toLBool
-  | .mdata _ a1, .mdata _ a2 => toLBoolM <| isDefEq a1 a2
+  | .mdata _ a1, .mdata _ a2 => toLBoolM <| isDefEq 60 a1 a2
   | .mvar .., .mvar .. => unreachable!
   | .lit a1, .lit a2 => pure (a1 == a2).toLBool
   | _, _ => return .undef
@@ -600,7 +612,7 @@ def quickIsDefEq (t s : Expr) (useHash := false) : RecM LBool := do
 def isDefEqArgs (t s : Expr) : RecM Bool := do
   match t, s with
   | .app tf ta, .app sf sa =>
-    if !(← isDefEq ta sa) then return false
+    if !(← isDefEq 61 ta sa) then return false
     isDefEqArgs tf sf
   | .app .., _ | _, .app .. => return false
   | _, _ => return true
@@ -608,7 +620,7 @@ def isDefEqArgs (t s : Expr) : RecM Bool := do
 def tryEtaExpansionCore (t s : Expr) : RecM Bool := do
   if t.isLambda && !s.isLambda then
     let .forallE name ty _ bi ← whnf 30 (← inferType 31 s) | return false
-    isDefEq t (.lam name ty (.app s (.bvar 0)) bi)
+    isDefEq 62 t (.lam name ty (.app s (.bvar 0)) bi)
   else return false
 
 def tryEtaExpansion (t s : Expr) : RecM Bool :=
@@ -620,10 +632,10 @@ def tryEtaStructCore (t s : Expr) : RecM Bool := do
   let .ctorInfo fInfo ← env.get f | return false
   unless s.getAppNumArgs == fInfo.numParams + fInfo.numFields do return false
   unless isStructureLike env fInfo.induct do return false
-  unless ← isDefEq (← inferType 32 t) (← inferType 33 s) do return false
+  unless ← isDefEq 63 (← inferType 32 t) (← inferType 33 s) do return false
   let args := s.getAppArgs
   for h : i in [fInfo.numParams:args.size] do
-    unless ← isDefEq (.proj fInfo.induct (i - fInfo.numParams) t) (args[i]'h.2) do return false
+    unless ← isDefEq 64 (.proj fInfo.induct (i - fInfo.numParams) t) (args[i]'h.2) do return false
   return true
 
 def tryEtaStruct (t s : Expr) : RecM Bool :=
@@ -634,15 +646,17 @@ def isDefEqApp (t s : Expr) : RecM Bool := do
   t.withApp fun tf tArgs =>
   s.withApp fun sf sArgs => do
   unless tArgs.size == sArgs.size do return false
-  unless ← isDefEq tf sf do return false
+  unless ← isDefEq 65 tf sf do return false
   for ta in tArgs, sa in sArgs do
-    unless ← isDefEq ta sa do return false
+    unless ← isDefEq 66 ta sa do return false
   return true
 
 def isDefEqProofIrrel (t s : Expr) : RecM LBool := do
   let tType ← inferType 34 t
   if !(← isProp tType) then return .undef
-  let ret ← toLBoolM <| isDefEq tType (← inferType 35 s)
+  let ret ← toLBoolM <| isDefEq 67 tType (← inferType 35 s)
+  if ret == .true then
+    trace s!"DBG[3]: TypeChecker.lean: {←callStackToStr}\n  {t}\n  {s}"
   return ret
   -- pure .undef
   
@@ -788,7 +802,7 @@ def isDefEqCore' (t s : Expr) : RecM Bool := do
     if tf == sf && Level.isEquivList tl sl then return true
   | .fvar tv, .fvar sv => if tv == sv then return true
   | .proj _ ti te, .proj _ si se =>
-    if ti == si then if ← isDefEq te se then return true
+    if ti == si then if ← isDefEq 68 te se then return true
   | _, _ => pure ()
 
   let tnn ← whnfCore tn
