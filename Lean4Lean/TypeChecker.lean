@@ -6,6 +6,8 @@ import Lean4Lean.Instantiate
 import Lean4Lean.ForEachExprV
 import Lean4Lean.EquivManager
 
+-- 52
+
 namespace Lean
 
 abbrev InferCache := ExprMap Expr
@@ -25,7 +27,35 @@ structure TypeChecker.State where
   whnfCoreCache : ExprMap Expr := {}
   whnfCache : ExprMap Expr := {}
   eqvManager : EquivManager := {}
+  numCalls : Nat := 0
   failure : Std.HashSet (Expr × Expr) := {}
+
+inductive CallData where
+|  isDefEqCore : Expr → Expr → CallData
+|  whnfCore (e : Expr) (cheapRec : Bool) (cheapProj : Bool) : CallData
+|  whnf (e : Expr) : CallData
+|  inferType (e : Expr) (inferOnly : Bool) : CallData
+deriving Inhabited
+
+instance : ToString CallData where
+toString
+| .isDefEqCore t s     => s!"isDefEqCore ({t}) ({s})"
+| .whnfCore e k p      => s!"whnfCore ({e}) {k} {p}"
+| .whnf e              => s!"whnf ({e})"
+| .inferType e d       => s!"inferType ({e}) ({d})"
+
+def CallData.name : CallData → String
+| .isDefEqCore ..     => "isDefEqCore"
+| .whnfCore ..        => "whnfCore"
+| .whnf ..            => "whnf"
+| .inferType ..       => "inferType"
+
+@[reducible]
+def CallDataT : CallData → Type
+| .isDefEqCore ..     => Bool
+| .whnfCore ..        => Expr
+| .whnf ..            => Expr
+| .inferType ..       => Expr
 
 structure TypeCheckerOpts where
   proofIrrelevance := true
@@ -37,6 +67,9 @@ structure TypeChecker.Context where
   opts : TypeCheckerOpts := {}
   lctx : LocalContext := {}
   safety : DefinitionSafety := .safe
+  callId : Nat := 0
+  dbgCallId : Option Nat := none
+  callStack : Array (Nat × CallData) := #[]
   lparams : List Name := []
 
 namespace TypeChecker
@@ -66,12 +99,24 @@ instance (priority := low) : MonadWithReaderOf LocalContext M where
   withReader f := withReader fun s => { s with lctx := f s.lctx }
 
 structure Methods where
-  isDefEqCore : Expr → Expr → M Bool
-  whnfCore (e : Expr) (cheapRec := false) (cheapProj := false) : M Expr
-  whnf (e : Expr) : M Expr
-  inferType (e : Expr) (inferOnly : Bool) : M Expr
+  isDefEqCore : Nat → Expr → Expr → M Bool
+  whnfCore (n : Nat) (e : Expr) (cheapRec := false) (cheapProj := false) : M Expr
+  whnf (n : Nat) (e : Expr) : M Expr
+  inferType (n : Nat) (e : Expr) (inferOnly : Bool) : M Expr
 
 abbrev RecM := ReaderT Methods M
+
+def traceM (msg : String) : M Unit := do
+  if (← readThe Context).callId == (← readThe Context).dbgCallId then
+    dbg_trace msg
+
+def trace (msg : String) : RecM Unit := do
+  if (← readThe Context).callId == (← readThe Context).dbgCallId then
+    dbg_trace msg
+
+def dotrace (msg : Unit → RecM String) : RecM Unit := do
+  if (← readThe Context).callId == (← readThe Context).dbgCallId then
+    trace (← msg ())
 
 inductive ReductionStatus where
   | continue (tn sn : Expr)
@@ -80,7 +125,7 @@ inductive ReductionStatus where
 
 namespace Inner
 
-def whnf (e : Expr) : RecM Expr := fun m => m.whnf e
+def whnf (n : Nat) (e : Expr) : RecM Expr := fun m => m.whnf n e
 
 @[inline] def withLCtx [MonadWithReaderOf LocalContext m] (lctx : LocalContext) (x : m α) : m α :=
   withReader (fun _ => lctx) x
@@ -88,15 +133,21 @@ def whnf (e : Expr) : RecM Expr := fun m => m.whnf e
 @[inline] def withDbg [MonadWithReaderOf Context m] (i : Nat) (x : m α) : m α :=
   withReader (fun l => {l with dbg := i}) x
 
+@[inline] def withCallData [MonadWithReaderOf Context m] (i : Nat) (d : CallData) (x : m α) : m α :=
+  withReader (fun c => {c with callStack := c.callStack.push (i, d)}) x
+
+@[inline] def withCallId [MonadWithReaderOf Context m] (id : Nat) (dbgCallId : Option Nat := none) (x : m α) : m α :=
+  withReader (fun c => {c with callId := id, dbgCallId}) x
+
 def ensureSortCore (e s : Expr) : RecM Expr := do
   if e.isSort then return e
-  let e ← whnf e
+  let e ← whnf 1 e
   if e.isSort then return e
   throw <| .typeExpected (← getEnv) (← getLCtx) s
 
 def ensureForallCore (e s : Expr) : RecM Expr := do
   if e.isForall then return e
-  let e' ← whnf e
+  let e' ← whnf 2 e
   if e'.isForall then return e'
   throw <| .funExpected (← getEnv) (← getLCtx) s
 
@@ -128,7 +179,7 @@ def inferConstant (tc : Context) (name : Name) (ls : List Level) (inferOnly : Bo
       checkLevel tc l
   return info.instantiateTypeLevelParams ls
 
-def inferType (e : Expr) (inferOnly := true) : RecM Expr := fun m => m.inferType e inferOnly
+def inferType (n : Nat) (e : Expr) (inferOnly := true) : RecM Expr := fun m => m.inferType n e inferOnly
 
 def inferLambda (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] e where
   loop fvars : Expr → RecM Expr
@@ -138,10 +189,10 @@ def inferLambda (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] e where
     withLCtx ((← getLCtx).mkLocalDecl id name d bi) do
       let fvars := fvars.push (.fvar id)
       if !inferOnly then
-        _ ← ensureSortCore (← inferType d inferOnly) d
+        _ ← ensureSortCore (← inferType 3 d inferOnly) d
       loop fvars body
   | e => do
-    let r ← inferType (e.instantiateRev fvars) inferOnly
+    let r ← inferType 4 (e.instantiateRev fvars) inferOnly
     let r := r.cheapBetaReduce
     return (← getLCtx).mkForall fvars r
 
@@ -149,28 +200,28 @@ def inferForall (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] #[] e wher
   loop fvars us : Expr → RecM Expr
   | .forallE name dom body bi => do
     let d := dom.instantiateRev fvars
-    let t1 ← ensureSortCore (← inferType d inferOnly) d
+    let t1 ← ensureSortCore (← inferType 5 d inferOnly) d
     let us := us.push t1.sortLevel!
     let id := ⟨← mkFreshId⟩
     withLCtx ((← getLCtx).mkLocalDecl id name d bi) do
       let fvars := fvars.push (.fvar id)
       loop fvars us body
   | e => do
-    let r ← inferType (e.instantiateRev fvars) inferOnly
+    let r ← inferType 6 (e.instantiateRev fvars) inferOnly
     let s ← ensureSortCore r e
     return .sort <| us.foldr mkLevelIMax' s.sortLevel!
 
-def isDefEqCore (t s : Expr) : RecM Bool := fun m => m.isDefEqCore t s
+def isDefEqCore (n : Nat) (t s : Expr) : RecM Bool := fun m => m.isDefEqCore n t s
 
 def isDefEq (t s : Expr) : RecM Bool := do
-  let r ← isDefEqCore t s
+  let r ← isDefEqCore 7 t s
   if r then
     modify fun st => { st with eqvManager := st.eqvManager.addEquiv t s }
   pure r
 
 def inferApp (e : Expr) : RecM Expr := do
   e.withApp fun f args => do
-  let mut fType ← inferType f
+  let mut fType ← inferType 8 f
   let mut j := 0
   for i in [:args.size] do
     match fType with
@@ -204,13 +255,13 @@ def inferLet (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] #[] e where
       let fvars := fvars.push (.fvar id)
       let vals := vals.push val
       if !inferOnly then
-        _ ← ensureSortCore (← inferType type inferOnly) type
-        let valType ← inferType val inferOnly
+        _ ← ensureSortCore (← inferType 9 type inferOnly) type
+        let valType ← inferType 10 val inferOnly
         if !(← isDefEq valType type) then
           throw <| .letTypeMismatch (← getEnv) (← getLCtx) name valType type
       loop fvars vals body
   | e => do
-    let r ← inferType (e.instantiateRev fvars) inferOnly
+    let r ← inferType 11 (e.instantiateRev fvars) inferOnly
     let r := r.cheapBetaReduce
     let rec loopUsed i (used : Array Bool) :=
       match i with
@@ -228,11 +279,11 @@ def inferLet (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] #[] e where
     return (← getLCtx).mkForall fvars r
 
 def isProp (e : Expr) : RecM Bool :=
-  return (← whnf (← inferType e)) == .prop
+  return (← whnf 12 (← inferType 13 e)) == .prop
 
 def inferProj (typeName : Name) (idx : Nat) (struct structType : Expr) : RecM Expr := do
   let e := Expr.proj typeName idx struct
-  let type ← whnf structType
+  let type ← whnf 14 structType
   type.withApp fun I args => do
   let env ← getEnv
   let fail {_} := do throw <| .invalidProj env (← getLCtx) e
@@ -244,19 +295,40 @@ def inferProj (typeName : Name) (idx : Nat) (struct structType : Expr) : RecM Ex
   let c_info ← env.get c
   let mut r := c_info.instantiateTypeLevelParams I_levels
   for i in [:I_val.numParams] do
-    let .forallE _ _ b _ ← whnf r | fail
+    let .forallE _ _ b _ ← whnf 15 r | fail
     r := b.instantiate1 args[i]!
   let isPropType ← isProp type
   for i in [:idx] do
-    let .forallE _ dom b _ ← whnf r | fail
+    let .forallE _ dom b _ ← whnf 16 r | fail
     if b.hasLooseBVars then
       if isPropType then if !(← isProp dom) then fail
       r := b.instantiate1 (.proj I_name i struct)
     else
       r := b
-  let .forallE _ dom _ _ ← whnf r | fail
+  let .forallE _ dom _ _ ← whnf 17 r | fail
   if isPropType then if !(← isProp dom) then fail
   return dom
+
+inductive WhnfIndex where
+| fn : WhnfIndex
+| arg (i : Nat) : WhnfIndex
+| proj (i : Nat) : WhnfIndex
+
+def _root_.Lean.Expr.getWhnfAt' (l : List WhnfIndex) (e : Expr) : RecM Expr := do
+  let e ← whnf 18 e
+  match l with
+  | i :: l =>
+    match i with
+    | .fn => getWhnfAt' l e.getAppFn
+    | .arg i => getWhnfAt' l e.getAppArgs[i]!
+    | .proj _ => match e with
+      | .proj _ _ e' =>
+        getWhnfAt' l e'
+      | _ => unreachable!
+  | [] => whnf 19 e
+
+instance : OfNat WhnfIndex n where
+ofNat := .arg n
 
 def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
   if e.isBVar then
@@ -290,6 +362,9 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
         let aType ← inferType' a inferOnly
         let dType := fType.bindingDomain!
         if !(← isDefEq dType aType) then
+          -- dbg_trace s!"DBG: {a}\n\n{aType}\n"
+          -- dbg_trace s!"DBG[2]: TypeChecker.lean:292 {(← aType.getWhnfAt [1, .fn])}\n"
+          -- dbg_trace s!"DBG[3]: TypeChecker.lean:292 {(← dType.getWhnfAt [1, .fn, .proj 1])}\n"
           throw <| .appTypeMismatch (← getEnv) (← getLCtx) e fType aType
         pure <| fType.bindingBody!.instantiate1 a
     | .letE .. => inferLet e inferOnly
@@ -299,15 +374,15 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
   return r
 
 def whnfCore (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr :=
-  fun m => m.whnfCore e cheapRec cheapProj
+  fun m => m.whnfCore 20 e cheapRec cheapProj
 
 def reduceRecursor (e : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) := do
   let env ← getEnv
   if env.header.quotInit then
-    if let some r ← quotReduceRec e whnf then
+    if let some r ← quotReduceRec e (whnf 21) then
       return r
-  let whnf' e := if cheapRec then whnfCore e cheapRec cheapProj else whnf e
-  if let some (r, usedKLikeReduction) ← inductiveReduceRec env e whnf' inferType isDefEq (← readThe Context).opts.kLikeReduction then
+  let whnf' e := if cheapRec then whnfCore e cheapRec cheapProj else whnf 22 e
+  if let some (r, usedKLikeReduction) ← inductiveReduceRec env e whnf' (inferType 23) isDefEq (← readThe Context).opts.kLikeReduction then
     if usedKLikeReduction then
       modify fun s => {s with data := {s.data with usedKLikeReduction := true}}
     return r
@@ -319,7 +394,7 @@ def whnfFVar (e : Expr) (cheapRec cheapProj : Bool) : RecM Expr := do
   return e
 
 def reduceProj (idx : Nat) (struct : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) := do
-  let mut c ← (if cheapProj then whnfCore struct cheapRec cheapProj else whnf struct)
+  let mut c ← (if cheapProj then whnfCore struct cheapRec cheapProj else whnf 24 struct)
   if let .lit (.strVal s) := c then
     c := .strLitToConstructor s
   c.withApp fun mk args => do
@@ -415,13 +490,13 @@ def reduceNative (_env : Environment) (e : Expr) : Except KernelException (Optio
 def rawNatLitExt? (e : Expr) : Option Nat := if e == .natZero then some 0 else e.rawNatLit?
 
 def reduceBinNatOp (f : Nat → Nat → Nat) (a b : Expr) : RecM (Option Expr) := do
-  let some v1 := rawNatLitExt? (← whnf a) | return none
-  let some v2 := rawNatLitExt? (← whnf b) | return none
+  let some v1 := rawNatLitExt? (← whnf 25 a) | return none
+  let some v2 := rawNatLitExt? (← whnf 26 b) | return none
   return some <| .lit <| .natVal <| f v1 v2
 
 def reduceBinNatPred (f : Nat → Nat → Bool) (a b : Expr) : RecM (Option Expr) := do
-  let some v1 := rawNatLitExt? (← whnf a) | return none
-  let some v2 := rawNatLitExt? (← whnf b) | return none
+  let some v1 := rawNatLitExt? (← whnf 27 a) | return none
+  let some v2 := rawNatLitExt? (← whnf 28 b) | return none
   return toExpr <| f v1 v2
 
 def reduceNat (e : Expr) : RecM (Option Expr) := do
@@ -430,7 +505,7 @@ def reduceNat (e : Expr) : RecM (Option Expr) := do
   if nargs == 1 then
     let f := e.appFn!
     if f == .const ``Nat.succ [] then
-      let some v := rawNatLitExt? (← whnf e.appArg!) | return none
+      let some v := rawNatLitExt? (← whnf 29 e.appArg!) | return none
       return some <| .lit <| .natVal <| v + 1
   else if nargs == 2 then
     let .app (.app (.const f _) a) b := e | return none
@@ -509,9 +584,9 @@ def isDefEqForall (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
   | t, s => isDefEq (t.instantiateRev subst) (s.instantiateRev subst)
 
 def quickIsDefEq (t s : Expr) (useHash := false) : RecM LBool := do
-  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 (eqvManager := m)) =>
+  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 (eqvManager := m)) =>
     let (b, m) := m.isEquiv useHash t s
-    (b, .mk a1 a2 a3 a4 a5 a6 a7 (eqvManager := m))
+    (b, .mk a1 a2 a3 a4 a5 a6 a7 a8 (eqvManager := m))
   then return .true
   match t, s with
   | .lam .., .lam .. => toLBoolM <| isDefEqLambda t s
@@ -532,7 +607,7 @@ def isDefEqArgs (t s : Expr) : RecM Bool := do
 
 def tryEtaExpansionCore (t s : Expr) : RecM Bool := do
   if t.isLambda && !s.isLambda then
-    let .forallE name ty _ bi ← whnf (← inferType s) | return false
+    let .forallE name ty _ bi ← whnf 30 (← inferType 31 s) | return false
     isDefEq t (.lam name ty (.app s (.bvar 0)) bi)
   else return false
 
@@ -545,7 +620,7 @@ def tryEtaStructCore (t s : Expr) : RecM Bool := do
   let .ctorInfo fInfo ← env.get f | return false
   unless s.getAppNumArgs == fInfo.numParams + fInfo.numFields do return false
   unless isStructureLike env fInfo.induct do return false
-  unless ← isDefEq (← inferType t) (← inferType s) do return false
+  unless ← isDefEq (← inferType 32 t) (← inferType 33 s) do return false
   let args := s.getAppArgs
   for h : i in [fInfo.numParams:args.size] do
     unless ← isDefEq (.proj fInfo.induct (i - fInfo.numParams) t) (args[i]'h.2) do return false
@@ -565,9 +640,9 @@ def isDefEqApp (t s : Expr) : RecM Bool := do
   return true
 
 def isDefEqProofIrrel (t s : Expr) : RecM LBool := do
-  let tType ← inferType t
+  let tType ← inferType 34 t
   if !(← isProp tType) then return .undef
-  let ret ← toLBoolM <| isDefEq tType (← inferType s)
+  let ret ← toLBoolM <| isDefEq tType (← inferType 35 s)
   return ret
   -- pure .undef
   
@@ -639,7 +714,7 @@ def isDefEqOffset (t s : Expr) : RecM LBool := do
   if isNatZero t && isNatZero s then
     return .true
   match isNatSuccOf? t, isNatSuccOf? s with
-  | some t', some s' => toLBoolM <| isDefEqCore t' s'
+  | some t', some s' => toLBoolM <| isDefEqCore 36 t' s'
   | _, _ => return .undef
 
 def lazyDeltaReduction (tn sn : Expr) : RecM ReductionStatus := loop tn sn 1000 where
@@ -650,14 +725,14 @@ def lazyDeltaReduction (tn sn : Expr) : RecM ReductionStatus := loop tn sn 1000 
     if r != .undef then return .bool (r == .true)
     if !tn.hasFVar && !sn.hasFVar then
       if let some tn' ← reduceNat tn then
-        return .bool (← isDefEqCore tn' sn)
+        return .bool (← isDefEqCore 37 tn' sn)
       else if let some sn' ← reduceNat sn then
-        return .bool (← isDefEqCore tn sn')
+        return .bool (← isDefEqCore 38 tn sn')
     let env ← getEnv
     if let some tn' ← reduceNative env tn then
-      return .bool (← isDefEqCore tn' sn)
+      return .bool (← isDefEqCore 39 tn' sn)
     else if let some sn' ← reduceNative env sn then
-      return .bool (← isDefEqCore tn sn')
+      return .bool (← isDefEqCore 40 tn sn')
     match ← lazyDeltaReductionStep tn sn with
     | .continue tn sn => loop tn sn fuel
     | r => return r
@@ -666,7 +741,7 @@ def tryStringLitExpansionCore (t s : Expr) : RecM LBool := do
   let .lit (.strVal st) := t | return .undef
   let .app sf _ := s | return .undef
   unless sf == .const ``String.mk [] do return .undef
-  toLBoolM <| isDefEqCore (.strLitToConstructor st) s
+  toLBoolM <| isDefEqCore 41 (.strLitToConstructor st) s
 
 def tryStringLitExpansion (t s : Expr) : RecM LBool := do
   match ← tryStringLitExpansionCore t s with
@@ -674,20 +749,20 @@ def tryStringLitExpansion (t s : Expr) : RecM LBool := do
   | r => return r
 
 def isDefEqUnitLike (t s : Expr) : RecM Bool := do
-  let tType ← whnf (← inferType t)
+  let tType ← whnf 42 (← inferType 43 t)
   let .const I _ := tType.getAppFn | return false
   let env ← getEnv
   let .inductInfo { isRec := false, ctors := [c], numIndices := 0, .. } ← env.get I
     | return false
   let .ctorInfo { numFields := 0, .. } ← env.get c | return false
-  isDefEqCore tType (← inferType s)
+  isDefEqCore 44 tType (← inferType 45 s)
 
 def isDefEqCore' (t s : Expr) : RecM Bool := do
   let r ← quickIsDefEq t s (useHash := true)
   if r != .undef then return r == .true
 
   if !t.hasFVar && s.isConstOf ``true then
-    if (← whnf t).isConstOf ``true then return true
+    if (← whnf 46 t).isConstOf ``true then return true
 
   let tn ← whnfCore t (cheapProj := true)
   let sn ← whnfCore s (cheapProj := true)
@@ -719,7 +794,7 @@ def isDefEqCore' (t s : Expr) : RecM Bool := do
   let tnn ← whnfCore tn
   let snn ← whnfCore sn
   if !(tnn == tn && snn == sn) then
-    return ← isDefEqCore tnn snn
+    return ← isDefEqCore 47 tnn snn
 
   if ← isDefEqApp tn sn then return true
   if ← tryEtaExpansion tn sn then return true
@@ -730,84 +805,3 @@ def isDefEqCore' (t s : Expr) : RecM Bool := do
   return false
 
 end Inner
-
-open Inner
-
-def defFuel := 1000
-
-mutual
-def fuelWrap (n : Nat) (m : Methods → M T) : M T := do
-  let st ← get
-  let recDepth := (defFuel - n)
-  if recDepth > st.data.maxRecursionDepth then
-    modify fun s => {s with data := {s.data with maxRecursionDepth := recDepth}}
-  m (Methods.withFuel n)
-
-def Methods.withFuel : Nat → Methods
-  | 0 =>
-    { isDefEqCore := fun _ _ =>
-        throw .deepRecursion
-      whnfCore := fun _ _ _ =>
-        throw .deepRecursion
-      whnf := fun _ =>
-        throw .deepRecursion
-      inferType := fun _ _ =>
-        throw .deepRecursion }
-  | n + 1 =>
-    { isDefEqCore := fun t s => do
-        fuelWrap n $ isDefEqCore' t s
-      whnfCore := fun e r p =>
-        fuelWrap n $ whnfCore' e r p
-      whnf := fun e =>
-        fuelWrap n $ whnf' e
-      inferType := fun e i =>
-        fuelWrap n $ inferType' e i}
-end
-
-def RecM.run (x : RecM α) (fuel := defFuel) : M α := x (Methods.withFuel fuel)
-
-def check (e : Expr) (lps : List Name) : M Expr :=
-  withReader ({ · with lparams := lps }) (inferType e (inferOnly := false)).run
-
-def whnf (e : Expr) : M Expr := (Inner.whnf e).run
-
-def inferType (e : Expr) : M Expr := (Inner.inferType e).run
-
-def inferTypeCheck (e : Expr) : M Expr := (Inner.inferType e (inferOnly := false)).run
-
-def isDefEq (t s : Expr) (fuel := defFuel) : M Bool := (Inner.isDefEq t s).run fuel
-
-def isDefEqCore (t s : Expr) : M Bool := (Inner.isDefEqCore t s).run
-
-def isProp (t : Expr) : M Bool := (Inner.isProp t).run
-
-def ensureSort (t : Expr) (s := t) : M Expr := (ensureSortCore t s).run
-
-def ensureForall (t : Expr) (s := t) : M Expr := (ensureForallCore t s).run
-
-def ensureType (e : Expr) : M Expr := do ensureSort (← inferType e) e
-
-def etaExpand (e : Expr) : M Expr :=
-  let rec loop fvars
-  | .lam name dom body bi => do
-    let d := dom.instantiateRev fvars
-    let id := ⟨← mkFreshId⟩
-    withLCtx ((← getLCtx).mkLocalDecl id name d bi) do
-      let fvars := fvars.push (.fvar id)
-      loop fvars body
-  | it => do
-    let itType ← whnf <| ← inferType <| it.instantiateRev fvars
-    if !itType.isForall then return e
-    let rec loop2 fvars args
-    | 0, _ => throw .deepRecursion
-    | fuel + 1, .forallE name dom body bi => do
-      let d := dom.instantiateRev fvars
-      let id := ⟨← mkFreshId⟩
-      withLCtx ((← getLCtx).mkLocalDecl id name d bi) do
-        let arg := .fvar id
-        let fvars := fvars.push arg
-        let args := args.push arg
-        loop2 fvars args fuel <| ← whnf <| body.instantiate1 arg
-    | _, it => return (← getLCtx).mkLambda fvars (mkAppN it args)
-    loop2 fvars #[] defFuel itType
-  loop #[] e
