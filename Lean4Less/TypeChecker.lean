@@ -459,6 +459,7 @@ def meths : ExtMethods RecM := {
     getTypeLevel := getTypeLevel
     ensureSortCorePure := ensureSortCorePure
     inferTypePure := inferTypePure
+    inferType := inferType
     appPrfIrrelHEq := appPrfIrrelHEq
     appPrfIrrel := appPrfIrrel
     appHEqTrans? := appHEqTrans?
@@ -930,6 +931,8 @@ def inferType' (e : Expr) (_dbg := false) : RecPE := do
       -- if (← readThe Context).const == `eq_of_heq' then if let .lam _ (.const `Ty _) _ _ := a then
 
       let (aType, a'?) ← inferType 98 a
+      -- _ ← inferTypePure 5001 fType -- sanity check
+      -- _ ← inferTypePure 5000 aType
 
       let dType := Expr.bindingDomain! fType' |>.toPExpr
       -- it can be shown that if `e` is typeable as `T`, then `T` is typeable as `Sort l`
@@ -1354,17 +1357,21 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
   | .mdata .. => throw $ .other "unreachable 9"
   | .fvar _ => return ← whnfFVar e cheapK cheapProj
   | .app .. => -- beta-reduce at the head as much as possible, apply any remaining `rargs` to the resulting expression, and re-run `whnfCore`
+    trace s!"DBG[1]: TypeChecker.lean:1358 (after | .app .. => -- beta-reduce at the head …)"
     e'.withAppRev fun f0 rargs => do
     let f0 := f0.toPExpr
     -- the head may still be a let variable/binding, projection, or mdata-wrapped expression
     let (f, pf0Eqf?) ← whnfCore 52 f0 cheapK cheapProj
     let frargs := f.toExpr.mkAppRevRange 0 rargs.size rargs |>.toPExpr
+    trace s!"DBG[2]: TypeChecker.lean:1364 (after let frargs := f.toExpr.mkAppRevRange 0 r…)"
 
     let (frargs', rargs', eEqfrargs'?) ←
-      if pf0Eqf?.isSome then -- FIXME the type may have changed, even if this is none
+      if f0 != f then -- the type may have changed, even if pf0Eqf? is none FIXME ?
+        trace s!"DBG[8]: TypeChecker.lean:1368 (after if f0 != f then -- the type may have cha…)"
         let f0T ← inferTypePure 91 f0
         let fT ← inferTypePure 92 f
         if ! (← isDefEqPure 93 f0T fT) then
+          trace s!"DBG[9]: TypeChecker.lean:1372 (after if ! (← isDefEqPure 93 f0T fT) then)"
           -- patch to cast rargs as necessary to agree with type of f
           let (_, frargs'?) ← inferType 53 frargs -- FIXME can result in redundant casts?
           let frargs' := frargs'?.getD frargs
@@ -1375,6 +1382,7 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
           let eEqfrargs'? := data?.map (·.1)
           pure (frargs', rargs', eEqfrargs'?)
         else
+          trace s!"DBG[10]: TypeChecker.lean:1383 (after else)"
           let mut m := default
           for i in [:rargs.size] do
             m := m.insert i none
@@ -1383,10 +1391,12 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
           let eEqfrargs'? := data?.map (·.1)
           pure (frargs, rargs, eEqfrargs'?)
       else
+        trace s!"DBG[11]: TypeChecker.lean:1392 (after else)"
         pure (frargs, rargs, none)
 
 
     if let (.lam _ _ body _) := f.toExpr then
+      trace s!"DBG[3]: TypeChecker.lean:1393 (after if let (.lam _ _ body _) := f.toExpr the…)"
       -- if e'.isApp then if let .const `Bool.casesOn _ := e'.withApp fun f _ => f then
       let rec loop m (f : Expr) : RecEE :=
         let cont := do
@@ -1401,13 +1411,17 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
         else cont
       loop 1 body
     else if f == f0 then
+      trace s!"DBG[4]: TypeChecker.lean:1408 (after else if f == f0 then)"
       if let some (r, eEqr?) ← reduceRecursor e cheapK then
+        trace s!"DBG[6]: TypeChecker.lean:1410 (after if let some (r, eEqr?) ← reduceRecurso…)"
         let (r', rEqr'?) ← whnfCore 55 r cheapK cheapProj
         let eEqr'? ← appHEqTrans? e r r' eEqr? rEqr'?
         pure (r', eEqr'?)
       else
+        trace s!"DBG[5]: TypeChecker.lean:1414 (after else)"
         pure (e, none)
     else
+      trace s!"DBG[7]: TypeChecker.lean:1418 (after else)"
       -- FIXME replace with reduceRecursor? adding arguments can only result in further normalization if the head reduced to a partial recursor application
       let (r', frargsEqr'?) ← whnfCore 56 frargs' cheapK cheapProj
       let eEqr'? ← appHEqTrans? e frargs' r' eEqfrargs'? frargsEqr'?
@@ -1428,8 +1442,11 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
   pure ret
 
 @[inherit_doc whnfCore]
-def whnfCore' (e : PExpr) (cheapK := false) (cheapProj := false) : RecEE :=
-  _whnfCore' e cheapK cheapProj
+def whnfCore' (e : PExpr) (cheapK := false) (cheapProj := false) : RecEE := do
+  -- _ ← inferTypePure 5000 e -- sanity check TODO remove
+  let ret ← _whnfCore' e cheapK cheapProj
+  -- _ ← inferTypePure 5001 ret.1 -- sanity check TODO remove
+  pure ret
 
 @[inherit_doc whnf]
 private def _whnf' (e' : Expr) (cheapK := false) : RecEE := do

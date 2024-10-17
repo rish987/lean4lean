@@ -68,6 +68,7 @@ structure ExtMethods (m : Type → Type u) where
   whnfPure  : Nat → PExpr → m PExpr
   mkId  : Nat → m Name
   inferTypePure : Nat → PExpr → m PExpr
+  inferType : Nat → Expr → m (PExpr × Option PExpr)
   withPure : {T : Type} → m T → m T
   mkHRefl : Level → PExpr → PExpr → m EExpr
   getTypeLevel : PExpr → m (Level × PExpr)

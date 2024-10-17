@@ -14,7 +14,7 @@ structure ExtMethodsR (m : Type → Type u) extends ExtMethods m where
   smartCast : Nat → PExpr → PExpr → PExpr → m (Bool × PExpr)
   isDefEqProofIrrel' : PExpr → PExpr → PExpr → PExpr → Option EExpr → m (Option EExpr)
 
-variable [Monad m] (env : Environment)
+variable [Monad m] [MonadExcept KernelException M] (env : Environment)
   (meth : ExtMethodsR m)
 
 def getFirstCtor (dName : Name) : Option Name := do
@@ -97,7 +97,7 @@ constructor application). The reduction is done by applying the
 `RecursorRule.rhs` associated with the constructor to the parameters from the
 recursor application and the fields of the constructor application.
 -/
-def inductiveReduceRec [Monad m] (env : Environment) (e : PExpr) (cheapK : Bool := false)
+def inductiveReduceRec [Monad m] [MonadExcept KernelException m] (env : Environment) (e : PExpr) (cheapK : Bool := false)
     : m (Option (PExpr × Option EExpr)) := do
   let recFn := e.toExpr.getAppFn
   let .const recFnName ls := recFn | return none
@@ -194,7 +194,28 @@ def inductiveReduceRec [Monad m] (env : Environment) (e : PExpr) (cheapK : Bool 
     if let some (_, e, _) := indEq? then
       newRecArgs := newRecArgs.set! recIdx e
 
+  let eNewMajor' := (mkAppN recFn newRecArgs[:majorIdx + 1]) |>.toPExpr
+  -- let (_, eNewMajor?) := (← meth.inferType 121 eNewMajor') -- cast remaining args as necessary
+  -- let eNewMajor := eNewMajor?.getD eNewMajor'
+
+  if majorIdx + 1 < newRecArgs.size then
+    let mut fType ← meth.inferTypePure 121 eNewMajor'
+    for idx in [majorIdx + 1:newRecArgs.size] do
+      let (domType, fType') ← match (← meth.whnfPure 122 fType).toExpr with
+        | .forallE _ d  b _=> pure (d, b)
+        | _ => throw $ .other "unreachable"
+      let newArg' := newRecArgs[idx]!.toPExpr
+      let argType ← meth.inferTypePure 123 newArg'
+      let (true, newArg) ← meth.smartCast 124 argType domType.toPExpr newArg' | unreachable!
+
+      fType := (fType'.instantiate1 newArg).toPExpr
+      
+      newRecArgs := newRecArgs.set! idx newArg
+
   let eNewMajor := mkAppN recFn newRecArgs |>.toPExpr
+
+  _ ← meth.inferTypePure 5000 eNewMajor -- sanity check TODO remove
+
   -- get parameters from recursor application (recursor rules don't need the indices,
   -- as these are determined by the constructor and its parameters/fields)
   rhs := mkAppRange rhs 0 info.getFirstIndexIdx newRecArgs
@@ -202,6 +223,7 @@ def inductiveReduceRec [Monad m] (env : Environment) (e : PExpr) (cheapK : Bool 
   rhs := mkAppRange rhs (majorArgs.size - rule.nfields) majorArgs.size majorArgs
   if majorIdx + 1 < newRecArgs.size then
     rhs := mkAppRange rhs (majorIdx + 1) newRecArgs.size newRecArgs
+  _ ← meth.inferTypePure 6000 rhs.toPExpr -- sanity check TODO remove
   let (.true, eEqeNewMajor?) ← meth.isDefEqApp e eNewMajor map | unreachable!
   return .some (rhs.toPExpr, eEqeNewMajor?)
 

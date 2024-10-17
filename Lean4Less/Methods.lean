@@ -85,12 +85,16 @@ match fuel with
       --     pure t
       --   | _ => unreachable!
       -- dbg_trace s!"{s.numCalls}: {stack[9]!.2}, {stack.map (·.1)}"
+
+    -- let traceId := (.some 27650)
+    let traceId := none
     try
-      let ret ← withCallId s.numCalls (.some 15061) do
+      let ret ← withCallId s.numCalls traceId do
         withCallData idx s.numCalls d do 
-          if s.numCalls == 15061 then
-            let stack := (← readThe Context).callStack
-            dbg_trace s!"{s.numCalls}: {stack.map (·.1)}"
+          if let some id := traceId then
+            if s.numCalls == id then
+              let stack := (← readThe Context).callStack
+              dbg_trace s!"{s.numCalls}: {stack.map (·.1)}"
 
           m (Methods.withFuel fuel')
       if printedTrace then
