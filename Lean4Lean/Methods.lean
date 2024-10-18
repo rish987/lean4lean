@@ -40,7 +40,8 @@ match fuel with
         dbg_trace s!">end of    {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}, {(← readThe Context).callId}"
       pure ret
     catch e =>
-      dbg_trace s!">calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}"
+      if trace then
+        dbg_trace s!">calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}"
       throw e
 
 def Methods.withFuel (n : Nat) : Methods := 
