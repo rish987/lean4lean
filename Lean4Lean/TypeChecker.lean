@@ -291,6 +291,32 @@ def inferLet (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] #[] e where
 def isProp (e : Expr) : RecM Bool :=
   return (← whnf 12 (← inferType 13 e)) == .prop
 
+def isValidProj (typeName : Name) (idx : Nat) (struct structType : Expr) : RecM Bool := do
+  let type ← whnf 14 structType
+  type.withApp fun I args => do
+  let env ← getEnv
+  let .const I_name I_levels := I | return false
+  if typeName != I_name then return false
+  let .inductInfo I_val ← env.get I_name | return false
+  let [c] := I_val.ctors | return false
+  if args.size != I_val.numParams + I_val.numIndices then return false
+  let c_info ← env.get c
+  let mut r := c_info.instantiateTypeLevelParams I_levels
+  for i in [:I_val.numParams] do
+    let .forallE _ _ b _ ← whnf 15 r | return false
+    r := b.instantiate1 args[i]!
+  let isPropType ← isProp type
+  for i in [:idx] do
+    let .forallE _ dom b _ ← whnf 16 r | return false
+    if b.hasLooseBVars then
+      if isPropType then if !(← isProp dom) then return false
+      r := b.instantiate1 (.proj I_name i struct)
+    else
+      r := b
+  let .forallE _ dom _ _ ← whnf 17 r | return false
+  if isPropType then if !(← isProp dom) then return false
+  return true
+
 def inferProj (typeName : Name) (idx : Nat) (struct structType : Expr) : RecM Expr := do
   let e := Expr.proj typeName idx struct
   let type ← whnf 14 structType
@@ -353,7 +379,7 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
   let r ← match e with
     | .lit l => pure l.type
     | .mdata _ e => inferType' e inferOnly
-    | .proj s idx e => inferProj s idx e (← inferType 71 e inferOnly)
+    | .proj s idx e => inferProj s idx e (← inferType' e inferOnly)
     | .fvar n => inferFVar (← readThe Context) n
     | .mvar _ => throw <| .other "kernel type checker does not support meta variables"
     | .bvar _ => unreachable!
@@ -368,16 +394,16 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
       if inferOnly then
         inferApp e
       else
-        let fType ← ensureForallCore (← inferType 70 f inferOnly) e
-        let aType ← inferType 72 a inferOnly
+        let fType ← ensureForallCore (← inferType' f inferOnly) e
+        let aType ← inferType' a inferOnly
         let dType := fType.bindingDomain!
-        trace s!"DBG[4]: {(← rctx).callId}, {← callStackToStr}, {e.getAppArgs.size}, {e.getAppFn} \n\n{dType}\n\n{aType}"
+        -- trace s!"{(← rctx).callId}, {← callStackToStr}, {e.getAppArgs.size}, {e.getAppFn} \n\n{dType}\n\n{aType}"
         if !(← isDefEq 54 dType aType) then
           -- dbg_trace s!"DBG: {a}\n\n{aType}\n"
           -- dbg_trace s!"DBG[2]: TypeChecker.lean:292 {(← aType.getWhnfAt [1, .fn])}\n"
           -- dbg_trace s!"DBG[3]: TypeChecker.lean:292 {(← dType.getWhnfAt [1, .fn, .proj 1])}\n"
           throw <| .appTypeMismatch (← getEnv) (← getLCtx) e fType aType
-        trace s!"DBG[5]: {(← rctx).callId}"
+        -- trace s!"{(← rctx).callId}"
         pure <| fType.bindingBody!.instantiate1 a
     | .letE .. => inferLet e inferOnly
   modify fun s => cond inferOnly
@@ -634,8 +660,11 @@ def tryEtaStructCore (t s : Expr) : RecM Bool := do
   unless isStructureLike env fInfo.induct do return false
   unless ← isDefEq 63 (← inferType 32 t) (← inferType 33 s) do return false
   let args := s.getAppArgs
+  let tType ← inferType 73 t
   for h : i in [fInfo.numParams:args.size] do
-    unless ← isDefEq 64 (.proj fInfo.induct (i - fInfo.numParams) t) (args[i]'h.2) do return false
+    let idx := (i - fInfo.numParams)
+    if !(← isValidProj fInfo.induct idx t tType) then return false
+    unless ← isDefEq 64 (.proj fInfo.induct idx t) (args[i]'h.2) do return false
   return true
 
 def tryEtaStruct (t s : Expr) : RecM Bool :=
@@ -655,12 +684,9 @@ def isDefEqProofIrrel (t s : Expr) : RecM LBool := do
   let tType ← inferType 34 t
   if !(← isProp tType) then return .undef
   let ret ← toLBoolM <| isDefEq 67 tType (← inferType 35 s)
-  if ret == .true then
-    trace s!"DBG[3]: TypeChecker.lean: {←callStackToStr}\n  {t}\n  {s}"
   return ret
   -- pure .undef
   
-
 def failedBefore (failure : Std.HashSet (Expr × Expr)) (t s : Expr) : Bool :=
   if t.hash < s.hash then
     failure.contains (t, s)
