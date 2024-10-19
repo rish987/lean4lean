@@ -164,6 +164,10 @@ def dotrace (msg : Unit → RecM String) : RecM Unit := do
   if ← shouldTrace then
     trace (← msg ())
 
+def dottrace (msg : Unit → RecM String) : RecM Unit := do -- TODO macro to make this easier to use
+  if ← shouldTTrace then
+    dbg_trace (← msg ())
+
 def mkId (n : Nat) : RecM Name := do
   let id ← mkFreshId
   -- if id == "_kernel_fresh.879".toName then
@@ -1459,7 +1463,6 @@ private def _whnf' (e' : Expr) (cheapK := false) : RecEE := do
   -- check cache
   -- if let some r := (← get).whnfCache.get? (e, cheapK) then
   --   return r
-  ttrace s!"DBG[0]: TypeChecker.lean:1458: ler={e}"
   let rec loop le eEqle?
   | 0 => throw .deterministicTimeout
   | fuel+1 => do
@@ -1469,7 +1472,6 @@ private def _whnf' (e' : Expr) (cheapK := false) : RecEE := do
     if let some (ler', lerEqler'?) ← reduceNative env ler then return (ler', ← appHEqTrans? e ler ler' eEqler? lerEqler'?)
     if let some (ler', lerEqler'?) ← reduceNat ler then return (ler', ← appHEqTrans? e ler ler' eEqler? lerEqler'?)
     let some leru := unfoldDefinition env ler | return (ler, eEqler?)
-    ttrace s!"DBG[1]: TypeChecker.lean:1458: ler={leru}"
     loop leru eEqler? fuel
   let r ← loop e none 1000
   modify fun s => { s with whnfCache := s.whnfCache.insert (e, cheapK) r }
