@@ -377,7 +377,7 @@ unsafe def replayFromInit'' (module : Name) (initEnv : Environment) (newConstant
     f env
 
 unsafe def replayFromInit' (module : Name) (initEnv : Environment) (f : Environment → IO Unit) (onlyConsts? : Option (List Name) := none) (initConsts? : Option (List Name) := none) (op : String := "typecheck")
-    (verbose := false) (compare := false) (decl : Option Name := none) (opts : TypeCheckerOpts := {}) (erase := true) : IO Unit := do
+    (verbose := false) (compare := false) (decl : Option Name := none) (opts : TypeCheckerOpts := {}) : IO Unit := do
   IO.println s!"loading module \"{module}\"..."
   Lean.withImportModules #[{module}] {} 0 fun env => do
     let mut newConstants := default
@@ -389,8 +389,6 @@ unsafe def replayFromInit' (module : Name) (initEnv : Environment) (f : Environm
     for (cname, cinfo) in (ics ++ cs) do
       if i % 100000 == 0 then
         IO.println s!"progress: {i}/{len}"
-      if erase && (initEnv.constants.find? cname).isSome then
-        continue
       newConstants := newConstants.insert cname cinfo
       i := i + 1
 
@@ -401,8 +399,7 @@ unsafe def replayFromInit' (module : Name) (initEnv : Environment) (f : Environm
     --     acc.erase const
     --   else
     --     acc
-    let e ← if not erase then mkEmptyEnvironment else pure $ initEnv.setMainModule module
-    replayFromInit'' addDeclFn module e newConstants f (onlyConsts? := onlyConsts?) (initConsts? := initConsts?) (op := op) (decl := decl) (verbose := verbose) (compare := compare) (opts := opts)
+    replayFromInit'' addDeclFn module (← mkEmptyEnvironment) newConstants f (onlyConsts? := onlyConsts?) (initConsts? := initConsts?) (op := op) (decl := decl) (verbose := verbose) (compare := compare) (opts := opts)
 
 unsafe def replayFromEnv (module : Name) (initEnv : Environment) (onlyConsts? : Option (List Name) := none) (op : String := "typecheck")
     (verbose := false) (compare := false) (decl : Option Name := none) (opts : TypeCheckerOpts := {}) : IO Unit := do

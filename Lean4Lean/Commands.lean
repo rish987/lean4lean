@@ -49,7 +49,9 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn :
 
         if not (initConsts.contains const) && consts.size == 1 && const != `temp then
           let outName := (const.toString) ++ s!"_{opts.kLikeReduction}_{opts.kLikeReduction}.olean"
-          let outPath := ((← IO.Process.getCurrentDir).join "saved").join outName
+          let outDir := ((← IO.Process.getCurrentDir).join "saved")
+          IO.FS.createDirAll outDir
+          let outPath := outDir.join outName
           if ← System.FilePath.pathExists outPath then
             let (mod, _) ← readModuleData outPath
             let module := modEnv.mainModule
