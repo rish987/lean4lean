@@ -19,7 +19,7 @@ def addDecl (d : Declaration) : M Unit := do
   | .ok env =>
     let t2 ← IO.monoMsNow
     if t2 - t1 > 1000 then
-      println! "{Lean4Lean.Ansi.resetLine}{d.name}: lean4less took {t2 - t1}"
+      println! "{Lean4Lean.Ansi.resetLine}lean4less took {t2 - t1}:\t {d.name}"
     modify fun s => { s with env := env }
   | .error ex =>
     throwKernelException ex

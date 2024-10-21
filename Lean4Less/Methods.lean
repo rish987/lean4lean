@@ -9,9 +9,11 @@ def defFuel := 1300
 
 mutual
 def fuelWrap (idx : Nat) (fuel : Nat) (d : CallData) : M (CallDataT d) := do
+let ctx := (← readThe Context)
 match fuel with
+
   | 0 =>
-    dbg_trace s!"deep recursion callstack: {(← readThe Context).callStack.map (·.1)}"
+    dbg_trace s!"deep recursion callstack: {ctx.callStack.map (·.1)}"
     throw .deepRecursion
   | fuel' + 1 =>
     -- let recDepth := (defFuel - fuel)
@@ -36,10 +38,10 @@ match fuel with
     --   
 
     let mut printedTrace := false
-    if false && s.numCalls >= 1100 /- && not s.printedDbg -/ then -- TODO static variables?
-      if s.numCalls % 1000 == 0 then
+    if false && s.numCalls >= 1000 /- && not s.printedDbg -/ then -- TODO static variables?
+      if s.numCalls % 1 == 0 then
         printedTrace := true
-        dbg_trace s!"calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}, {(← readThe Context).callId}"
+        dbg_trace s!"calltrace {s.numCalls}: {ctx.callStack.map (·.1)}, {idx}, {ctx.callId}"
     
     -- let meth := Methods.withFuel fuel'
     -- if s.isDefEqCache.size > 300 then

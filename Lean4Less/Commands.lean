@@ -39,7 +39,7 @@ def ppConst (env : Environment) (n : Name) : IO Unit := do
 The set of all constants used to patch terms, in linearised order based on
 dependencies in the patched versions of their types/values.
 -/
-def patchConsts : List Name := [
+def patchConsts : Array Name := #[
 `L4L.eq_of_heq,
 `cast,
 `L4L.castHEq,
@@ -80,7 +80,7 @@ def patchConsts : List Name := [
 `L4L.lambdaHEqABUV',
 
 `L4L.appHEqBinNatFn,
-`sorryAx, --FIXME
+`sorryAx --FIXME
 ]
 
 def transL4L' (ns : Array Name) (env : Environment) (pp := false) (printProgress := false) : IO Environment := do
