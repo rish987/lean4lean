@@ -302,8 +302,18 @@ def checkPostponedRecursors : M Unit := do
 
 variable (addDeclFn : Declaration → M Unit)
 
+open private Environment.mk from Lean.Environment
+
+def _root_.Lean.Environment.withConsts (env : Environment) (f : ConstMap → ConstMap): Environment :=
+  Environment.mk env.const2ModIdx (f env.constants) env.extensions env.extraConstNames env.header
+
+def _root_.Lean.Environment.toMap₁ (env : Environment) : Environment :=
+  let newMap₁ :=  env.constants.map₂.foldl (init := env.constants.map₁) fun acc n c => acc.insert n c
+  env.withConsts fun c => {c with map₁ := newMap₁}
+
 /-- "Replay" some constants into an `Environment`, sending them to the kernel for checking. -/
-def replay (ctx : Context) (env : Environment) (onlyConsts? : Option (List Name) := none) (initConsts? : Option (List Name) := none) (decl : Option Name := none) (printProgress : Bool := false) (op : String := "typecheck") : IO Environment := do 
+def replay (ctx : Context) (env : Environment) (decl : Option Name := none) (printProgress : Bool := false) (op : String := "typecheck") : IO Environment := do 
+  let env := env.toMap₁.withConsts fun c => {c with stage₁ := false}
   let mut remaining : NameSet := ∅
   let mut numToCheck : Nat := 0
   for (n, ci) in ctx.newConstants.toList do
@@ -312,8 +322,8 @@ def replay (ctx : Context) (env : Environment) (onlyConsts? : Option (List Name)
     if !ci.isUnsafe && !ci.isPartial then
       remaining := remaining.insert n
       numToCheck := numToCheck + 1
-  if let some onlyConsts := onlyConsts? then
-    numToCheck := (← getDepConsts ctx.newConstants onlyConsts).size
+  -- if let some onlyConsts := onlyConsts? then
+  --   numToCheck := (← getDepConsts ctx.newConstants onlyConsts).size
   let (_, s) ← StateRefT'.run (s := { env, remaining, numToCheck }) do
     ReaderT.run (r := ctx) do
       match decl with
@@ -326,15 +336,8 @@ def replay (ctx : Context) (env : Environment) (onlyConsts? : Option (List Name)
           | e => 
             IO.eprintln s!"Error {op}ing constant `{n}`: {e.toString}"
             throw e
-        if let some initConsts := initConsts? then
-          for n in initConsts do
-            tryReplay n
-        if let some onlyConsts := onlyConsts? then
-          for n in onlyConsts do
-            tryReplay n
-        else
-          for n in remaining do
-            tryReplay n
+        for n in remaining do
+          tryReplay n
       checkPostponedConstructors
       checkPostponedRecursors
   if s.printNewLine then
@@ -343,15 +346,15 @@ def replay (ctx : Context) (env : Environment) (onlyConsts? : Option (List Name)
     IO.println s!"{numToCheck} total constants typechecked"
     IO.println s!"-- {s.data.prfIrrelUses} used proof irrelevance"
     IO.println s!"-- {s.data.kLikeRedUses} used k-like reduction"
-    if let some onlyConsts := onlyConsts? then
-      for const in onlyConsts do
-        IO.println s!"-- {const} data: "
-        if let some d := (s.data.constsToData.get? const) then
-          IO.println s!"  - maximum recursion depth: {d.maxRecursionDepth}"
-          if d.usedProofIrrelevance then
-            IO.println s!"  - used proof irrelevance"
-          if d.usedKLikeReduction then
-            IO.println s!"  - used k-like reduction"
+    -- if let some onlyConsts := onlyConsts? then
+    --   for const in onlyConsts do
+    --     IO.println s!"-- {const} data: "
+    --     if let some d := (s.data.constsToData.get? const) then
+    --       IO.println s!"  - maximum recursion depth: {d.maxRecursionDepth}"
+    --       if d.usedProofIrrelevance then
+    --         IO.println s!"  - used proof irrelevance"
+    --       if d.usedKLikeReduction then
+    --         IO.println s!"  - used k-like reduction"
   return s.env
 
 unsafe def replayFromImports (module : Name) (verbose := false) (compare := false) : IO Unit := do
@@ -370,13 +373,13 @@ unsafe def replayFromImports (module : Name) (verbose := false) (compare := fals
   env'.freeRegions
   region.free
 
-unsafe def replayFromInit'' (module : Name) (initEnv : Environment) (newConstants : Std.HashMap Name ConstantInfo) (f : Environment → IO Unit) (onlyConsts? : Option (List Name) := none) (initConsts? : Option (List Name) := none) (op : String := "typecheck")
+unsafe def replayFromInit'' (module : Name) (initEnv : Environment) (newConstants : Std.HashMap Name ConstantInfo) (f : Environment → IO Unit) (op : String := "typecheck")
     (verbose := false) (compare := false) (decl : Option Name := none) (opts : TypeCheckerOpts := {}) : IO Unit := do
     let ctx := { newConstants, verbose, compare, opts }
-    let env ← replay addDeclFn ctx (initEnv.setMainModule module) (onlyConsts? := onlyConsts?) (initConsts? := initConsts?) (op := op) (decl := decl) (printProgress := true)
+    let env ← replay addDeclFn ctx (initEnv.setMainModule module) (op := op) (decl := decl) (printProgress := true)
     f env
 
-unsafe def replayFromInit' (module : Name) (initEnv : Environment) (f : Environment → IO Unit) (onlyConsts? : Option (List Name) := none) (initConsts? : Option (List Name) := none) (op : String := "typecheck")
+unsafe def replayFromInit' (module : Name) (initEnv : Environment) (f : Environment → IO Unit) (op : String := "typecheck")
     (verbose := false) (compare := false) (decl : Option Name := none) (opts : TypeCheckerOpts := {}) : IO Unit := do
   IO.println s!"loading module \"{module}\"..."
   Lean.withImportModules #[{module}] {} 0 fun env => do
@@ -399,24 +402,24 @@ unsafe def replayFromInit' (module : Name) (initEnv : Environment) (f : Environm
     --     acc.erase const
     --   else
     --     acc
-    replayFromInit'' addDeclFn module (← mkEmptyEnvironment) newConstants f (onlyConsts? := onlyConsts?) (initConsts? := initConsts?) (op := op) (decl := decl) (verbose := verbose) (compare := compare) (opts := opts)
+    replayFromInit'' addDeclFn module (← mkEmptyEnvironment) newConstants f (op := op) (decl := decl) (verbose := verbose) (compare := compare) (opts := opts)
 
-unsafe def replayFromEnv (module : Name) (initEnv : Environment) (onlyConsts? : Option (List Name) := none) (op : String := "typecheck")
+unsafe def replayFromEnv (module : Name) (initEnv : Environment) (op : String := "typecheck")
     (verbose := false) (compare := false) (decl : Option Name := none) (opts : TypeCheckerOpts := {}) : IO Unit := do
   let mut newConstants := initEnv.constants.map₁
-  replayFromInit'' addDeclFn module (← mkEmptyEnvironment) newConstants (fun _ => pure ()) (onlyConsts? := onlyConsts?) (op := op) (decl := decl) (verbose := verbose) (compare := compare) (opts := opts)
+  replayFromInit'' addDeclFn module (← mkEmptyEnvironment) newConstants (fun _ => pure ()) (op := op) (decl := decl) (verbose := verbose) (compare := compare) (opts := opts)
 
-unsafe def replayFromInit (module : Name) (initEnv : Environment) (onlyConsts? : Option (List Name) := none) (op : String := "typecheck")
+unsafe def replayFromInit (module : Name) (initEnv : Environment) (op : String := "typecheck")
     (verbose := false) (compare := false) (decl : Option Name := none) (opts : TypeCheckerOpts := {}) : IO Unit := do
-  discard <| replayFromInit' addDeclFn module initEnv (fun _ => pure ()) onlyConsts? none op verbose compare decl opts
+  discard <| replayFromInit' addDeclFn module initEnv (fun _ => pure ()) op verbose compare decl opts
 
-unsafe def replayFromFresh' (module : Name) (f : Environment → IO Unit) (onlyConsts? : Option (List Name) := none) (op : String := "typecheck")
+unsafe def replayFromFresh' (module : Name) (f : Environment → IO Unit) (op : String := "typecheck")
     (verbose := false) (compare := false) (decl : Option Name := none) (opts : TypeCheckerOpts := {}) : IO Unit := do
-  replayFromInit' addDeclFn module (← mkEmptyEnvironment) f (onlyConsts? := onlyConsts?) (op := op) (verbose := verbose) (compare := compare) (decl := decl) (opts := opts)
+  replayFromInit' addDeclFn module (← mkEmptyEnvironment) f (op := op) (verbose := verbose) (compare := compare) (decl := decl) (opts := opts)
 
-unsafe def replayFromFresh (module : Name) (onlyConsts? : Option (List Name) := none) (op : String := "typecheck")
+unsafe def replayFromFresh (module : Name) (op : String := "typecheck")
     (verbose := false) (compare := false) (decl : Option Name := none) (opts : TypeCheckerOpts := {}) : IO Unit := do
-  replayFromInit addDeclFn module (← mkEmptyEnvironment) (onlyConsts? := onlyConsts?) (op := op) (verbose := verbose) (compare := compare) (decl := decl) (opts := opts)
+  replayFromInit addDeclFn module (← mkEmptyEnvironment) (op := op) (verbose := verbose) (compare := compare) (decl := decl) (opts := opts)
 
 end Lean4Lean
 

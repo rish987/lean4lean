@@ -31,7 +31,7 @@ unsafe def main (args : List String) : IO UInt32 := do
     | [mod, only] => match mod.toName with
       | .anonymous => throw <| IO.userError s!"Could not resolve module: {mod}"
       | m =>
-        replayFromFresh addDecl m (verbose := verbose) (compare := compare) (onlyConsts? := [only.toName])
+        replayFromFresh addDecl m (verbose := verbose) (compare := compare)
     | [mod] => match mod.toName with
       | .anonymous => throw <| IO.userError s!"Could not resolve module: {mod}"
       | m =>

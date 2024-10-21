@@ -6,22 +6,14 @@ open Lean
 
 namespace Lean4Lean
 
-def mkModuleData (env : Environment) : IO ModuleData := do
-  let pExts ← persistentEnvExtensionsRef.get
-  let entries := pExts.map fun pExt =>
-    let state := pExt.getState env
-    (pExt.name, pExt.exportEntriesFn state)
-  let constNames := env.constants.map₁.fold (fun names name _ => names.push name) #[]
-  let constants  := env.constants.map₁.fold (fun cs _ c => cs.push c) #[]
-  return {
-    imports         := env.header.imports
-    extraConstNames := env.extraConstNames.toArray
-    constNames, constants, entries
-  }
-
 open private add from Lean.Environment
+open private Environment.mk from Lean.Environment
 
-def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn : Declaration → M Unit) (initConsts : List Name := []) (printErr := false) (opts : TypeCheckerOpts := {}) (op : String := "typecheck") (printProgress := false) : IO (Lean.NameSet × Environment) := do
+def getDepConstsEnv (env : Environment) (consts : Array Name) : IO $ Std.HashMap Name ConstantInfo := do
+  let mut (_, {map := map, ..}) ← ((Deps.namedConstDeps consts).toIO { options := default, fileName := "", fileMap := default } {env} {env})
+  pure map
+
+def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn : Declaration → M Unit) (initConsts : Array Name := #[]) (printErr := false) (opts : TypeCheckerOpts := {}) (op : String := "typecheck") (printProgress := false) : IO (Lean.NameSet × Environment) := do
   let mut onlyConstsToTrans : Lean.NameSet := default
 
   -- constants that should be skipped on account of already having been typechecked
@@ -29,12 +21,14 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn :
   -- constants that should throw an error if encountered on account of having previously failed to typecheck
   let mut errConsts : Lean.NameSet := default
   let mut modEnv := ← Lean.mkEmptyEnvironment
+  modEnv := Environment.mk modEnv.const2ModIdx {modEnv.constants with stage₁ := false} modEnv.extensions modEnv.extraConstNames modEnv.header
+
   let loop const modEnv skipConsts errConsts onlyConstsToTrans printProgress := do
     try
       let mut modEnv := modEnv
       let mut skipConsts := skipConsts
       if not $ skipConsts.contains const then
-        let mut (_, {map := map, ..}) ← ((Deps.namedConstDeps const).toIO { options := default, fileName := "", fileMap := default } {env} {env})
+        let mut map ← getDepConstsEnv env #[const]
         let mapConsts := map.fold (init := default) fun acc const _ => acc.insert const
 
         let erredConsts : Lean.NameSet := mapConsts.intersectBy (fun _ _ _ => default) errConsts
@@ -63,7 +57,7 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn :
             modEnv := modEnv.setMainModule module
           else
             modEnv ← rp
-            saveModuleData outPath modEnv.mainModule (← mkModuleData modEnv)
+            writeModule modEnv outPath
         else
           modEnv ← rp
 

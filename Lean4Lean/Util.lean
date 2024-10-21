@@ -30,15 +30,17 @@ namespace Deps
   let ((a, s), _, _) ← (x.run ctx s).toIO ctxCore sCore
   pure (a, s)
 
-  partial def namedConstDeps (name : Name) : DepsM Unit := do
-    match ((← get).map.get? name) with
-    | .none =>
-      let some const := (← read).env.find? name | throw $ IO.userError s!"could not find constant \"{name}\" for translation, verify that it exists in the Lean input"
-      modify fun s => { s with map := s.map.insert name const }
-      let mut deps := const.getUsedConstantsAsSet
-      if name == ``String then deps := deps.insert ``Char.ofNat
-      for dep in deps do
-        if !dep.isImplementationDetail && !dep.isCStage then
-          namedConstDeps dep
-    | .some _ => pure default
+  partial def namedConstDeps (names : Array Name) : DepsM Unit := do
+    for name in names do
+      match ((← get).map.get? name) with
+      | .none =>
+        let some const := (← read).env.find? name | throw $ IO.userError s!"could not find constant \"{name}\" for translation, verify that it exists in the Lean input"
+        modify fun s => { s with map := s.map.insert name const }
+        let mut deps := #[]
+        if name == ``String then deps := deps.push ``Char.ofNat
+        for dep in const.getUsedConstantsAsSet do
+          if !dep.isImplementationDetail && !dep.isCStage then
+            deps := deps.push dep
+        namedConstDeps deps
+      | .some _ => pure default
 end Deps
