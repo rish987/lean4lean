@@ -438,7 +438,7 @@ def isDefEqPure (n : Nat) (t s : PExpr) (fuel := 1000) : RecM Bool := do
     | .deepRecursion =>
       pure false -- proof irrelevance may be needed to avoid deep recursion (e.g. String.size_toUTF8)
     | _ => 
-      trace s!"isDefEqPure error: {n}"
+      dbg_trace s!"isDefEqPure error: {n}"
       throw e
 
 def appPrfIrrelHEq (P Q : PExpr) (hPQ : EExpr) (p q : PExpr) : RecM EExpr := do
@@ -921,9 +921,11 @@ def inferType' (e : Expr) (_dbg := false) : RecPE := do
     return r
   let (r, ep?) ← match e with
     | .lit l => pure (l.type.toPExpr, none)
-    | .mdata _ e => inferType 95 e
+    | .mdata _ e => inferType'  e
+    -- | .mdata _ e => inferType 95 e
     | .proj s idx e =>
-      let (t, e'?) ← inferType 96 e
+      let (t, e'?) ← inferType' e
+      -- let (t, e'?) ← inferType 96 e
       let e' := e'?.getD e.toPExpr
       inferProj s idx e' e'?.isSome t
     | .fvar n => pure (← inferFVar (← readThe Context) n ((← get).fvarRegistry.get? n.name), none)
@@ -936,12 +938,14 @@ def inferType' (e : Expr) (_dbg := false) : RecPE := do
     | .lam .. => inferLambda e false
     | .forallE .. => inferForall e
     | .app f a =>
-      let (fType, f'?) ← inferType 97 f
+      let (fType, f'?) ← inferType' f
+      -- let (fType, f'?) ← inferType 97 f
       let (fType', pf'?) ← ensureForallCore fType f
       let f' ← maybeCast 18 pf'? fType fType' (f'?.getD f.toPExpr)
       -- if (← readThe Context).const == `eq_of_heq' then if let .lam _ (.const `Ty _) _ _ := a then
 
-      let (aType, a'?) ← inferType 98 a
+      let (aType, a'?) ← inferType' a
+      -- let (aType, a'?) ← inferType 98 a
       -- _ ← inferTypePure 5001 fType -- sanity check
       -- _ ← inferTypePure 5000 aType
 
@@ -1461,8 +1465,8 @@ private def _whnf' (e' : Expr) (cheapK := false) : RecEE := do
       return (e, none)
   | .lam .. | .app .. | .const .. | .letE .. | .proj .. => pure ()
   -- check cache
-  -- if let some r := (← get).whnfCache.get? (e, cheapK) then
-  --   return r
+  if let some r := (← get).whnfCache.get? (e, cheapK) then
+    return r
   let rec loop le eEqle?
   | 0 => throw .deterministicTimeout
   | fuel+1 => do
@@ -1489,8 +1493,8 @@ Checks if `t` and `s` are definitionally equivalent according to proof irrelevan
 (that is, they are proofs of the same proposition).
 -/
 def isDefEqProofIrrel (t s : PExpr) : RecLB := do
-  if ← shouldTrace then
-    let x ← withL4LTrace $ runLeanMinusRecM $ Lean.TypeChecker.inferTypeCheck t
+  -- if ← shouldTrace then
+  --   let x ← withL4LTrace $ runLeanMinusRecM $ Lean.TypeChecker.inferTypeCheck t
   let tType ← inferTypePure 59 t
   let prop ← isPropPure tType
   if !prop then return (.undef, none)
@@ -1722,8 +1726,6 @@ def isDefEqUnitLike (t s : PExpr) : RecB := do
 
 @[inherit_doc isDefEqCore]
 def isDefEqCore' (t s : PExpr) : RecB := do
-  -- if let some p := (← get).isDefEqCache.get? (s, t) then
-  --   return (true, .some p.reverse sorry sorry sorry) -- <<< TODO
 
   -- if ← isDefEqPure 74 t s 15 then -- NOTE: this is a tradeoff between runtime and output size
   --   return (true, none)
@@ -1736,6 +1738,10 @@ def isDefEqCore' (t s : PExpr) : RecB := do
 
   if let some p := (← get).isDefEqCache.get? (t, s) then
     return (true, .some p)
+  -- else if let some p := (← get).isDefEqCache.get? (s, t) then
+  --   let (lvl, sType) ← getTypeLevel s
+  --   let tType ← inferTypePure 99 t
+  --   return (true, .some $ p.reverse s t sType tType lvl)
 
   let (tn, tEqtn?) ← whnfCore 76 t (cheapK := true) (cheapProj := true)
   let (sn, sEqsn?) ← whnfCore 77 s (cheapK := true) (cheapProj := true)

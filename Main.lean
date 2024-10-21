@@ -47,7 +47,7 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
             env := add env c
           _ ← Lean4Less.checkL4L (onlyConsts.map (·.toName)) env (printProgress := true)
       else
-        replayFromInit' Lean4Less.addDecl m lemmEnv (op := "patch") (erase := false) (initConsts? := Lean4Less.patchConsts) fun env' =>
+        replayFromInit' Lean4Less.addDecl m lemmEnv (op := "patch") (initConsts? := Lean4Less.patchConsts) fun env' =>
           replayFromEnv Lean4Lean.addDecl m env' (op := "typecheck") (opts := {proofIrrelevance := false, kLikeReduction := false})
   return 0
 

@@ -19,17 +19,7 @@ def addDecl (d : Declaration) : M Unit := do
   | .ok env =>
     let t2 ← IO.monoMsNow
     if t2 - t1 > 1000 then
-      if (← read).compare then
-        let t3 ← match (← get).env.addDecl {} d with
-        | .ok _ => IO.monoMsNow
-        | .error ex => throwKernelException ex
-        if (t2 - t1) > 2 * (t3 - t2) then
-          println!
-            "{(← get).env.mainModule}:{d.name}: lean took {t3 - t2}, lean4less took {t2 - t1}"
-        else
-          println! "{(← get).env.mainModule}:{d.name}: lean4less took {t2 - t1}"
-      else
-        println! "{(← get).env.mainModule}:{d.name}: lean4less took {t2 - t1}"
+      println! "{Lean4Lean.Ansi.resetLine}{d.name}: lean4less took {t2 - t1}"
     modify fun s => { s with env := env }
   | .error ex =>
     throwKernelException ex

@@ -619,6 +619,17 @@ def EExpr.reverse (t s tType sType : PExpr) (lvl : Level) : EExpr → EExpr
 | .prfIrrel d
 | .sry d  => d.reverse
 
+def EExpr.reverse? : EExpr → Option EExpr
+| .other _ => none
+| .lam d
+| .forallE d
+| .app d
+| .trans d
+| .symm d
+| .refl d
+| .prfIrrel d
+| .sry d  => d.reverse
+
 end
 
 namespace EExpr

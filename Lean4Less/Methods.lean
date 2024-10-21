@@ -37,7 +37,7 @@ match fuel with
 
     let mut printedTrace := false
     if false && s.numCalls >= 1100 /- && not s.printedDbg -/ then -- TODO static variables?
-      if s.numCalls % 1 == 0 then
+      if s.numCalls % 1000 == 0 then
         printedTrace := true
         dbg_trace s!"calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}, {(← readThe Context).callId}"
     
