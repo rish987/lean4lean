@@ -88,6 +88,8 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
           _ ← Lean4Less.checkL4L (onlyConsts.map (·.toName)) env (printProgress := true)
       else
         let outDir := ((← IO.Process.getCurrentDir).join "out")
+        if ← outDir.pathExists then
+          IO.FS.removeDirAll outDir
         IO.FS.createDirAll outDir
         let mkMod imports env n := do
           let mod ← mkModuleData imports env
@@ -113,6 +115,7 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
                 #[{module := `Init.PatchPrelude}] ++ d.imports
               else
                 d.imports
+
             mkMod imports env dn
             modify fun s => {s with env}
         let env := s.env
