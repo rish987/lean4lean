@@ -104,11 +104,11 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
         mkMod #[] env patchPreludeModName
         let (_, s) ← ForEachModuleM.run env do
           forEachModule' (imports := #[m]) fun dn d => do
-            let newConstants := d.constNames.zip d.constants |>.foldl (init := default) fun acc (n, ci) =>
-              if not (env.constants.contains n) then
-                acc.insert n ci
+            let newConstants ← d.constNames.zip d.constants |>.foldlM (init := default) fun acc (n, ci) => do
+              if not ((← get).env.contains n) then
+                pure $ acc.insert n ci
               else
-                acc
+                pure $ acc
             IO.println s!"{dn} module"
             let env ← replay Lean4Less.addDecl {newConstants := newConstants, opts := {}} (← get).env (printProgress := true) (op := "patch")
             let imports := if dn == `Init.Prelude then
