@@ -309,7 +309,11 @@ def _root_.Lean.Environment.withConsts (env : Environment) (f : ConstMap → Con
 
 def _root_.Lean.Environment.toMap₁ (env : Environment) : Environment :=
   let newMap₁ :=  env.constants.map₂.foldl (init := env.constants.map₁) fun acc n c => acc.insert n c
-  env.withConsts fun c => {c with map₁ := newMap₁}
+  env.withConsts fun c => {c with map₁ := newMap₁, map₂ := default}
+
+def _root_.Lean.Environment.toMap₂ (env : Environment) : Environment :=
+  let newMap :=  env.constants.map₁.fold (init := env.constants.map₂) fun acc n c => acc.insert n c
+  env.withConsts fun c => {c with map₂ := newMap, map₁ := default}
 
 /-- "Replay" some constants into an `Environment`, sending them to the kernel for checking. -/
 def replay (ctx : Context) (env : Environment) (decl : Option Name := none) (printProgress : Bool := false) (op : String := "typecheck") : IO Environment := do 
@@ -357,7 +361,7 @@ def replay (ctx : Context) (env : Environment) (decl : Option Name := none) (pri
     --         IO.println s!"  - used k-like reduction"
   return s.env
 
-unsafe def replayFromImports (module : Name) (verbose := false) (compare := false) : IO Unit := do
+unsafe def replayFromImports (module : Name) (verbose := false) (compare := false) (opts : TypeCheckerOpts := {}) : IO Unit := do
   let mFile ← findOLean module
   unless (← mFile.pathExists) do
     throw <| IO.userError s!"object file '{mFile}' of module {module} does not exist"
@@ -369,7 +373,7 @@ unsafe def replayFromImports (module : Name) (verbose := false) (compare := fals
   let mut newConstants := {}
   for name in mod.constNames, ci in mod.constants do
     newConstants := newConstants.insert name ci
-  let env' ← replay addDeclFn { newConstants, verbose, compare } env
+  let env' ← replay addDeclFn { newConstants, verbose, compare, opts } env
   env'.freeRegions
   region.free
 

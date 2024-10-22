@@ -21,7 +21,6 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn :
   -- constants that should throw an error if encountered on account of having previously failed to typecheck
   let mut errConsts : Lean.NameSet := default
   let mut modEnv := ← Lean.mkEmptyEnvironment
-  modEnv := Environment.mk modEnv.const2ModIdx {modEnv.constants with stage₁ := false} modEnv.extensions modEnv.extraConstNames modEnv.header
 
   let loop const modEnv skipConsts errConsts onlyConstsToTrans printProgress := do
     try
@@ -39,15 +38,19 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn :
         for skipConst in skippedConsts do
           map := map.erase skipConst
 
+        -- for (n, const) in modEnv.constants do
+        --   dbg_trace s!"DBG[11]: {n}"
         let rp := replay addDeclFn {newConstants := map.erase const, opts := {}} modEnv (printProgress := printProgress)
 
         if not (initConsts.contains const) && consts.size == 1 && const != `temp then
-          let outName := (const.toString) ++ s!"_{opts.kLikeReduction}_{opts.kLikeReduction}.olean"
+          let outName := (const.toString) ++ s!"_{opts.proofIrrelevance}_{opts.kLikeReduction}.olean"
           let outDir := ((← IO.Process.getCurrentDir).join "saved")
           IO.FS.createDirAll outDir
           let outPath := outDir.join outName
           if ← System.FilePath.pathExists outPath then
             let (mod, _) ← readModuleData outPath
+            -- for const in mod.constants do
+            --   dbg_trace s!"DBG[9]: {const.name}"
             let module := modEnv.mainModule
             let (_, s) ← importModulesCore mod.imports
               |>.run (s := { moduleNameSet := ({} : NameHashSet).insert module })
@@ -57,7 +60,7 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn :
             modEnv := modEnv.setMainModule module
           else
             modEnv ← rp
-            writeModule modEnv outPath
+            writeModule modEnv.toMap₂ outPath
         else
           modEnv ← rp
 
