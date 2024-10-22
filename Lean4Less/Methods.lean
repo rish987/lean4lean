@@ -42,6 +42,9 @@ match fuel with
       if s.numCalls % 1 == 0 then
         printedTrace := true
         dbg_trace s!"calltrace {s.numCalls}: {ctx.callStack.map (·.1)}, {idx}, {ctx.callId}"
+
+    -- if s.numCalls == 39363 then
+    --   dbg_trace s!"DBG[21]: Methods.lean:46 (after if s.numCalls == 39363 then)"
     
     -- let meth := Methods.withFuel fuel'
     -- if s.isDefEqCache.size > 300 then
@@ -88,7 +91,7 @@ match fuel with
       --   | _ => unreachable!
       -- dbg_trace s!"{s.numCalls}: {stack[9]!.2}, {stack.map (·.1)}"
 
-    -- let traceId := (.some 2392)
+    -- let traceId := .some 39363
     let traceId := none
     try
       let ret ← withCallId s.numCalls traceId do
@@ -103,6 +106,8 @@ match fuel with
           m (Methods.withFuel fuel')
       if printedTrace then
         dbg_trace s!"end of    {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}, {(← readThe Context).callId}"
+      -- if s.numCalls == 39363 then
+      --   dbg_trace s!"DBG[22]: Methods.lean:110 (after dbg_trace s!DBG[21]: Methods.lean:46 (af…)"
       pure ret
     catch e =>
       dbg_trace s!"calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}"

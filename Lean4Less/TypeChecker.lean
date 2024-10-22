@@ -333,10 +333,13 @@ def getTypeLevel (e : PExpr) : RecM (Level × PExpr) := do
 
 def appHEqSymm (t s : PExpr) (theqs : EExpr) (info : Option (Level × PExpr × PExpr) := none) : RecM EExpr := do
   let (lvl, tType, sType) ← info.getDM do
+    ttrace s!"DBG[28]: TypeChecker.lean:335 (after let (lvl, tType, sType) ← info.getDM d…)"
     let (lvl, tType) ← getTypeLevel t
+    ttrace s!"DBG[29]: TypeChecker.lean:337 (after let (lvl, tType) ← getTypeLevel t)"
     let sType ← inferTypePure 3 s
+    ttrace s!"DBG[30]: TypeChecker.lean:339 (after let sType ← inferTypePure 3 s)"
     pure (lvl, tType, sType)
-  pure $ theqs.reverse t s tType sType lvl
+  pure $ .rev t s tType sType lvl theqs
 
 def appHEqSymm? (t s : PExpr) (theqs? : Option EExpr) : RecM (Option EExpr) := do
   let some theqs := theqs? | return none
@@ -1091,7 +1094,6 @@ def unfoldDefinition (env : Environment) (e : PExpr) : Option PExpr := do
   if e.toExpr.isApp then
     let f0 := e.toExpr.getAppFn
     if let some f := unfoldDefinitionCore env f0.toPExpr then
-      -- ttrace s!"DBG[2]: TypeChecker.lean:1072 {d.name}"
       let rargs := e.toExpr.getAppRevArgs
       return f.toExpr.mkAppRevRange 0 rargs.size rargs |>.toPExpr
     none
@@ -1727,6 +1729,7 @@ def isDefEqUnitLike (t s : PExpr) : RecB := do
 @[inherit_doc isDefEqCore]
 def isDefEqCore' (t s : PExpr) : RecB := do
 
+  ttrace s!"DBG[1]: TypeChecker.lean:1728 (after def isDefEqCore (t s : PExpr) : RecB := …)"
   -- if ← isDefEqPure 74 t s 15 then -- NOTE: this is a tradeoff between runtime and output size
   --   return (true, none)
   let (r, pteqs?) ← quickIsDefEq 88 t s (useHash := true)
@@ -1735,6 +1738,7 @@ def isDefEqCore' (t s : PExpr) : RecB := do
   if !t.toExpr.hasFVar && s.toExpr.isConstOf ``true then
     let (t, p?) ← whnf 75 t
     if t.toExpr.isConstOf ``true then return (true, p?)
+  ttrace s!"DBG[2]: TypeChecker.lean:1737 (after if t.toExpr.isConstOf true then return (…)"
 
   if let some p := (← get).isDefEqCache.get? (t, s) then
     return (true, .some p)
@@ -1742,11 +1746,20 @@ def isDefEqCore' (t s : PExpr) : RecB := do
   --   let (lvl, sType) ← getTypeLevel s
   --   let tType ← inferTypePure 99 t
   --   return (true, .some $ p.reverse s t sType tType lvl)
+  ttrace s!"DBG[3]: TypeChecker.lean:1745 (after --   return (true, .some  p.reverse s t …)"
 
   let (tn, tEqtn?) ← whnfCore 76 t (cheapK := true) (cheapProj := true)
   let (sn, sEqsn?) ← whnfCore 77 s (cheapK := true) (cheapProj := true)
 
-  let mktEqs? (t' s' : PExpr) (tEqt'? sEqs'? t'Eqs'? : Option EExpr) := do appHEqTrans? t s' s (← appHEqTrans? t t' s' tEqt'? t'Eqs'?) (← appHEqSymm? s s' sEqs'?)
+  let mktEqs? (t' s' : PExpr) (tEqt'? sEqs'? t'Eqs'? : Option EExpr) := do 
+    ttrace s!"DBG[25]: TypeChecker.lean:1751 (after let mktEqs? (t s : PExpr) (tEqt? sEqs? t…)"
+    let tEqs'? ← appHEqTrans? t t' s' tEqt'? t'Eqs'?
+    ttrace s!"DBG[26]: TypeChecker.lean:1753 (after let tEqs? ← appHEqTrans? t t s tEqt? t…)"
+    let s'Eqs? ← appHEqSymm? s s' sEqs'?
+    ttrace s!"DBG[27]: TypeChecker.lean:1755 (after let sEqs? ← appHEqSymm? s s sEqs?)"
+    appHEqTrans? t s' s tEqs'? s'Eqs?
+
+  ttrace s!"DBG[4]: TypeChecker.lean:1751 (after let mktEqs? (t s : PExpr) (tEqt? sEqs? t…)"
 
   if !(tn == t && sn == s) then
     let (r, tnEqsn?) ← quickIsDefEq 89 tn sn
@@ -1754,12 +1767,13 @@ def isDefEqCore' (t s : PExpr) : RecB := do
       return (false, none)
     else if r == .true then
       return (true, ← mktEqs? tn sn tEqtn? sEqsn? tnEqsn?)
-
+  ttrace s!"DBG[6]: TypeChecker.lean:1761 (after return (true, ← mktEqs? tn sn tEqtn? s…)"
   let (r, tnEqsn?) ← isDefEqProofIrrel tn sn
   if r != .undef then 
     if r == .true then
       return (true, ← mktEqs? tn sn tEqtn? sEqsn? tnEqsn?)
     return (false, none)
+  ttrace s!"DBG[7]: TypeChecker.lean:1766 (after return (false, none))"
 
   match ← lazyDeltaReduction tn sn with
   | .continue ..
@@ -1770,10 +1784,12 @@ def isDefEqCore' (t s : PExpr) : RecB := do
   -- if snEqsn'?.isNone then
   --   if not (← isDefEqPure 0 sn sn') then
   --     throw $ .other "lazyDeltaReduction failed sanity check"
+  ttrace s!"DBG[8]: TypeChecker.lean:1777 (after --     throw  .other lazyDeltaReduction …)"
 
   let tEqtn'? ← appHEqTrans? t tn tn' tEqtn? tnEqtn'?
   let sEqsn'? ← appHEqTrans? s sn sn' sEqsn? snEqsn'?
 
+  ttrace s!"DBG[9]: TypeChecker.lean:1782 (after let sEqsn? ← appHEqTrans? s sn sn sEqs…)"
   match tn'.toExpr, sn'.toExpr with
   | .const tf tl, .const sf sl =>
     if tf == sf && Level.isEquivList tl sl then return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? none)
@@ -1801,16 +1817,23 @@ def isDefEqCore' (t s : PExpr) : RecB := do
               | _ =>
                 pure ()
   | _, _ => pure ()
+  ttrace s!"DBG[10]: TypeChecker.lean:1810 (after | _, _ => pure ())"
 
   -- above functions used `cheapProj = true`, `cheapK = true`, so we may not have a complete WHNF
   let (tn'', tn'Eqtn''?) ← whnfCore 79 tn'
   let (sn'', sn'Eqsn''?) ← whnfCore 80 sn'
+  ttrace s!"DBG[17]: TypeChecker.lean:1815 (after let (sn, snEqsn?) ← whnfCore 80 sn)"
   if !(tn'' == tn' && sn'' == sn') then
     -- if projection reduced, need to re-run (as we may not have a WHNF)
     let tEqtn''? ← appHEqTrans? t tn' tn'' tEqtn'? tn'Eqtn''?
     let sEqsn''? ← appHEqTrans? s sn' sn'' sEqsn'? sn'Eqsn''?
+    ttrace s!"DBG[19]: TypeChecker.lean:1820 (after let sEqsn? ← appHEqTrans? s sn sn sEqs…)"
     let (true, tn''Eqsn''?) ← isDefEqCore 81 tn'' sn'' | return (false, none)
-    return (true, ← mktEqs? tn'' sn'' tEqtn''? sEqsn''? tn''Eqsn''?)
+    ttrace s!"DBG[20]: TypeChecker.lean:1822 (after let (true, tnEqsn?) ← isDefEqCore 81 t…)"
+    let r? := ← mktEqs? tn'' sn'' tEqtn''? sEqsn''? tn''Eqsn''?
+    ttrace s!"DBG[18]: TypeChecker.lean:1821 (after let (true, tnEqsn?) ← isDefEqCore 81 t…)"
+    return (true, r?)
+  ttrace s!"DBG[11]: TypeChecker.lean:1821 (after return (true, ← mktEqs? tn sn tEqtn? s…)"
 
   -- optimized by above functions using `cheapK = true`
   match ← isDefEqApp methsA tn' sn' with
@@ -1818,22 +1841,30 @@ def isDefEqCore' (t s : PExpr) : RecB := do
     return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)
   | _ =>
     pure ()
+  ttrace s!"DBG[12]: TypeChecker.lean:1829 (after pure ())"
 
   match ← tryEtaExpansion tn' sn' with
   | (true, tn'Eqsn'?) => return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)
   | _ => pure ()
+
+  ttrace s!"DBG[13]: TypeChecker.lean:1834 (after | _ => pure ())"
+
   match ← tryEtaStruct tn' sn' with
   | (true, tn'Eqsn'?) => return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)
   | _ => pure ()
+
+  ttrace s!"DBG[14]: TypeChecker.lean:1839 (after | _ => pure ())"
   let r ← tryStringLitExpansion tn' sn'
   if r != .undef then
     if r == .true then 
       return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? none)
     else
       return (false, none)
+  ttrace s!"DBG[15]: TypeChecker.lean:1848 (after return (false, none))"
   let (r, tn'Eqsn'?) ← isDefEqUnitLike tn' sn'
   if r then
     return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)
+  ttrace s!"DBG[16]: TypeChecker.lean:1852 (after return (true, ← mktEqs? tn sn tEqtn? s…)"
   return (false, none)
 
 def isDefEqCorePure' (t s : PExpr) : RecM Bool := do

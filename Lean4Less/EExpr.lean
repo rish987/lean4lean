@@ -271,6 +271,7 @@ inductive EExpr where
 | refl     : ReflData → EExpr
 | prfIrrel : PIData EExpr → EExpr
 | sry      : SorryData → EExpr
+| rev      : PExpr → PExpr → PExpr → PExpr → Level → EExpr → EExpr -- "thunked" equality reversal
 deriving Inhabited
 
 def PExpr.replaceFVar (e fvar val : PExpr) : PExpr := e.toExpr.replaceFVar fvar val |>.toPExpr
@@ -362,15 +363,16 @@ def SorryData.replaceFVar (fvar val : PExpr) : SorryData → SorryData
 | {u, A, a, B, b} => {u, A := A.replaceFVar fvar val, a := a.replaceFVar fvar val, B := B.replaceFVar fvar val, b := b.replaceFVar fvar val}
 
 def EExpr.replaceFVar (fvar val : PExpr) : EExpr → EExpr
-| .other e    => .other $ e.replaceFVar fvar val
-| .lam d      => .lam $ d.replaceFVar fvar val
-| .forallE d  => .forallE $ d.replaceFVar fvar val
-| .app d      => .app $ d.replaceFVar fvar val
-| .trans d    => .trans $ d.replaceFVar fvar val
-| .symm d     => .symm $ d.replaceFVar fvar val
-| .refl d     => .refl $ d.replaceFVar fvar val
+| .other e    => .other    $ e.replaceFVar fvar val
+| .lam d      => .lam      $ d.replaceFVar fvar val
+| .forallE d  => .forallE  $ d.replaceFVar fvar val
+| .app d      => .app      $ d.replaceFVar fvar val
+| .trans d    => .trans    $ d.replaceFVar fvar val
+| .symm d     => .symm     $ d.replaceFVar fvar val
+| .refl d     => .refl     $ d.replaceFVar fvar val
 | .prfIrrel d => .prfIrrel $ d.replaceFVar fvar val
-| .sry d      => .sry $ d.replaceFVar fvar val
+| .sry d      => .sry      $ d.replaceFVar fvar val
+| .rev s t S T l e => .rev (s.replaceFVar fvar val) (t.replaceFVar fvar val) (S.replaceFVar fvar val) (T.replaceFVar fvar val) l (e.replaceFVar fvar val)
 
 end
 
@@ -379,153 +381,6 @@ end
 -- | lam     (d : LamData EExpr) => sorry
 -- | forallE (d : ForallData EExpr) => sorry
 -- | app     (d : AppData EExpr) => sorry
-
-mutual
-def HUVData.toExpr (dep : Bool) : HUVData EExpr → Expr
-| {a, UaEqVb, extra} =>
-  if dep then match extra with
-    | .some {b, vaEqb} => mkLambda #[a, b, vaEqb.aEqb] UaEqVb.toExpr
-    | .none => mkLambda #[a] UaEqVb.toExpr
-  else
-    UaEqVb.toExpr
-
-def LamDataExtra.lemmaName (dep : Bool) (d : LamDataExtra EExpr) : Name :=
-let name := match d with
-| .ABUV .. => `L4L.lambdaHEqABUV
-| .UV .. => `L4L.lambdaHEqUV
-| .none => `L4L.lambdaHEq
-if dep then name.toString ++ "'" |>.toName else name
-
-def LamData.toExpr : LamData EExpr → Expr
-| {u, v, A, U, f, a, g, faEqgx, extra} =>
-  Id.run $ do
-    let hfg := match extra with
-    | .ABUV {b, vaEqb, ..} .. =>
-        mkLambda #[a, b, vaEqb.aEqb] faEqgx.toExpr
-    | .UV ..
-    | .none => mkLambda #[a] faEqgx.toExpr
-
-    let (args, dep) := match extra with
-    | .ABUV {B, hAB, ..} {V} =>
-        let (U, V, dep) := getMaybeDepLemmaApp2 U V
-        (#[A, B, U, V, f, g, hAB.toExpr, hfg], dep)
-    | .UV {V} => 
-        let (U, V, dep) := getMaybeDepLemmaApp2 U V
-        (#[A, U, V, f, g, hfg], dep)
-    | .none => 
-        let (U, dep) := getMaybeDepLemmaApp1 U
-        (#[A, U, f, g, hfg], dep)
-    let n := extra.lemmaName dep
-    Lean.mkAppN (.const n [u, v]) args
-
-def ForallDataExtra.lemmaName (dep : Bool) (d : ForallDataExtra EExpr) : Name :=
-let name := match d with
-| .AB .. => `L4L.forallHEqAB
-| .ABApp .. => `L4L.forallHEq
-| .none => `L4L.forallHEq
-if dep then name.toString ++ "'" |>.toName else name
-
-def ForallData.toExpr : ForallData EExpr → Expr
-| {u, v, A, U, V, a, UaEqVx, extra} =>
-  Id.run $ do
-    let hUV dep :=
-      if dep then match extra with
-        | .AB {b, vaEqb, ..} => mkLambda #[a, b, vaEqb.aEqb] UaEqVx.toExpr
-        | .ABApp {b, vaEqb} =>
-          let fvars := #[b.toExpr, vaEqb.toExpr]
-          let vals := #[a.toExpr, Lean.mkAppN (.const `HEq.refl [u]) #[A, a.toExpr]]
-          -- TODO optimize resultant term -- will need to call replaceFVars directly on UaEqVx, call a simplify routine and prove termination
-          mkLambda #[a] (UaEqVx.toExpr.replaceFVars fvars vals)
-        | .none => mkLambda #[a] UaEqVx.toExpr
-      else
-        UaEqVx.toExpr
-
-    let (U, V, dep) := getMaybeDepLemmaApp2 U V
-    let (args, dep) := match extra with
-    | .AB {B, hAB, ..} =>
-        (#[A, B, U, V, hAB.toExpr, hUV dep], dep)
-    | .ABApp _ =>
-        (#[A, U, V, hUV dep], dep)
-    | .none =>
-        (#[A, U, V, hUV dep], dep)
-
-    let n := extra.lemmaName dep
-    Lean.mkAppN (.const n [u, v]) args
-
-def AppDataExtra.lemmaName (dep : Bool) (d : AppDataExtra EExpr) : Name :=
-let name := match d with
-| .ABUV .. => `L4L.appHEqABUV
-| .UV .. => `L4L.appHEqUV
-| .UVFun .. => `L4L.appFunHEqUV
-| .AB .. => `L4L.appHEqAB
-| .none .. => `L4L.appHEq
-| .Arg .. => `L4L.appArgHEq
-| .Fun .. => `L4L.appFunHEq
-if dep then name.toString ++ "'" |>.toName else name
-
-def AppData.toExpr : AppData EExpr → Expr
-| {u, v, A, U, f, a, extra} =>
-  let (args, dep) := match extra with
-  | .ABUV {B, hAB, V, hUV, g, fEqg, b, aEqb} =>
-    let (U, V, dep) := getMaybeDepLemmaApp2 U V
-    (#[A, B, U, V, hAB.toExpr, hUV.toExpr dep, f, g, a, b, fEqg.toExpr, aEqb.toExpr], dep)
-  | .UV {V, hUV, g, fEqg, b, aEqb} => 
-    let (U, V, dep) := getMaybeDepLemmaApp2 U V
-    (#[A, U, V, hUV.toExpr dep, f, g, a, b, fEqg.toExpr, aEqb.toExpr], dep)
-  | .UVFun {V, hUV, g, fEqg} => 
-    let (U, V, dep) := getMaybeDepLemmaApp2 U V
-    (#[A, U, V, hUV.toExpr dep, f, g, a, fEqg.toExpr], dep)
-  | .AB {B, hAB, g, fEqg, b, aEqb} => 
-    let U := U.1
-    (#[A, B, U, hAB.toExpr, f, g, a, b, fEqg.toExpr, aEqb.toExpr], false)
-  | .none {g, fEqg, b, aEqb} => -- TODO fails to show termination if doing nested match?
-    let (U, dep) := getMaybeDepLemmaApp1 U
-    (#[A, U, f, g, a, b, fEqg.toExpr, aEqb.toExpr], dep)
-  | .Fun {g, fEqg} =>
-    let (U, dep) := getMaybeDepLemmaApp1 U
-    (#[A, U, f, g, a, fEqg.toExpr], dep)
-  | .Arg {b, aEqb} =>
-    let (U, dep) := getMaybeDepLemmaApp1 U
-    (#[A, U, f, a, b, aEqb.toExpr], dep)
-  let n := extra.lemmaName dep
-  Lean.mkAppN (.const n [u, v]) args
-
-def TransData.toExpr : TransData EExpr → Expr
-| {u, A, B, C, a, b, c, aEqb, bEqc} =>
-  Lean.mkAppN (.const `HEq.trans [u]) #[A, B, C, a, b, c, aEqb.toExpr, bEqc.toExpr]
-
-def SymmData.toExpr : SymmData EExpr → Expr
-| {u, A, B, a, b, aEqb} => Lean.mkAppN (.const `HEq.symm [u]) #[A, B, a, b, aEqb.toExpr]
-
-def ReflData.toExpr : ReflData → Expr
-| {u, A, a} => Lean.mkAppN (.const `HEq.refl [u]) #[A, a]
-
-def PIData.toExpr : PIData EExpr → Expr
-| {P, p, q, extra} =>
-  match extra with
-  | .none =>
-    Lean.mkAppN (.const `L4L.prfIrrel []) #[P, p, q]
-  | .HEq {Q, hPQ} =>
-    Lean.mkAppN (.const `L4L.prfIrrelHEq []) #[P, Q, hPQ.toExpr, p, q]
-
-def FVarData.toExpr : FVarData → Expr
-| {aEqb, ..} => aEqb.toExpr
-
-def SorryData.toExpr : SorryData → Expr
-| {u, A, a, B, b} => Lean.mkAppN (.const `sorryAx [0]) #[Lean.mkAppN (.const ``HEq [u]) #[A, a, B, b], .const `Bool.false []]
-
-def EExpr.toExpr : EExpr → Expr
-| .other e => e
-| .lam d
-| .forallE d
-| .app d
-| .trans d
-| .symm d
-| .refl d
-| .prfIrrel d
-| .sry d  => d.toExpr
-
-end
 
 mutual
 
@@ -618,6 +473,7 @@ def EExpr.reverse (t s tType sType : PExpr) (lvl : Level) : EExpr → EExpr
 | .refl d
 | .prfIrrel d
 | .sry d  => d.reverse
+| .rev _ _ _ _ _ e => e
 
 def EExpr.reverse? : EExpr → Option EExpr
 | .other _ => none
@@ -629,6 +485,181 @@ def EExpr.reverse? : EExpr → Option EExpr
 | .refl d
 | .prfIrrel d
 | .sry d  => d.reverse
+| .rev _ _ _ _ _ e => e
+
+end
+
+instance : SizeOf EExpr where
+sizeOf e := sorry
+
+mutual
+def HUVData.toExprDep' (e : HUVData EExpr) : Expr := match e with -- FIXME why can't I use a single function here?
+| {a, UaEqVb, extra} =>
+  match extra with
+    | .some {b, vaEqb} => mkLambda #[a, b, vaEqb.aEqb] UaEqVb.toExpr
+    | .none => mkLambda #[a] UaEqVb.toExpr
+termination_by sizeOf e
+decreasing_by
+  sorry
+  sorry
+
+def HUVData.toExpr' (e : HUVData EExpr) : Expr := match e with
+| {a, UaEqVb, extra} =>
+  UaEqVb.toExpr
+termination_by sizeOf e
+
+def LamDataExtra.lemmaName (dep : Bool) (d : LamDataExtra EExpr) : Name :=
+let name := match d with
+| .ABUV .. => `L4L.lambdaHEqABUV
+| .UV .. => `L4L.lambdaHEqUV
+| .none => `L4L.lambdaHEq
+if dep then name.toString ++ "'" |>.toName else name
+
+def LamData.toExpr (e : LamData EExpr) : Expr := match e with
+| {u, v, A, U, f, a, g, faEqgx, extra} =>
+  Id.run $ do
+    let hfg := match extra with
+    | .ABUV {b, vaEqb, ..} .. =>
+        mkLambda #[a, b, vaEqb.aEqb] faEqgx.toExpr
+    | .UV ..
+    | .none => mkLambda #[a] faEqgx.toExpr
+
+    let (args, dep) := match extra with
+    | .ABUV {B, hAB, ..} {V} =>
+        let (U, V, dep) := getMaybeDepLemmaApp2 U V
+        (#[A, B, U, V, f, g, hAB.toExpr, hfg], dep)
+    | .UV {V} => 
+        let (U, V, dep) := getMaybeDepLemmaApp2 U V
+        (#[A, U, V, f, g, hfg], dep)
+    | .none => 
+        let (U, dep) := getMaybeDepLemmaApp1 U
+        (#[A, U, f, g, hfg], dep)
+    let n := extra.lemmaName dep
+    Lean.mkAppN (.const n [u, v]) args
+termination_by sizeOf e
+
+def ForallDataExtra.lemmaName (dep : Bool) (d : ForallDataExtra EExpr) : Name :=
+let name := match d with
+| .AB .. => `L4L.forallHEqAB
+| .ABApp .. => `L4L.forallHEq
+| .none => `L4L.forallHEq
+if dep then name.toString ++ "'" |>.toName else name
+
+def ForallData.toExpr (e : ForallData EExpr) : Expr := match e with
+| {u, v, A, U, V, a, UaEqVx, extra} =>
+  Id.run $ do
+    let hUV dep :=
+      if dep then match extra with
+        | .AB {b, vaEqb, ..} => mkLambda #[a, b, vaEqb.aEqb] UaEqVx.toExpr
+        | .ABApp {b, vaEqb} =>
+          let fvars := #[b.toExpr, vaEqb.toExpr]
+          let vals := #[a.toExpr, Lean.mkAppN (.const `HEq.refl [u]) #[A, a.toExpr]]
+          -- TODO optimize resultant term -- will need to call replaceFVars directly on UaEqVx, call a simplify routine and prove termination
+          mkLambda #[a] (UaEqVx.toExpr.replaceFVars fvars vals)
+        | .none => mkLambda #[a] UaEqVx.toExpr
+      else
+        UaEqVx.toExpr
+
+    let (U, V, dep) := getMaybeDepLemmaApp2 U V
+    let (args, dep) := match extra with
+    | .AB {B, hAB, ..} =>
+        (#[A, B, U, V, hAB.toExpr, hUV dep], dep)
+    | .ABApp _ =>
+        (#[A, U, V, hUV dep], dep)
+    | .none =>
+        (#[A, U, V, hUV dep], dep)
+
+    let n := extra.lemmaName dep
+    Lean.mkAppN (.const n [u, v]) args
+termination_by sizeOf e
+
+def AppDataExtra.lemmaName (dep : Bool) (d : AppDataExtra EExpr) : Name :=
+let name := match d with
+| .ABUV .. => `L4L.appHEqABUV
+| .UV .. => `L4L.appHEqUV
+| .UVFun .. => `L4L.appFunHEqUV
+| .AB .. => `L4L.appHEqAB
+| .none .. => `L4L.appHEq
+| .Arg .. => `L4L.appArgHEq
+| .Fun .. => `L4L.appFunHEq
+if dep then name.toString ++ "'" |>.toName else name
+
+def AppData.toExpr (e : AppData EExpr) : Expr := match e with
+| {u, v, A, U, f, a, extra} =>
+  let (args, dep) := match extra with
+  | .ABUV {B, hAB, V, hUV, g, fEqg, b, aEqb} =>
+    let (U, V, dep) := getMaybeDepLemmaApp2 U V
+    (#[A, B, U, V, hAB.toExpr, if dep then hUV.toExprDep' else hUV.toExpr', f, g, a, b, fEqg.toExpr, aEqb.toExpr], dep)
+  | .UV {V, hUV, g, fEqg, b, aEqb} => 
+    let (U, V, dep) := getMaybeDepLemmaApp2 U V
+    (#[A, U, V, if dep then hUV.toExprDep' else hUV.toExpr', f, g, a, b, fEqg.toExpr, aEqb.toExpr], dep)
+  | .UVFun {V, hUV, g, fEqg} => 
+    let (U, V, dep) := getMaybeDepLemmaApp2 U V
+    (#[A, U, V, if dep then hUV.toExprDep' else hUV.toExpr', f, g, a, fEqg.toExpr], dep)
+  | .AB {B, hAB, g, fEqg, b, aEqb} => 
+    let U := U.1
+    (#[A, B, U, hAB.toExpr, f, g, a, b, fEqg.toExpr, aEqb.toExpr], false)
+  | .none {g, fEqg, b, aEqb} => -- TODO fails to show termination if doing nested match?
+    let (U, dep) := getMaybeDepLemmaApp1 U
+    (#[A, U, f, g, a, b, fEqg.toExpr, aEqb.toExpr], dep)
+  | .Fun {g, fEqg} =>
+    let (U, dep) := getMaybeDepLemmaApp1 U
+    (#[A, U, f, g, a, fEqg.toExpr], dep)
+  | .Arg {b, aEqb} =>
+    let (U, dep) := getMaybeDepLemmaApp1 U
+    (#[A, U, f, a, b, aEqb.toExpr], dep)
+  let n := extra.lemmaName dep
+  Lean.mkAppN (.const n [u, v]) args
+termination_by sizeOf e
+
+def TransData.toExpr (e : TransData EExpr) : Expr := match e with
+| {u, A, B, C, a, b, c, aEqb, bEqc} =>
+  Lean.mkAppN (.const `HEq.trans [u]) #[A, B, C, a, b, c, aEqb.toExpr, bEqc.toExpr]
+termination_by sizeOf e
+
+def SymmData.toExpr (e : SymmData EExpr) : Expr := match e with
+| {u, A, B, a, b, aEqb} => Lean.mkAppN (.const `HEq.symm [u]) #[A, B, a, b, aEqb.toExpr]
+termination_by sizeOf e
+
+def ReflData.toExpr : ReflData → Expr
+| {u, A, a} => Lean.mkAppN (.const `HEq.refl [u]) #[A, a]
+
+def PIData.toExpr (e : PIData EExpr) : Expr := match e with
+| {P, p, q, extra} =>
+  match extra with
+  | .none =>
+    Lean.mkAppN (.const `L4L.prfIrrel []) #[P, p, q]
+  | .HEq {Q, hPQ} =>
+    Lean.mkAppN (.const `L4L.prfIrrelHEq []) #[P, Q, hPQ.toExpr, p, q]
+termination_by sizeOf e
+
+def FVarData.toExpr : FVarData → Expr
+| {aEqb, ..} => aEqb.toExpr
+
+def SorryData.toExpr : SorryData → Expr
+| {u, A, a, B, b} => Lean.mkAppN (.const `sorryAx [0]) #[Lean.mkAppN (.const ``HEq [u]) #[A, a, B, b], .const `Bool.false []]
+
+def EExpr.toExpr (e : EExpr) : Expr := match e with
+| .other e => e
+| .lam d
+| .forallE d
+| .app d
+| .trans d
+| .symm d
+| .refl d
+| .prfIrrel d
+| .sry d  => d.toExpr
+-- | .rev .. => panic! "encountered thunked reversal"
+| .rev t s T S l e => (e.reverse t s T S l).toExpr
+termination_by sizeOf e
+decreasing_by
+  sorry
+  sorry
+  sorry
+  sorry
+  sorry
+  sorry
+  sorry
 
 end
 
