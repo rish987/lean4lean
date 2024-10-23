@@ -170,7 +170,8 @@ def dottrace (msg : Unit → RecM String) : RecM Unit := do -- TODO macro to mak
 
 def mkId (n : Nat) : RecM Name := do
   let id ← mkFreshId
-  -- if id == "_kernel_fresh.879".toName then
+  -- if id == "_kernel_fresh.15280".toName then
+  --   dbg_trace s!"DBG: mkId {n}"
   -- else if id == "_kernel_fresh.877".toName then
   modify fun st => { st with fvarRegistry := st.fvarRegistry.insert id n }
   pure id
@@ -912,8 +913,6 @@ def inferProj (typeName : Name) (idx : Nat) (struct : PExpr) (patched : Bool) (s
 
 @[inherit_doc inferType]
 def inferType' (e : Expr) (_dbg := false) : RecPE := do
-  -- if (← readThe Context).const == `eq_of_heq' then
-  --   trace s!"started e={e}"
   if e.isBVar then
     throw <| .other
       s!"patcher does not support loose bound variables, {""
@@ -1495,8 +1494,9 @@ Checks if `t` and `s` are definitionally equivalent according to proof irrelevan
 (that is, they are proofs of the same proposition).
 -/
 def isDefEqProofIrrel (t s : PExpr) : RecLB := do
-  -- if ← shouldTrace then
-  --   let x ← withL4LTrace $ runLeanMinusRecM $ Lean.TypeChecker.inferTypeCheck t
+  if ← shouldTrace then
+    dbg_trace s!"HERE: {t.toExpr.containsFVar' (.mk "_kernel_fresh.15280".toName)}"
+    -- let x ← withL4LTrace $ runLeanMinusRecM $ Lean.TypeChecker.inferTypeCheck t
   let tType ← inferTypePure 59 t
   let prop ← isPropPure tType
   if !prop then return (.undef, none)

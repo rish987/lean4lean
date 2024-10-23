@@ -91,7 +91,7 @@ match fuel with
       --   | _ => unreachable!
       -- dbg_trace s!"{s.numCalls}: {stack[9]!.2}, {stack.map (·.1)}"
 
-    -- let traceId := .some 39363
+    let traceId := Option.some 468826
     let traceId := none
     try
       let ret ← withCallId s.numCalls traceId do
@@ -110,7 +110,7 @@ match fuel with
       --   dbg_trace s!"DBG[22]: Methods.lean:110 (after dbg_trace s!DBG[21]: Methods.lean:46 (af…)"
       pure ret
     catch e =>
-      dbg_trace s!"calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}"
+      dbg_trace s!"err calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}"
       throw e
 
 def Methods.withFuel (n : Nat) : Methods := 
