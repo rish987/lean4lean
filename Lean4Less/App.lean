@@ -201,7 +201,7 @@ def mkAppEqProof (T S : PExpr) (TEqS? : Option EExpr) (as bs : Array PExpr) (asE
             withLCtx ((← getLCtx).mkLocalDecl idbEqa default seqtType default) do
               let some vaEqb := (← getLCtx).find? idaEqb | unreachable!
               let some vbEqa := (← getLCtx).find? idbEqa | unreachable!
-              withEqFVar ida idb (vaEqb, (vaEqb.toExpr.toEExpr.reverse aVar.toExpr.toPExpr bVar.toExpr.toPExpr A B u).run) do
+              withEqFVar ida idb (vaEqb, (vaEqb.toExpr.toEExpr.reverse 0 aVar.toExpr.toPExpr bVar.toExpr.toPExpr A B u).run) do
                 let d := (vaEqb, vbEqa, AEqB)
                 cont (.some d) bVar
       else
@@ -323,7 +323,7 @@ def forallAbs (max : Nat) (tfT sfT : Expr) : m
                   withLCtx ((← getLCtx).mkLocalDecl idsEqt default seqtType default) do
                     let some vtEqs := (← getLCtx).find? idtEqs | unreachable!
                     -- let some vsEqt := (← getLCtx).find? idsEqt | unreachable!
-                    withEqFVar idt ids (vtEqs, (vtEqs.toExpr.toEExpr.reverse tVar.toExpr.toPExpr sVar.toExpr.toPExpr tDom.toPExpr sDom.toPExpr lvl).run) do -- TODO verify that we actually need this
+                    withEqFVar idt ids (vtEqs, (vtEqs.toExpr.toEExpr.reverse 0 tVar.toExpr.toPExpr sVar.toExpr.toPExpr tDom.toPExpr sDom.toPExpr lvl).run) do -- TODO verify that we actually need this
                       cont' ids
             else
               cont' idt

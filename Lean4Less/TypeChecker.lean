@@ -419,7 +419,7 @@ def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : P
             withLCtx ((← getLCtx).mkLocalDecl idsEqt default seqtType default) do
               let some vtEqs := (← getLCtx).find? idtEqs | unreachable!
               let some vsEqt := (← getLCtx).find? idsEqt | unreachable!
-              withEqFVar idt ids (vtEqs, (vtEqs.toExpr.toEExpr.reverse tvar.toExpr.toPExpr svar.toExpr.toPExpr tDom sDom lvl).run) do
+              withEqFVar idt ids (vtEqs, (vtEqs.toExpr.toEExpr.reverse 0 tvar.toExpr.toPExpr svar.toExpr.toPExpr tDom sDom lvl).run) do
                 cont (.some (svar, vtEqs, vsEqt, p?)) svar 
       else
         cont none tvar
