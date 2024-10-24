@@ -38,14 +38,16 @@ match fuel with
     --   
 
     let mut printedTrace := false
-    if false && s.numCalls >= 1000 /- && not s.printedDbg -/ then -- TODO static variables?
+    let methPrint := false
+    -- let methPrint := true
+    if methPrint && s.numCalls >= 1000 /- && not s.printedDbg -/ then -- TODO static variables?
       if s.numCalls % 1 == 0 then
         printedTrace := true
         dbg_trace s!"calltrace {s.numCalls}: {ctx.callStack.map (·.1)}, {idx}, {ctx.callId}"
 
     -- if s.numCalls == 39363 then
     --   dbg_trace s!"DBG[21]: Methods.lean:46 (after if s.numCalls == 39363 then)"
-    
+
     -- let meth := Methods.withFuel fuel'
     -- if s.isDefEqCache.size > 300 then
     --   modify fun s => {s with isDefEqCache := Std.HashMap.empty (capacity := 1000)} 
@@ -91,8 +93,8 @@ match fuel with
       --   | _ => unreachable!
       -- dbg_trace s!"{s.numCalls}: {stack[9]!.2}, {stack.map (·.1)}"
 
-    let traceId := Option.some 468826
-    let traceId := none
+    let traceId := Option.some 20218
+    -- let traceId := none
     try
       let ret ← withCallId s.numCalls traceId do
         withCallData idx s.numCalls d do 

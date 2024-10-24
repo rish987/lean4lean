@@ -40,13 +40,19 @@ def getMaybeDepLemmaApp2 (U V : (PExpr × LocalDecl)) : (PExpr × PExpr × Bool)
   | (#[U, V], dep) => (U, V, dep)
   | _ => unreachable!
 
+instance : Hashable LocalDecl where
+hash l := hash (l.toExpr, l.type)
+
+instance : BEq LocalDecl where
+beq l l' := (l.toExpr, l.type) == (l'.toExpr, l'.type)
+
 /--
 Tracks fvars for an equality in both directions (useful when reversing equalities).
 -/
 structure FVarData where
 aEqb : LocalDecl
 bEqa : LocalDecl
-deriving Inhabited
+deriving Inhabited, Hashable, BEq
 
 structure SorryData where
 u    : Level
@@ -54,7 +60,7 @@ A    : PExpr
 a    : PExpr
 B    : PExpr
 b    : PExpr
-deriving Inhabited
+deriving Inhabited, Hashable, BEq
 
 
 
@@ -63,15 +69,17 @@ B      : PExpr
 b      : LocalDecl
 vaEqb  : FVarData
 hAB    : EExpr
+deriving Hashable, BEq
 
 structure LamUVData :=
 V   : PExpr × LocalDecl
+deriving Hashable, BEq
 
 inductive LamDataExtra (EExpr : Type) :=
 | ABUV : LamABData EExpr → LamUVData → LamDataExtra EExpr
 | UV   : LamUVData → LamDataExtra EExpr
 | none : LamDataExtra EExpr
-deriving Inhabited
+deriving Inhabited, Hashable, BEq
 
 structure LamData (EExpr : Type) :=
 u      : Level
@@ -83,7 +91,7 @@ a      : LocalDecl
 g      : PExpr
 faEqgx : EExpr
 extra  : LamDataExtra EExpr := .none
-deriving Inhabited
+deriving Inhabited, Hashable, BEq
 
 
 
@@ -92,16 +100,18 @@ B      : PExpr
 b      : LocalDecl
 vaEqb  : FVarData
 hAB    : EExpr
+deriving Hashable, BEq
 
 structure ForallABAppData (EExpr : Type) :=
 b      : LocalDecl
 vaEqb  : FVarData
+deriving Hashable, BEq
 
 inductive ForallDataExtra (EExpr : Type) :=
 | AB   : ForallABData EExpr → ForallDataExtra EExpr
 | ABApp: ForallABAppData EExpr → ForallDataExtra EExpr
 | none : ForallDataExtra EExpr
-deriving Inhabited
+deriving Inhabited, Hashable, BEq
 
 structure ForallData (EExpr : Type) :=
 u      : Level
@@ -112,20 +122,20 @@ U      : PExpr × LocalDecl
 V      : PExpr × LocalDecl
 UaEqVx : EExpr
 extra  : ForallDataExtra EExpr := .none
-deriving Inhabited
+deriving Inhabited, Hashable, BEq
 
 
 
 structure HUVDataExtra (EExpr : Type) where
 b      : LocalDecl
 vaEqb  : FVarData
-deriving Inhabited
+deriving Inhabited, Hashable, BEq
 
 structure HUVData (EExpr : Type) where
 a      : LocalDecl
 UaEqVb : EExpr
 extra  : Option (HUVDataExtra EExpr)
-deriving Inhabited
+deriving Inhabited, Hashable, BEq
 
 
 
@@ -134,17 +144,17 @@ g    : PExpr
 fEqg : EExpr
 b    : PExpr
 aEqb : EExpr
-deriving Inhabited
+deriving Inhabited, Hashable, BEq
 
 structure AppDataArg (EExpr : Type) where
 b    : PExpr
 aEqb : EExpr
-deriving Inhabited
+deriving Inhabited, Hashable, BEq
 
 structure AppDataFun (EExpr : Type) where
 g    : PExpr
 fEqg : EExpr
-deriving Inhabited
+deriving Inhabited, Hashable, BEq
 
 structure AppDataAB (EExpr : Type) where
 B    : PExpr
@@ -153,7 +163,7 @@ g    : PExpr
 fEqg : EExpr
 b    : PExpr
 aEqb : EExpr
-deriving Inhabited
+deriving Inhabited, Hashable, BEq
 
 structure AppDataUV (EExpr : Type) where
 V    : PExpr × LocalDecl
@@ -162,14 +172,14 @@ g    : PExpr
 fEqg : EExpr
 b    : PExpr
 aEqb : EExpr
-deriving Inhabited
+deriving Inhabited, Hashable, BEq
 
 structure AppDataUVFun (EExpr : Type) where
 V    : PExpr × LocalDecl
 hUV  : HUVData EExpr
 g    : PExpr
 fEqg : EExpr
-deriving Inhabited
+deriving Inhabited, Hashable, BEq
 
 structure AppDataABUV (EExpr : Type) where
 B    : PExpr
@@ -180,7 +190,7 @@ g    : PExpr
 fEqg : EExpr
 b    : PExpr
 aEqb : EExpr
-deriving Inhabited
+deriving Inhabited, Hashable, BEq
 
 inductive AppDataExtra (EExpr : Type) where
 | none  : AppDataNone EExpr → AppDataExtra EExpr
@@ -190,7 +200,7 @@ inductive AppDataExtra (EExpr : Type) where
 | UVFun : AppDataUVFun EExpr → AppDataExtra EExpr
 | AB    : AppDataAB EExpr → AppDataExtra EExpr
 | ABUV  : AppDataABUV EExpr → AppDataExtra EExpr
-deriving Inhabited
+deriving Inhabited, Hashable, BEq
 
 structure AppData (EExpr : Type) where
 u     : Level
@@ -200,7 +210,7 @@ U     : PExpr × LocalDecl -- TODO make fvar arg optional
 f     : PExpr
 a     : PExpr
 extra : AppDataExtra EExpr
-deriving Inhabited
+deriving Inhabited, Hashable, BEq
 
 
 
@@ -214,7 +224,7 @@ b     : PExpr
 c     : PExpr
 aEqb  : EExpr
 bEqc  : EExpr
-deriving Inhabited
+deriving Inhabited, Hashable, BEq
 
 
 
@@ -225,7 +235,7 @@ B     : PExpr
 a     : PExpr
 b     : PExpr
 aEqb  : EExpr
-deriving Inhabited
+deriving Inhabited, Hashable, BEq
 
 
 
@@ -233,26 +243,26 @@ structure ReflData where
 u     : Level
 A     : PExpr
 a     : PExpr
-deriving Inhabited
+deriving Inhabited, Hashable, BEq
 
 
 
 structure PIDataHEq (EExpr : Type) where
 Q    : PExpr
 hPQ  : EExpr
-deriving Inhabited
+deriving Inhabited, Hashable, BEq
 
 inductive PIDataExtra (EExpr : Type) where
 | none 
 | HEq   : PIDataHEq EExpr → PIDataExtra EExpr
-deriving Inhabited
+deriving Inhabited, Hashable, BEq
 
 structure PIData (EExpr : Type) where
 P     : PExpr
 p     : PExpr
 q     : PExpr
 extra : PIDataExtra EExpr := .none
-deriving Inhabited
+deriving Inhabited, Hashable, BEq
 
 
 
@@ -270,7 +280,61 @@ inductive EExpr where
 | prfIrrel : PIData EExpr → EExpr
 | sry      : SorryData → EExpr
 | rev      : PExpr → PExpr → PExpr → PExpr → Level → EExpr → EExpr -- "thunked" equality reversal
-deriving Inhabited
+-- with
+--   @[computed_field]
+--   data : @& EExpr → UInt64
+-- | .other d
+-- | .lam d
+-- | .forallE d
+-- | .app d
+-- | .trans d
+-- | .symm d
+-- | .refl d
+-- | .prfIrrel d
+-- | .sry d   => hash d
+-- | .rev s t S T l e => hash (#[s, t, S, T], l, data e)
+    -- | .const n lvls => mkData (mixHash 5 <| mixHash (hash n) (hash lvls)) 0 0 false false (lvls.any Level.hasMVar) (lvls.any Level.hasParam)
+    -- | .bvar idx => mkData (mixHash 7 <| hash idx) (idx+1)
+    -- | .sort lvl => mkData (mixHash 11 <| hash lvl) 0 0 false false lvl.hasMVar lvl.hasParam
+    -- | .fvar fvarId => mkData (mixHash 13 <| hash fvarId) 0 0 true
+    -- | .mvar fvarId => mkData (mixHash 17 <| hash fvarId) 0 0 false true
+    -- | .mdata _m e =>
+    --   let d := e.data.approxDepth.toUInt32+1
+    --   mkData (mixHash d.toUInt64 <| e.data.hash) e.data.looseBVarRange.toNat d e.data.hasFVar e.data.hasExprMVar e.data.hasLevelMVar e.data.hasLevelParam
+    -- | .proj s i e =>
+    --   let d := e.data.approxDepth.toUInt32+1
+    --   mkData (mixHash d.toUInt64 <| mixHash (hash s) <| mixHash (hash i) e.data.hash)
+    --       e.data.looseBVarRange.toNat d e.data.hasFVar e.data.hasExprMVar e.data.hasLevelMVar e.data.hasLevelParam
+    -- | .app f a => mkAppData f.data a.data
+    -- | .lam _ t b _ =>
+    --   let d := (max t.data.approxDepth.toUInt32 b.data.approxDepth.toUInt32) + 1
+    --   mkDataForBinder (mixHash d.toUInt64 <| mixHash t.data.hash b.data.hash)
+    --     (max t.data.looseBVarRange.toNat (b.data.looseBVarRange.toNat - 1))
+    --     d
+    --     (t.data.hasFVar || b.data.hasFVar)
+    --     (t.data.hasExprMVar || b.data.hasExprMVar)
+    --     (t.data.hasLevelMVar || b.data.hasLevelMVar)
+    --     (t.data.hasLevelParam || b.data.hasLevelParam)
+    -- | .forallE _ t b _ =>
+    --   let d := (max t.data.approxDepth.toUInt32 b.data.approxDepth.toUInt32) + 1
+    --   mkDataForBinder (mixHash d.toUInt64 <| mixHash t.data.hash b.data.hash)
+    --     (max t.data.looseBVarRange.toNat (b.data.looseBVarRange.toNat - 1))
+    --     d
+    --     (t.data.hasFVar || b.data.hasFVar)
+    --     (t.data.hasExprMVar || b.data.hasExprMVar)
+    --     (t.data.hasLevelMVar || b.data.hasLevelMVar)
+    --     (t.data.hasLevelParam || b.data.hasLevelParam)
+    -- | .letE _ t v b _ =>
+    --   let d := (max (max t.data.approxDepth.toUInt32 v.data.approxDepth.toUInt32) b.data.approxDepth.toUInt32) + 1
+    --   mkDataForLet (mixHash d.toUInt64 <| mixHash t.data.hash <| mixHash v.data.hash b.data.hash)
+    --     (max (max t.data.looseBVarRange.toNat v.data.looseBVarRange.toNat) (b.data.looseBVarRange.toNat - 1))
+    --     d
+    --     (t.data.hasFVar || v.data.hasFVar || b.data.hasFVar)
+    --     (t.data.hasExprMVar || v.data.hasExprMVar || b.data.hasExprMVar)
+    --     (t.data.hasLevelMVar || v.data.hasLevelMVar || b.data.hasLevelMVar)
+    --     (t.data.hasLevelParam || v.data.hasLevelParam || b.data.hasLevelParam)
+    -- | .lit l => mkData (mixHash 3 (hash l))
+deriving Inhabited, Hashable, BEq
 
 namespace Expr
 
@@ -492,7 +556,11 @@ def EExpr.replaceFVarE (fvar : PExpr) (val : EExpr') : EExpr → EExpr
 | .forallE d  => .forallE  $ d.replaceFVarE fvar val
 | .app d      => .app      $ d.replaceFVarE fvar val
 | .trans d    => .trans    $ d.replaceFVarE fvar val
-| .symm d     => .symm     $ d.replaceFVarE fvar val
+| .symm d     =>
+  let d' := d.replaceFVarE fvar val
+  match d'.aEqb with
+  | .symm de => de.aEqb -- can eliminate double-symm application
+  | _ => .symm d'
 | .refl d     => .refl     $ d.replaceFVarE fvar
 | .prfIrrel d => .prfIrrel $ d.replaceFVarE fvar val
 | .sry d      => .sry      $ d.replaceFVarE fvar
@@ -506,129 +574,152 @@ end
 -- | forallE (d : ForallData EExpr) => sorry
 -- | app     (d : AppData EExpr) => sorry
 
+structure EContext where
+  dbg : Bool := false -- (for debugging purposes)
+
+structure EState where -- TODO why is this needed for dbg_trace to show up?
+  toExprCache : Std.HashMap EExpr Expr := {}
+  reverseCache : Std.HashMap EExpr EExpr := {}
+
+abbrev EM := ReaderT EContext <| StateT EState <| Id
+
+def EM.run (dbg : Bool := false) (x : EM α) : α :=
+  (StateT.run (x { dbg }) {}).1
+
+abbrev ttrace (msg : String) : EM Unit := do
+  if (← read).dbg then
+    dbg_trace msg
+
 mutual
 
 def FVarData.reverse : FVarData → FVarData
 | {aEqb, bEqa} => Id.run $ do
   pure {aEqb := bEqa, bEqa := aEqb} 
 
-def LamData.reverse : LamData EExpr → EExpr
-| {u, v, A, U, f, a, g, faEqgx, extra} =>
-  Id.run $ do 
+def LamData.reverse : LamData EExpr → EM EExpr
+| {u, v, A, U, f, a, g, faEqgx, extra} => do
     let (extra, newA, newU, newa, newfaEqgx) ← match extra with
     | .ABUV {b, B, vaEqb, hAB} {V} => do
       let aEqb' := .mk $ EExpr.symm {u, a := b.toExpr.toPExpr, b := a.toExpr.toPExpr, A := B, B := A, aEqb := EExpr.other (vaEqb.bEqa.toExpr.toPExpr)}
-      let newfaEqgx := EExpr.reverse f g (mkForall #[U.2] U.1) (mkForall #[U.2] U.1) (Level.imax u v) faEqgx |>.replaceFVarE (vaEqb.aEqb.toExpr.toPExpr) aEqb'
-      pure (.ABUV {b := a, B := A, vaEqb := vaEqb.reverse, hAB := (EExpr.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ hAB).replaceFVarE (vaEqb.aEqb.toExpr.toPExpr) aEqb'} {V := U}, B, V, b, newfaEqgx)
-    | .UV {V} => (.UV {V := U}, A, V, a, EExpr.reverse f g (mkForall #[U.2] U.1) (mkForall #[U.2] U.1) (Level.imax u v) faEqgx)
-    | .none => (.none, A, U, a, EExpr.reverse f g (mkForall #[U.2] U.1) (mkForall #[U.2] U.1) (Level.imax u v) faEqgx)
+      let newfaEqgx := (← EExpr.reverse f g (mkForall #[U.2] U.1) (mkForall #[U.2] U.1) (Level.imax u v) faEqgx) |>.replaceFVarE (vaEqb.aEqb.toExpr.toPExpr) aEqb'
+      pure (.ABUV {b := a, B := A, vaEqb := vaEqb.reverse, hAB := (← EExpr.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ hAB).replaceFVarE (vaEqb.aEqb.toExpr.toPExpr) aEqb'} {V := U}, B, V, b, newfaEqgx)
+    | .UV {V} => pure (.UV {V := U}, A, V, a, (← EExpr.reverse f g (mkForall #[U.2] U.1) (mkForall #[U.2] U.1) (Level.imax u v) faEqgx))
+    | .none => pure (.none, A, U, a, (← EExpr.reverse f g (mkForall #[U.2] U.1) (mkForall #[U.2] U.1) (Level.imax u v) faEqgx))
 
-    .lam {u, v, A := newA, U := newU, f := g, a := newa, g := f, faEqgx := newfaEqgx, extra}
+    pure $ .lam {u, v, A := newA, U := newU, f := g, a := newa, g := f, faEqgx := newfaEqgx, extra}
 
-def HUVData.reverse (A B Ua Vb : PExpr) (u v : Level) : HUVData EExpr → HUVData EExpr
-| {a, UaEqVb, extra} => Id.run $
-  let newUaEqVb := UaEqVb.reverse Ua Vb (Expr.sort v).toPExpr (Expr.sort v).toPExpr v.succ
+def HUVData.reverse (A B Ua Vb : PExpr) (u v : Level) : HUVData EExpr → EM (HUVData EExpr)
+| {a, UaEqVb, extra} => do
+  let newUaEqVb ← UaEqVb.reverse Ua Vb (Expr.sort v).toPExpr (Expr.sort v).toPExpr v.succ
   match extra with
   | .some {b, vaEqb} => do
     let aEqb' := .mk $ EExpr.symm {u, a := b.toExpr.toPExpr, b := a.toExpr.toPExpr, A := B, B := A, aEqb := EExpr.other (vaEqb.bEqa.toExpr.toPExpr)}
-    pure {a := b, UaEqVb := newUaEqVb.replaceFVarE (vaEqb.aEqb.toExpr.toPExpr) aEqb', extra := .some {b := a, vaEqb := vaEqb.reverse}}
-  | .none => {a, UaEqVb := newUaEqVb, extra := .none}
+    pure {a := b, UaEqVb := (newUaEqVb.replaceFVarE (vaEqb.aEqb.toExpr.toPExpr) aEqb'), extra := .some {b := a, vaEqb := vaEqb.reverse}}
+  | .none => pure {a, UaEqVb := newUaEqVb, extra := .none}
 
-def ForallData.reverse : ForallData EExpr → EExpr
-| {u, v, A, U, V, a, UaEqVx, extra} =>
-  Id.run $ do 
+def ForallData.reverse : ForallData EExpr → EM EExpr
+  | {u, v, A, U, V, a, UaEqVx, extra} => do 
     let (extra, newA, newa) ← match extra with
     | .AB {b, B, hAB, vaEqb} => do
       let aEqb' := .mk $ EExpr.symm {u, a := b.toExpr.toPExpr, b := a.toExpr.toPExpr, A := B, B := A, aEqb := EExpr.other (vaEqb.bEqa.toExpr.toPExpr)}
-      pure (.AB {b := a, B := A, hAB := (hAB.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ).replaceFVarE (vaEqb.aEqb.toExpr.toPExpr) aEqb', vaEqb := vaEqb.reverse}, B, b)
+      pure (.AB {b := a, B := A, hAB := (← hAB.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ).replaceFVarE (vaEqb.aEqb.toExpr.toPExpr) aEqb', vaEqb := vaEqb.reverse}, B, b)
     | .ABApp {b, vaEqb} => 
-      (.ABApp {b := a, vaEqb := vaEqb.reverse}, A, b)
+      pure (.ABApp {b := a, vaEqb := vaEqb.reverse}, A, b)
     | .none =>
-      (.none, A, a)
+      pure (.none, A, a)
 
-    let newUaEqVx := UaEqVx.reverse U.1 V.1 (Expr.sort v).toPExpr (Expr.sort v).toPExpr v.succ
+    let newUaEqVx ← UaEqVx.reverse U.1 V.1 (Expr.sort v).toPExpr (Expr.sort v).toPExpr v.succ
     pure $ .forallE {u, v, A := newA, U := V, V := U, a := newa, UaEqVx := newUaEqVx, extra}
 
-def AppData.reverse : AppData EExpr → EExpr
-| {u, v, A, U, f, a, extra} =>
-  let (extra, newA, newU, newf, newa) := match extra with
+def AppData.reverse : AppData EExpr → EM EExpr
+| {u, v, A, U, f, a, extra} => do
+  let (extra, newA, newU, newf, newa) ← match extra with
   | .ABUV {B, hAB, V, hUV, g, fEqg, b, aEqb} =>
-    (.ABUV {B := A, hAB := EExpr.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ hAB, V := U, hUV := HUVData.reverse A B (Prod.fst U) (Prod.fst V) u v hUV, g := f, fEqg := EExpr.reverse f g (mkForall #[U.2] U.1) (mkForall #[V.2] V.1) (Level.imax u v) fEqg, b := a, aEqb := EExpr.reverse a b A B u aEqb}, B, V, g, b)
+    pure (.ABUV {B := A, hAB := (← EExpr.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ hAB), V := U, hUV := (← HUVData.reverse A B (Prod.fst U) (Prod.fst V) u v hUV), g := f, fEqg := (← EExpr.reverse f g (mkForall #[U.2] U.1) (mkForall #[V.2] V.1) (Level.imax u v) fEqg), b := a, aEqb := (← EExpr.reverse a b A B u aEqb)}, B, V, g, b)
   | .UV {V, hUV, g, fEqg, b, aEqb} => 
-    (.UV {V := U, hUV := HUVData.reverse A A (Prod.fst U) (Prod.fst V) u v hUV, g := f, fEqg := EExpr.reverse f g (mkForall #[U.2] U.1) (mkForall #[V.2] V.1) (Level.imax u v) fEqg, b := a, aEqb := EExpr.reverse a b A A u aEqb}, A, V, g, b)
+    pure $ (.UV {V := U, hUV := (← HUVData.reverse A A (Prod.fst U) (Prod.fst V) u v hUV), g := f, fEqg := (← EExpr.reverse f g (mkForall #[U.2] U.1) (mkForall #[V.2] V.1) (Level.imax u v) fEqg), b := a, aEqb := (← EExpr.reverse a b A A u aEqb)}, A, V, g, b)
   | .UVFun {V, hUV, g, fEqg} => 
-    (.UVFun {V := U, hUV := HUVData.reverse A A (Prod.fst U) (Prod.fst V) u v hUV, g := f, fEqg := EExpr.reverse f g (mkForall #[U.2] U.1) (mkForall #[V.2] V.1) (Level.imax u v) fEqg}, A, V, g, a)
+    pure (.UVFun {V := U, hUV := (← HUVData.reverse A A (Prod.fst U) (Prod.fst V) u v hUV), g := f, fEqg := (← EExpr.reverse f g (mkForall #[U.2] U.1) (mkForall #[V.2] V.1) (Level.imax u v) fEqg)}, A, V, g, a)
   | .AB {B, hAB, g, fEqg, b, aEqb} => 
-    (.AB {B := A, hAB := EExpr.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ hAB, g := f, fEqg := EExpr.reverse f g (mkForall #[U.2] U.1) (mkForall #[U.2] U.1) (Level.imax u v) fEqg, b := a, aEqb := EExpr.reverse a b A B u aEqb}, B, U, g, b)
+    pure (.AB {B := A, hAB := (← EExpr.reverse A B (Expr.sort u).toPExpr (Expr.sort u).toPExpr u.succ hAB), g := f, fEqg := (← EExpr.reverse f g (mkForall #[U.2] U.1) (mkForall #[U.2] U.1) (Level.imax u v) fEqg), b := a, aEqb := (← EExpr.reverse a b A B u aEqb)}, B, U, g, b)
   | .none {g, fEqg, b, aEqb} =>
-    (.none {g := f, fEqg := EExpr.reverse f g (mkForall #[U.2] U.1) (mkForall #[U.2] U.1) (Level.imax u v) fEqg, b := a, aEqb := EExpr.reverse a b A A u aEqb}, A, U, g, b)
+    pure (.none {g := f, fEqg := (← EExpr.reverse f g (mkForall #[U.2] U.1) (mkForall #[U.2] U.1) (Level.imax u v) fEqg), b := a, aEqb := (← EExpr.reverse a b A A u aEqb)}, A, U, g, b)
   | .Fun {g, fEqg} =>
-    (.Fun {g := f, fEqg := EExpr.reverse f g (mkForall #[U.2] U.1) (mkForall #[U.2] U.1) (Level.imax u v) fEqg}, A, U, g, a)
+    pure (.Fun {g := f, fEqg := (← EExpr.reverse f g (mkForall #[U.2] U.1) (mkForall #[U.2] U.1) (Level.imax u v) fEqg)}, A, U, g, a)
   | .Arg {b, aEqb} =>
-    (.Arg {b := a, aEqb := EExpr.reverse a b A A u aEqb}, A, U, f, b)
-  .app {u, v, A := newA, U := newU, f := newf, a := newa, extra}
+    pure (.Arg {b := a, aEqb := (← EExpr.reverse a b A A u aEqb)}, A, U, f, b)
+  pure $ .app {u, v, A := newA, U := newU, f := newf, a := newa, extra}
 
-def TransData.reverse : TransData EExpr → EExpr
-| {u, A, B, C, a, b, c, aEqb, bEqc} =>
-  .trans {u, A := C, B, C := A, a := c, b, c := a, aEqb := bEqc.reverse b c B C u, bEqc := aEqb.reverse a b A B u}
+def TransData.reverse : TransData EExpr → EM EExpr
+| {u, A, B, C, a, b, c, aEqb, bEqc} => do
+  pure $ .trans {u, A := C, B, C := A, a := c, b, c := a, aEqb := (← bEqc.reverse b c B C u), bEqc := (← aEqb.reverse a b A B u)}
 
-def SymmData.reverse : SymmData EExpr → EExpr
-| {aEqb, ..} => aEqb
+def SymmData.reverse : SymmData EExpr → EM EExpr
+| {aEqb, ..} => pure aEqb
 
-def ReflData.reverse : ReflData → EExpr := .refl
+def ReflData.reverse : ReflData → EM EExpr := fun d => pure $ .refl d
 
-def PIData.reverse : PIData EExpr → EExpr
-| {P, p, q, extra} =>
-  let (extra, newP) := match extra with
-  | .none => (.none, P)
+def PIData.reverse : PIData EExpr → EM EExpr
+| {P, p, q, extra} => do
+  let (extra, newP) ← match extra with
+  | .none => pure (.none, P)
   | .HEq {Q, hPQ} =>
-    (.HEq {Q := P, hPQ := hPQ.reverse P Q (Expr.sort 0).toPExpr (Expr.sort 0).toPExpr 1}, Q)
-  .prfIrrel {P := newP, p := q, q := p, extra := extra}
+    pure (.HEq {Q := P, hPQ := (← hPQ.reverse P Q (Expr.sort 0).toPExpr (Expr.sort 0).toPExpr 1)}, Q)
+  pure $ .prfIrrel {P := newP, p := q, q := p, extra := extra}
 
-def SorryData.reverse : SorryData → EExpr
+def SorryData.reverse : SorryData → EM EExpr
 | {u, a, A, b, B} =>
-  .sry {u, A := B, a := b, B := A, b := a}
+  pure $ .sry {u, A := B, a := b, B := A, b := a}
 
-def EExpr.reverse (t s tType sType : PExpr) (lvl : Level) : EExpr → EExpr
-| .other e => .symm {u := lvl, A := tType, B := sType, a := t, b := s, aEqb := .other e}
-| .lam d
-| .forallE d
-| .app d
-| .trans d
-| .symm d
-| .refl d
-| .prfIrrel d
-| .sry d  => d.reverse
-| .rev _ _ _ _ _ e => e
+def EExpr.reverse (t s tType sType : PExpr) (lvl : Level) (e : EExpr) : EM EExpr := do
+  dbg_trace s!"DBG[223]: EExpr.lean:795 (after def EExpr.toExpr (e : EExpr) : EM Expr :…)"
+  if let some ex := (← get).reverseCache[e]? then
+    dbg_trace s!"DBG[222]: EExpr.lean:796 (after if let some ex := (← get).toExprCache[…)"
+    return ex
+  dbg_trace s!"DBG[224]: EExpr.lean:799 (after return ex)"
+  let ret ← match e with
+    | .other e => pure $ .symm {u := lvl, A := tType, B := sType, a := t, b := s, aEqb := .other e}
+    | .lam d
+    | .forallE d
+    | .app d
+    | .trans d
+    | .symm d
+    | .refl d
+    | .prfIrrel d
+    | .sry d  => d.reverse
+    | .rev _ _ _ _ _ e => pure e
+  modify fun st => { st with reverseCache := st.reverseCache.insert e ret }
+  pure ret
 
-def EExpr.reverse? : EExpr → Option EExpr
-| .other _ => none
-| .lam d
-| .forallE d
-| .app d
-| .trans d
-| .symm d
-| .refl d
-| .prfIrrel d
-| .sry d  => d.reverse
-| .rev _ _ _ _ _ e => e
+-- def EExpr.reverse? : EExpr → Option EExpr
+-- | .other _ => none
+-- | .lam d
+-- | .forallE d
+-- | .app d
+-- | .trans d
+-- | .symm d
+-- | .refl d
+-- | .prfIrrel d
+-- | .sry d  => d.reverse
+-- | .rev _ _ _ _ _ e => e
 
 end
 
 mutual
-def HUVData.toExprDep' (e : HUVData EExpr) : Expr := match e with -- FIXME why can't I use a single function here?
-| {a, UaEqVb, extra} =>
-  match extra with
-    | .some {b, vaEqb} => mkLambda #[a, b, vaEqb.aEqb] UaEqVb.toExpr
-    | .none => mkLambda #[a] UaEqVb.toExpr
+def HUVData.toExprDep' (e : HUVData EExpr) : EM Expr := match e with -- FIXME why can't I use a single function here?
+| {a, UaEqVb, extra} => do
+  let ret ← match extra with
+    | .some {b, vaEqb} => pure $ mkLambda #[a, b, vaEqb.aEqb] (← UaEqVb.toExpr')
+    | .none => pure $ mkLambda #[a] (← UaEqVb.toExpr')
+  pure ret
 termination_by sizeOf e
 decreasing_by
   sorry
   sorry
 
-def HUVData.toExpr' (e : HUVData EExpr) : Expr := match e with
-| {a, UaEqVb, extra} =>
-  UaEqVb.toExpr
+def HUVData.toExpr' (e : HUVData EExpr) : EM Expr := match e with
+| {a, UaEqVb, extra} => do
+  pure (← UaEqVb.toExpr')
 termination_by sizeOf e
 
 def LamDataExtra.lemmaName (dep : Bool) (d : LamDataExtra EExpr) : Name :=
@@ -638,27 +729,26 @@ let name := match d with
 | .none => `L4L.lambdaHEq
 if dep then name.toString ++ "'" |>.toName else name
 
-def LamData.toExpr (e : LamData EExpr) : Expr := match e with
-| {u, v, A, U, f, a, g, faEqgx, extra} =>
-  Id.run $ do
-    let hfg := Id.run $ do match extra with
+def LamData.toExpr (e : LamData EExpr) : EM Expr := match e with
+| {u, v, A, U, f, a, g, faEqgx, extra} => do
+    let hfg ← match extra with
     | .ABUV {b, vaEqb, ..} .. =>
-        mkLambda #[a, b, vaEqb.aEqb] faEqgx.toExpr
+      pure $ mkLambda #[a, b, vaEqb.aEqb] (← faEqgx.toExpr')
     | .UV ..
-    | .none => mkLambda #[a] faEqgx.toExpr
+    | .none => pure $ mkLambda #[a] (← faEqgx.toExpr')
 
-    let (args, dep) := match extra with
+    let (args, dep) ← match extra with
     | .ABUV {B, hAB, ..} {V} =>
         let (U, V, dep) := getMaybeDepLemmaApp2 U V
-        (#[A, B, U, V, f, g, hAB.toExpr, hfg], dep)
+        pure $ (#[A.toExpr, B, U, V, f, g, (← hAB.toExpr'), hfg], dep)
     | .UV {V} => 
         let (U, V, dep) := getMaybeDepLemmaApp2 U V
-        (#[A, U, V, f, g, hfg], dep)
+        pure (#[A.toExpr, U, V, f, g, hfg], dep)
     | .none => 
         let (U, dep) := getMaybeDepLemmaApp1 U
-        (#[A, U, f, g, hfg], dep)
+        pure (#[A.toExpr, U, f, g, hfg], dep)
     let n := extra.lemmaName dep
-    Lean.mkAppN (.const n [u, v]) args
+    pure $ Lean.mkAppN (.const n [u, v]) args
 termination_by sizeOf e
 
 def ForallDataExtra.lemmaName (dep : Bool) (d : ForallDataExtra EExpr) : Name :=
@@ -668,33 +758,32 @@ let name := match d with
 | .none => `L4L.forallHEq
 if dep then name.toString ++ "'" |>.toName else name
 
-def ForallData.toExpr (e : ForallData EExpr) : Expr := match e with
-| {u, v, A, U, V, a, UaEqVx, extra} =>
-  Id.run $ do
-    let hUV dep := Id.run $ do
+def ForallData.toExpr (e : ForallData EExpr) : EM Expr := match e with
+| {u, v, A, U, V, a, UaEqVx, extra} => do
+    let hUV dep := do
       if dep then match extra with
         | .AB {b, vaEqb, ..} =>
-          pure $ mkLambda #[a, b, vaEqb.aEqb] UaEqVx.toExpr
+          pure $ mkLambda #[a, b, vaEqb.aEqb] (← UaEqVx.toExpr')
         | .ABApp {b, vaEqb} =>
           let fvars := #[b.toExpr, vaEqb.toExpr]
           let vals := #[a.toExpr, Lean.mkAppN (.const `HEq.refl [u]) #[A, a.toExpr]]
           -- TODO optimize resultant term -- will need to call replaceFVars directly on UaEqVx, call a simplify routine and prove termination
-          pure $ mkLambda #[a] (UaEqVx.toExpr.replaceFVars fvars vals)
-        | .none => pure $ mkLambda #[a] UaEqVx.toExpr
+          pure $ mkLambda #[a] ((← UaEqVx.toExpr').replaceFVars fvars vals)
+        | .none => pure $ mkLambda #[a] (← UaEqVx.toExpr')
       else
-        UaEqVx.toExpr
+        pure (← UaEqVx.toExpr')
 
     let (U, V, dep) := getMaybeDepLemmaApp2 U V
-    let (args, dep) := match extra with
+    let (args, dep) ← match extra with
     | .AB {B, hAB, ..} =>
-        (#[A, B, U, V, hAB.toExpr, hUV dep], dep)
+        pure $ (#[A.toExpr, B, U, V, (← hAB.toExpr'), (← hUV dep)], dep)
     | .ABApp _ =>
-        (#[A, U, V, hUV dep], dep)
+        pure (#[A.toExpr, U, V, (← hUV dep)], dep)
     | .none =>
-        (#[A, U, V, hUV dep], dep)
+        pure (#[A.toExpr, U, V, (← hUV dep)], dep)
 
     let n := extra.lemmaName dep
-    Lean.mkAppN (.const n [u, v]) args
+    pure $ Lean.mkAppN (.const n [u, v]) args
 termination_by sizeOf e
 
 def AppDataExtra.lemmaName (dep : Bool) (d : AppDataExtra EExpr) : Name :=
@@ -708,73 +797,87 @@ let name := match d with
 | .Fun .. => `L4L.appFunHEq
 if dep then name.toString ++ "'" |>.toName else name
 
-def AppData.toExpr (e : AppData EExpr) : Expr := match e with
-| {u, v, A, U, f, a, extra} =>
-  let (args, dep) := match extra with
+def AppData.toExpr (e : AppData EExpr) : EM Expr := match e with
+| {u, v, A, U, f, a, extra} => do
+  let (args, dep) ← match extra with
   | .ABUV {B, hAB, V, hUV, g, fEqg, b, aEqb} =>
     let (U, V, dep) := getMaybeDepLemmaApp2 U V
-    (#[A, B, U, V, hAB.toExpr, if dep then hUV.toExprDep' else hUV.toExpr', f, g, a, b, fEqg.toExpr, aEqb.toExpr], dep)
+    pure (#[A.toExpr, B, U, V, (← hAB.toExpr'), (← if dep then do hUV.toExprDep' else hUV.toExpr'), f, g, a, b, (← fEqg.toExpr'), (← aEqb.toExpr')], dep)
   | .UV {V, hUV, g, fEqg, b, aEqb} => 
     let (U, V, dep) := getMaybeDepLemmaApp2 U V
-    (#[A, U, V, if dep then hUV.toExprDep' else hUV.toExpr', f, g, a, b, fEqg.toExpr, aEqb.toExpr], dep)
+    pure (#[A.toExpr, U, V, (← if dep then hUV.toExprDep' else hUV.toExpr'), f, g, a, b, (← fEqg.toExpr'), (← aEqb.toExpr')], dep)
   | .UVFun {V, hUV, g, fEqg} => 
     let (U, V, dep) := getMaybeDepLemmaApp2 U V
-    (#[A, U, V, if dep then hUV.toExprDep' else hUV.toExpr', f, g, a, fEqg.toExpr], dep)
+    pure (#[A.toExpr, U, V, (← if dep then hUV.toExprDep' else hUV.toExpr'), f, g, a, (← fEqg.toExpr')], dep)
   | .AB {B, hAB, g, fEqg, b, aEqb} => 
     let U := U.1
-    (#[A, B, U, hAB.toExpr, f, g, a, b, fEqg.toExpr, aEqb.toExpr], false)
+    pure (#[A.toExpr, B, U, (← hAB.toExpr'), f, g, a, b, (← fEqg.toExpr'), (← aEqb.toExpr')], false)
   | .none {g, fEqg, b, aEqb} => -- TODO fails to show termination if doing nested match?
     let (U, dep) := getMaybeDepLemmaApp1 U
-    (#[A, U, f, g, a, b, fEqg.toExpr, aEqb.toExpr], dep)
+    pure (#[A.toExpr, U, f, g, a, b, (← fEqg.toExpr'), (← aEqb.toExpr')], dep)
   | .Fun {g, fEqg} =>
     let (U, dep) := getMaybeDepLemmaApp1 U
-    (#[A, U, f, g, a, fEqg.toExpr], dep)
+    pure (#[A.toExpr, U, f, g, a, (← fEqg.toExpr')], dep)
   | .Arg {b, aEqb} =>
     let (U, dep) := getMaybeDepLemmaApp1 U
-    (#[A, U, f, a, b, aEqb.toExpr], dep)
+    pure (#[A.toExpr, U, f, a, b, (← aEqb.toExpr')], dep)
   let n := extra.lemmaName dep
-  Lean.mkAppN (.const n [u, v]) args
+  pure $ Lean.mkAppN (.const n [u, v]) args
 termination_by sizeOf e
 
-def TransData.toExpr (e : TransData EExpr) : Expr := match e with
-| {u, A, B, C, a, b, c, aEqb, bEqc} =>
-  Lean.mkAppN (.const `HEq.trans [u]) #[A, B, C, a, b, c, aEqb.toExpr, bEqc.toExpr]
+def TransData.toExpr (e : TransData EExpr) : EM Expr := match e with
+| {u, A, B, C, a, b, c, aEqb, bEqc} => do
+  pure $ Lean.mkAppN (.const `HEq.trans [u]) #[A, B, C, a, b, c, (← aEqb.toExpr'), (← bEqc.toExpr')]
 termination_by sizeOf e
 
-def SymmData.toExpr (e : SymmData EExpr) : Expr := match e with
-| {u, A, B, a, b, aEqb} => Lean.mkAppN (.const `HEq.symm [u]) #[A, B, a, b, aEqb.toExpr] -- TODO eliminate double-symms
+def SymmData.toExpr (e : SymmData EExpr) : EM Expr := do match e with
+| {u, A, B, a, b, aEqb} => pure $ Lean.mkAppN (.const `HEq.symm [u]) #[A, B, a, b, (← aEqb.toExpr')] -- TODO eliminate double-symms
 termination_by sizeOf e
 
-def ReflData.toExpr : ReflData → Expr
-| {u, A, a} => Lean.mkAppN (.const `HEq.refl [u]) #[A, a]
+def ReflData.toExpr : ReflData → EM Expr
+| {u, A, a} => pure $ Lean.mkAppN (.const `HEq.refl [u]) #[A, a]
 
-def PIData.toExpr (e : PIData EExpr) : Expr := match e with
-| {P, p, q, extra} =>
+def PIData.toExpr (e : PIData EExpr) : EM Expr := match e with
+| {P, p, q, extra} => do
   match extra with
   | .none =>
-    Lean.mkAppN (.const `L4L.prfIrrel []) #[P, p, q]
+    pure $ Lean.mkAppN (.const `L4L.prfIrrel []) #[P, p, q]
   | .HEq {Q, hPQ} =>
-    Lean.mkAppN (.const `L4L.prfIrrelHEq []) #[P, Q, hPQ.toExpr, p, q]
+    pure $ Lean.mkAppN (.const `L4L.prfIrrelHEq []) #[P, Q, (← hPQ.toExpr'), p, q]
 termination_by sizeOf e
 
 def FVarData.toExpr : FVarData → Expr
 | {aEqb, ..} => aEqb.toExpr
 
-def SorryData.toExpr : SorryData → Expr
-| {u, A, a, B, b} => Lean.mkAppN (.const `sorryAx [0]) #[Lean.mkAppN (.const ``HEq [u]) #[A, a, B, b], .const `Bool.false []]
+def SorryData.toExpr : SorryData → EM Expr
+| {u, A, a, B, b} => pure $ Lean.mkAppN (.const `sorryAx [0]) #[Lean.mkAppN (.const ``HEq [u]) #[A, a, B, b], .const `Bool.false []]
 
-def EExpr.toExpr (e : EExpr) : Expr := match e with
-| .other e => e
-| .lam d
-| .forallE d
-| .app d
-| .trans d
-| .symm d
-| .refl d
-| .prfIrrel d
-| .sry d  => d.toExpr
--- | .rev .. => panic! "encountered thunked reversal"
-| .rev t s T S l e => (e.reverse t s T S l).toExpr
+def EExpr.toExpr' (e : EExpr) : EM Expr := do
+  dbg_trace s!"DBG[23]: EExpr.lean:795 (after def EExpr.toExpr (e : EExpr) : EM Expr :…)"
+  if let some ex := (← get).toExprCache[e]? then
+    dbg_trace s!"DBG[22]: EExpr.lean:796 (after if let some ex := (← get).toExprCache[…)"
+    return ex
+  dbg_trace s!"DBG[24]: EExpr.lean:799 (after return ex)"
+  let ret ← match e with
+  | .other e =>
+    pure e
+  | .lam d
+  | .forallE d
+  | .app d
+  | .trans d
+  | .symm d
+  | .refl d
+  | .prfIrrel d
+  | .sry d  => d.toExpr
+  -- | .rev .. => panic! "encountered thunked reversal"
+  | .rev t s T S l e => do
+    -- dbg_trace s!"DBG[16]: EExpr.lean:804 (after | .rev t s T S l e => do)"
+    let ret ← (← e.reverse t s T S l).toExpr'
+    -- dbg_trace s!"DBG[17]: EExpr.lean:806 (after let ret ← (e.reverse t s T S l).toExpr)"
+    pure ret
+
+  modify fun st => { st with toExprCache := st.toExprCache.insert e ret }
+  pure ret
 termination_by sizeOf e
 decreasing_by
   sorry
@@ -786,6 +889,8 @@ decreasing_by
   sorry
 
 end
+
+def EExpr.toExpr (e : EExpr) (dbg := false) : Expr := e.toExpr'.run dbg
 
 namespace EExpr
 
@@ -805,7 +910,7 @@ def EExpr.instantiateRev (e : EExpr) (subst : Array EExpr) : EExpr :=
 instance : ToString (Option EExpr) where
 toString e? := toString $ e?.map (·.toExpr)
 
-instance : Coe EExpr Expr := ⟨(EExpr.toExpr)⟩
+-- instance : Coe EExpr Expr := ⟨toExpr⟩
 instance : Coe EExpr PExpr := ⟨(EExpr.toPExpr)⟩
 
 end Lean4Less
