@@ -22,6 +22,7 @@ def outDir : System.FilePath := System.mkFilePath [".", "out"]
 structure ForEachModuleState where
   moduleNameSet : NameHashSet := {}
   env : Environment
+  count := 0
 
 -- def throwAlreadyImported (s : ImportState) (const2ModIdx : Std.HashMap Name ModuleIdx) (modIdx : Nat) (cname : Name) : IO α := do
 --   let modName := s.moduleNames[modIdx]!
@@ -43,6 +44,7 @@ partial def forEachModule' (f : Name → ModuleData → ForEachModuleM Unit) (im
       throw <| IO.userError s!"object file '{mFile}' of module {i.module} does not exist"
     let (mod, _) ← readModuleData mFile
     forEachModule' f mod.imports
+    modify fun s => { s with count := s.count + 1}
     f i.module mod
 
 def mkModuleData (imports : Array Import) (env : Environment) : IO ModuleData := do
@@ -74,6 +76,8 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
   let mod : Name := p.positionalArg! "input" |>.value.toName
   let onlyConsts? := p.flag? "only" |>.map fun onlys => 
     onlys.as! (Array String)
+  let cachedPath? := p.flag? "cached" |>.map fun sp => 
+    System.FilePath.mk $ sp.as! String
   match mod with
     | .anonymous => throw <| IO.userError s!"Could not resolve module: {mod}"
     | m =>
@@ -88,7 +92,7 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
           _ ← Lean4Less.checkL4L (onlyConsts.map (·.toName)) env (printProgress := true)
       else
         let outDir := ((← IO.Process.getCurrentDir).join "out")
-        if ← outDir.pathExists then
+        if (← outDir.pathExists) && not cachedPath?.isSome then
           IO.FS.removeDirAll outDir
         IO.FS.createDirAll outDir
         let mkMod imports env n := do
@@ -98,18 +102,42 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
           IO.FS.createDirAll modParent
           saveModuleData modPath n mod
 
-        IO.println s!"init module"
+        IO.println s!">>init module"
         let patchConsts ← getDepConstsEnv lemmEnv Lean4Less.patchConsts
         let env ← replay Lean4Less.addDecl {newConstants := patchConsts, opts := {}} (← mkEmptyEnvironment) (printProgress := true) (op := "patch")
         mkMod #[] env patchPreludeModName
+
+        let (_, s) ← ForEachModuleM.run env do
+          forEachModule' (imports := #[m]) fun _ _ => do
+            pure ()
+        let numMods := s.moduleNameSet.size
+
         let (_, s) ← ForEachModuleM.run env do
           forEachModule' (imports := #[m]) fun dn d => do
+            let skip ←
+              if let some cachedPath := cachedPath? then
+                if let some mfile ← SearchPath.findWithExt [cachedPath] "olean" dn then
+                  if ← mfile.pathExists then
+                    let (mod, _) ← readModuleData mfile
+                    let mut env := (← get).env
+                    for c in mod.constants do
+                      env := add env c
+                    modify fun s => {s with env}
+                    pure true
+                  else
+                    pure false
+                else
+                  pure false
+              else
+                pure false
+            unless not skip do return
+
             let newConstants ← d.constNames.zip d.constants |>.foldlM (init := default) fun acc (n, ci) => do
               if not ((← get).env.contains n) then
                 pure $ acc.insert n ci
               else
                 pure $ acc
-            IO.println s!"{dn} module"
+            IO.println s!">>{dn} module [{(← get).count}/{numMods}]"
             let env ← replay Lean4Less.addDecl {newConstants := newConstants, opts := {}} (← get).env (printProgress := true) (op := "patch")
             let imports := if dn == `Init.Prelude then
                 #[{module := `Init.PatchPrelude}] ++ d.imports
@@ -139,6 +167,7 @@ unsafe def transCmd : Cmd := `[Cli|
     -- w, write;               "Also write translation of specified constants (with dependencies) to file (relevant only with '-p')."
     o, only : Array String; "Only translate the specified constants and their dependencies."
     a, appopt : Bool; "Optimize application case"
+    c, cached : String; "Use cached library translation files from specified directory."
 
   ARGS:
     input : String;         "Input .lean file."

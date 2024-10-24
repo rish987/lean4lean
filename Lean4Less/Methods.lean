@@ -94,16 +94,16 @@ match fuel with
       -- dbg_trace s!"{s.numCalls}: {stack[9]!.2}, {stack.map (·.1)}"
 
     let traceId := Option.some 20218
-    -- let traceId := none
+    let traceId := none
     try
       let ret ← withCallId s.numCalls traceId do
         withCallData idx s.numCalls d do 
-          if let some id := traceId then
-            if s.numCalls == id then
-              let stack := (← readThe Context).callStack
-              if idx == 110 then
-                dbg_trace s!"\n{stack[stack.size - 4]!}"
-                dbg_trace s!"{s.numCalls}: {stack.map (·.1)}"
+          -- if let some id := traceId then
+          --   if s.numCalls == id then
+          --     let stack := (← readThe Context).callStack
+          --     if idx == 110 then
+          --       dbg_trace s!"\n{stack[stack.size - 4]!}"
+          --       dbg_trace s!"{s.numCalls}: {stack.map (·.1)}"
 
           m (Methods.withFuel fuel')
       if printedTrace then
