@@ -60,8 +60,10 @@ A    : PExpr
 a    : PExpr
 B    : PExpr
 b    : PExpr
-deriving Inhabited, Hashable, BEq
+deriving Inhabited, BEq
 
+def SorryData.data : SorryData → UInt64
+| {u, A, a, B, b} => hash (u, A, a, B, b)
 
 
 structure LamABData (EExpr : Type) :=
@@ -69,30 +71,47 @@ B      : PExpr
 b      : LocalDecl
 vaEqb  : FVarData
 hAB    : EExpr
-deriving Hashable, BEq
+_hAB   : UInt64
+deriving BEq
+
+def LamABData.data : LamABData EExpr → UInt64
+| {B, b, vaEqb, _hAB, ..} => hash (B, b, vaEqb, _hAB)
 
 structure LamUVData :=
 V   : PExpr × LocalDecl
-deriving Hashable, BEq
+deriving BEq
+
+def LamUVData.data : LamUVData → UInt64
+| {V} => hash V
 
 inductive LamDataExtra (EExpr : Type) :=
 | ABUV : LamABData EExpr → LamUVData → LamDataExtra EExpr
 | UV   : LamUVData → LamDataExtra EExpr
 | none : LamDataExtra EExpr
-deriving Inhabited, Hashable, BEq
+with
+  @[computed_field]
+  data : (EExpr : Type) → LamDataExtra EExpr → UInt64
+  | _, d => sorry
+deriving Inhabited, BEq
+
+instance : Hashable (LamDataExtra EExpr) where
+hash d := d.data
 
 structure LamData (EExpr : Type) :=
-u      : Level
-v      : Level
-A      : PExpr
-U      : PExpr × LocalDecl
-f      : PExpr
-a      : LocalDecl
-g      : PExpr
-faEqgx : EExpr
-extra  : LamDataExtra EExpr := .none
-deriving Inhabited, Hashable, BEq
+u       : Level
+v       : Level
+A       : PExpr
+U       : PExpr × LocalDecl
+f       : PExpr
+a       : LocalDecl
+g       : PExpr
+faEqgx  : EExpr
+_faEqgx : UInt64 -- TODO ask about this
+extra   : LamDataExtra EExpr := .none
+deriving Inhabited, BEq
 
+def LamData.data : LamData EExpr → UInt64
+| {u, v, A, U, f, a, g, _faEqgx, extra, ..} => hash (u, v, A, U, f, a, g, _faEqgx, extra)
 
 
 structure ForallABData (EExpr : Type) :=
@@ -100,97 +119,159 @@ B      : PExpr
 b      : LocalDecl
 vaEqb  : FVarData
 hAB    : EExpr
-deriving Hashable, BEq
+_hAB   : UInt64
+deriving BEq
+
+def ForallABData.data : ForallABData EExpr → UInt64
+| {B, b, vaEqb, _hAB, ..} => hash (B, b, vaEqb, _hAB)
 
 structure ForallABAppData (EExpr : Type) :=
 b      : LocalDecl
 vaEqb  : FVarData
-deriving Hashable, BEq
+deriving BEq
+
+def ForallABAppData.data : ForallABAppData EExpr → UInt64
+| {b, vaEqb} => hash (b, vaEqb)
 
 inductive ForallDataExtra (EExpr : Type) :=
 | AB   : ForallABData EExpr → ForallDataExtra EExpr
 | ABApp: ForallABAppData EExpr → ForallDataExtra EExpr
 | none : ForallDataExtra EExpr
-deriving Inhabited, Hashable, BEq
+with
+  @[computed_field]
+  data : (EExpr : Type) → ForallDataExtra EExpr → UInt64
+  | _, d => sorry
+deriving Inhabited, BEq
+
+instance : Hashable (ForallDataExtra EExpr) where
+hash d := d.data
 
 structure ForallData (EExpr : Type) :=
-u      : Level
-v      : Level
-A      : PExpr
-a      : LocalDecl
-U      : PExpr × LocalDecl
-V      : PExpr × LocalDecl
-UaEqVx : EExpr
-extra  : ForallDataExtra EExpr := .none
-deriving Inhabited, Hashable, BEq
+u       : Level
+v       : Level
+A       : PExpr
+a       : LocalDecl
+U       : PExpr × LocalDecl
+V       : PExpr × LocalDecl
+UaEqVx  : EExpr
+_UaEqVx : UInt64
+extra   : ForallDataExtra EExpr := .none
+deriving Inhabited, BEq
 
-
+def ForallData.data : ForallData EExpr → UInt64
+| {u, v, A, a, U, V, _UaEqVx, extra, ..} => hash (u, v, A, a, U, V, _UaEqVx, extra)
 
 structure HUVDataExtra (EExpr : Type) where
 b      : LocalDecl
 vaEqb  : FVarData
-deriving Inhabited, Hashable, BEq
+deriving Inhabited, BEq
+
+def HUVDataExtra.data : HUVDataExtra EExpr → UInt64
+| {b, vaEqb} => hash (b, vaEqb)
+
+instance : Hashable (HUVDataExtra EExpr) where
+hash d := d.data
 
 structure HUVData (EExpr : Type) where
-a      : LocalDecl
-UaEqVb : EExpr
-extra  : Option (HUVDataExtra EExpr)
-deriving Inhabited, Hashable, BEq
+a       : LocalDecl
+UaEqVb  : EExpr
+_UaEqVb : UInt64
+extra   : Option (HUVDataExtra EExpr)
+deriving Inhabited, BEq
 
+def HUVData.data : HUVData EExpr → UInt64
+| {a, _UaEqVb, extra, ..} => hash (a, _UaEqVb, extra)
+
+instance : Hashable (HUVData EExpr) where
+hash d := d.data
 
 
 structure AppDataNone (EExpr : Type) where
-g    : PExpr
-fEqg : EExpr
-b    : PExpr
-aEqb : EExpr
-deriving Inhabited, Hashable, BEq
+g     : PExpr
+fEqg  : EExpr
+_fEqg : UInt64
+b     : PExpr
+aEqb  : EExpr
+_aEqb : UInt64
+deriving Inhabited, BEq
+
+def AppDataNone.data : AppDataNone EExpr → UInt64
+| {g, _fEqg, b, _aEqb, ..} => hash (g, _fEqg, b, _aEqb)
 
 structure AppDataArg (EExpr : Type) where
-b    : PExpr
-aEqb : EExpr
-deriving Inhabited, Hashable, BEq
+b     : PExpr
+aEqb  : EExpr
+_aEqb : UInt64
+deriving Inhabited, BEq
+
+def AppDataArg.data : AppDataArg EExpr → UInt64
+| {b, _aEqb, ..} => hash (b, _aEqb)
 
 structure AppDataFun (EExpr : Type) where
-g    : PExpr
-fEqg : EExpr
-deriving Inhabited, Hashable, BEq
+g     : PExpr
+fEqg  : EExpr
+_fEqg : UInt64
+deriving Inhabited, BEq
+
+def AppDataFun.data : AppDataFun EExpr → UInt64
+| {g, _fEqg, ..} => hash (g, _fEqg)
 
 structure AppDataAB (EExpr : Type) where
-B    : PExpr
-hAB  : EExpr
-g    : PExpr
-fEqg : EExpr
-b    : PExpr
-aEqb : EExpr
-deriving Inhabited, Hashable, BEq
+B     : PExpr
+hAB   : EExpr
+_hAB  : UInt64
+g     : PExpr
+fEqg  : EExpr
+_fEqg : UInt64
+b     : PExpr
+aEqb  : EExpr
+_aEqb : UInt64
+deriving Inhabited, BEq
+
+def AppDataAB.data : AppDataAB EExpr → UInt64
+| {B, g, b,_hAB, _fEqg, _aEqb, ..} => hash (B, g, b,_hAB, _fEqg, _aEqb)
 
 structure AppDataUV (EExpr : Type) where
-V    : PExpr × LocalDecl
-hUV  : HUVData EExpr
-g    : PExpr
-fEqg : EExpr
-b    : PExpr
-aEqb : EExpr
-deriving Inhabited, Hashable, BEq
+V     : PExpr × LocalDecl
+hUV   : HUVData EExpr
+g     : PExpr
+fEqg  : EExpr
+_fEqg : UInt64
+b     : PExpr
+aEqb  : EExpr
+_aEqb : UInt64
+deriving Inhabited, BEq
+
+def AppDataUV.data : AppDataUV EExpr → UInt64
+| {V, hUV, g, _fEqg, b, _aEqb, ..} => hash (V, hUV, g, _fEqg, b, _aEqb)
 
 structure AppDataUVFun (EExpr : Type) where
-V    : PExpr × LocalDecl
-hUV  : HUVData EExpr
-g    : PExpr
-fEqg : EExpr
-deriving Inhabited, Hashable, BEq
+V     : PExpr × LocalDecl
+hUV   : HUVData EExpr
+g     : PExpr
+fEqg  : EExpr
+_fEqg : UInt64
+deriving Inhabited, BEq
+
+def AppDataUVFun.data : AppDataUVFun EExpr → UInt64
+| {V, hUV, g, _fEqg, ..} => hash (V, hUV, g, _fEqg)
 
 structure AppDataABUV (EExpr : Type) where
-B    : PExpr
-hAB  : EExpr
-V    : PExpr × LocalDecl
-hUV  : HUVData EExpr
-g    : PExpr
-fEqg : EExpr
-b    : PExpr
-aEqb : EExpr
-deriving Inhabited, Hashable, BEq
+B     : PExpr
+hAB   : EExpr
+_hAB  : UInt64
+V     : PExpr × LocalDecl
+hUV   : HUVData EExpr
+g     : PExpr
+fEqg  : EExpr
+_fEqg : UInt64
+b     : PExpr
+aEqb  : EExpr
+_aEqb : UInt64
+deriving Inhabited, BEq
+
+def AppDataABUV.data : AppDataABUV EExpr → UInt64
+| {B, _hAB, V, hUV, g, _fEqg, b, _aEqb, ..} => hash (B, _hAB, V, hUV, g, _fEqg, b, _aEqb)
 
 inductive AppDataExtra (EExpr : Type) where
 | none  : AppDataNone EExpr → AppDataExtra EExpr
@@ -200,7 +281,14 @@ inductive AppDataExtra (EExpr : Type) where
 | UVFun : AppDataUVFun EExpr → AppDataExtra EExpr
 | AB    : AppDataAB EExpr → AppDataExtra EExpr
 | ABUV  : AppDataABUV EExpr → AppDataExtra EExpr
-deriving Inhabited, Hashable, BEq
+with
+  @[computed_field]
+  data : (EExpr : Type) → AppDataExtra EExpr → UInt64
+  | _, d => sorry
+deriving Inhabited, BEq
+
+instance : Hashable (AppDataExtra EExpr) where
+hash d := d.data
 
 structure AppData (EExpr : Type) where
 u     : Level
@@ -210,8 +298,10 @@ U     : PExpr × LocalDecl -- TODO make fvar arg optional
 f     : PExpr
 a     : PExpr
 extra : AppDataExtra EExpr
-deriving Inhabited, Hashable, BEq
+deriving Inhabited, BEq
 
+def AppData.data : AppData EExpr → UInt64
+| {u, v, A, U, f, a, extra} => hash (u, v, A, U, f, a, extra)
 
 
 structure TransData (EExpr : Type) where
@@ -223,9 +313,13 @@ a     : PExpr
 b     : PExpr
 c     : PExpr
 aEqb  : EExpr
+_aEqb : UInt64
 bEqc  : EExpr
-deriving Inhabited, Hashable, BEq
+_bEqc : UInt64
+deriving Inhabited, BEq
 
+def TransData.data : TransData EExpr → UInt64
+| {u, A, B, C, a, b, c, _aEqb, _bEqc, ..} => hash (u, A, B, C, a, b, c, _aEqb, _bEqc)
 
 
 structure SymmData (EExpr : Type) where
@@ -235,64 +329,81 @@ B     : PExpr
 a     : PExpr
 b     : PExpr
 aEqb  : EExpr
-deriving Inhabited, Hashable, BEq
+_aEqb : UInt64
+deriving Inhabited, BEq
 
+def SymmData.data : SymmData EExpr → UInt64
+| {u, A, B, a, b, _aEqb, ..} => hash (u, A, B, a, b, _aEqb)
 
 
 structure ReflData where
 u     : Level
 A     : PExpr
 a     : PExpr
-deriving Inhabited, Hashable, BEq
+deriving Inhabited, BEq
 
+def ReflData.data : ReflData → UInt64
+| {u, A, a} => hash (u, A, a)
 
 
 structure PIDataHEq (EExpr : Type) where
 Q    : PExpr
 hPQ  : EExpr
-deriving Inhabited, Hashable, BEq
+_hPQ : UInt64
+deriving Inhabited, BEq
+
+def PIDataHEq.data : PIDataHEq EExpr → UInt64
+| {Q, _hPQ, ..} => hash (Q, _hPQ)
 
 inductive PIDataExtra (EExpr : Type) where
 | none 
 | HEq   : PIDataHEq EExpr → PIDataExtra EExpr
-deriving Inhabited, Hashable, BEq
+with
+  @[computed_field]
+  data : (EExpr : Type) → PIDataExtra EExpr → UInt64 -- TODO why isn't `EExpr` auto-inferred
+  | _, d => sorry
+deriving Inhabited, BEq
+
+instance : Hashable (PIDataExtra EExpr) where
+hash d := d.data
 
 structure PIData (EExpr : Type) where
 P     : PExpr
 p     : PExpr
 q     : PExpr
 extra : PIDataExtra EExpr := .none
-deriving Inhabited, Hashable, BEq
+deriving Inhabited, BEq
 
-
+def PIData.data : PIData EExpr → UInt64
+| {P, p, q, extra} => hash (P, p, q, extra)
 
 /--
 Structured data representing expressions for proofs of equality.
 -/
-inductive EExpr where
-| other    : Expr → EExpr
-| lam      : LamData EExpr → EExpr
-| forallE  : ForallData EExpr → EExpr
-| app      : AppData EExpr → EExpr
-| trans    : TransData EExpr → EExpr
-| symm     : SymmData EExpr → EExpr
-| refl     : ReflData → EExpr
-| prfIrrel : PIData EExpr → EExpr
-| sry      : SorryData → EExpr
-| rev      : PExpr → PExpr → PExpr → PExpr → Level → EExpr → EExpr -- "thunked" equality reversal
--- with
---   @[computed_field]
---   data : @& EExpr → UInt64
--- | .other d
--- | .lam d
--- | .forallE d
--- | .app d
--- | .trans d
--- | .symm d
--- | .refl d
--- | .prfIrrel d
--- | .sry d   => hash d
--- | .rev s t S T l e => hash (#[s, t, S, T], l, data e)
+inductive EExpr' (EExpr : Type) (fE : EExpr → UInt64) where
+| other    : Expr → EExpr' EExpr fE
+| lam      : LamData EExpr → EExpr' EExpr fE
+| forallE  : ForallData EExpr → EExpr' EExpr fE
+| app      : AppData EExpr → EExpr' EExpr fE
+| trans    : TransData EExpr → EExpr' EExpr fE
+| symm     : SymmData EExpr → EExpr' EExpr fE
+| refl     : ReflData → EExpr' EExpr fE
+| prfIrrel : PIData EExpr → EExpr' EExpr fE
+| sry      : SorryData → EExpr' EExpr fE
+| rev      : PExpr → PExpr → PExpr → PExpr → Level → EExpr' EExpr fE → EExpr' EExpr fE -- "thunked" equality reversal
+with
+  @[computed_field]
+  data : (EExpr : Type) → (fE : EExpr → UInt64) → EExpr' EExpr fE → UInt64
+  | _, _, .other d
+  | _, _, .lam d
+  | _, _, .forallE d
+  | _, _, .app d
+  | _, _, .trans d
+  | _, _, .symm d
+  | _, _, .refl d
+  | _, _, .prfIrrel d
+  | _, _, .sry d   => d.data
+  | EExpr, fE, .rev s t S T l e => hash (#[s, t, S, T], l, data EExpr fE e)
     -- | .const n lvls => mkData (mixHash 5 <| mixHash (hash n) (hash lvls)) 0 0 false false (lvls.any Level.hasMVar) (lvls.any Level.hasParam)
     -- | .bvar idx => mkData (mixHash 7 <| hash idx) (idx+1)
     -- | .sort lvl => mkData (mixHash 11 <| hash lvl) 0 0 false false lvl.hasMVar lvl.hasParam
@@ -334,7 +445,25 @@ inductive EExpr where
     --     (t.data.hasLevelMVar || v.data.hasLevelMVar || b.data.hasLevelMVar)
     --     (t.data.hasLevelParam || v.data.hasLevelParam || b.data.hasLevelParam)
     -- | .lit l => mkData (mixHash 3 (hash l))
-deriving Inhabited, Hashable, BEq
+deriving Inhabited, BEq
+
+structure EExpr where
+  fE : EExpr' → UInt64
+  e : EExpr'
+
+def EExpr.data : EExpr → UInt64
+| {fE, e} => fE e
+
+def EExpr.other    (e : Expr) : EExpr := .mk EExpr'.data $ .other e
+def EExpr.lam      (d : LamData EExpr') : EExpr := .mk EExpr'.data $ .lam d
+def EExpr.forallE  (d : ForallData EExpr') : EExpr := .mk EExpr'.data $ .forallE d
+def EExpr.app      (d : AppData EExpr') : EExpr := .mk EExpr'.data $ .app d
+def EExpr.trans    (d : TransData EExpr') : EExpr := .mk EExpr'.data $ .trans d
+def EExpr.symm     (d : SymmData EExpr') : EExpr := .mk EExpr'.data $ .symm d
+def EExpr.refl     (d : ReflData) : EExpr := .mk EExpr'.data $ .refl d
+def EExpr.prfIrrel (d : PIData EExpr') : EExpr := .mk EExpr'.data $ .prfIrrel d
+def EExpr.sry      (d : SorryData) : EExpr := .mk EExpr'.data $ .sry d
+def EExpr.rev      (s : PExpr) (t : PExpr) (S : PExpr) (T : PExpr) (l : Level) (e : EExpr') : EExpr := .mk EExpr'.data $ sorry -- "thunked" equality reversal
 
 namespace Expr
 
@@ -355,7 +484,7 @@ def _root_.Prod.replaceFVarU (fvar val : PExpr) (Uvar : PExpr × LocalDecl) : PE
 mutual
 
 def HUVData.replaceFVar (fvar val : PExpr) : HUVData EExpr → HUVData EExpr
-| {a, UaEqVb, extra} => Id.run $ do
+| {a, UaEqVb, extra, ..} => Id.run $ do
   let extra ← match extra with
     | .some {b, vaEqb} =>
       .some {b := b.replaceFVar fvar val, vaEqb := vaEqb.replaceFVar fvar val}
@@ -363,9 +492,9 @@ def HUVData.replaceFVar (fvar val : PExpr) : HUVData EExpr → HUVData EExpr
   {a := a.replaceFVar fvar val, UaEqVb := UaEqVb.replaceFVar fvar val, extra}
 
 def LamData.replaceFVar (fvar val : PExpr) : LamData EExpr → LamData EExpr
-| {u, v, A, U, f, a, g, faEqgx, extra} => Id.run $ do
+| {u, v, A, U, f, a, g, faEqgx, extra, ..} => Id.run $ do
   let extra ← match extra with
-  | .ABUV {B, hAB, b, vaEqb} {V} =>
+  | .ABUV {B, hAB, b, vaEqb, ..} {V} =>
     .ABUV {B := B.replaceFVar fvar val, hAB := hAB.replaceFVar fvar val, b := b.replaceFVar fvar val, vaEqb := vaEqb.replaceFVar fvar val} {V := (V.replaceFVarU fvar val)}
   | .UV {V} =>
     .UV {V := V.replaceFVarU fvar val}
@@ -374,10 +503,10 @@ def LamData.replaceFVar (fvar val : PExpr) : LamData EExpr → LamData EExpr
   {u, v, A := A.replaceFVar fvar val, U := U.replaceFVarU fvar val, f := f.replaceFVar fvar val, a := a.replaceFVar fvar val, g := g.replaceFVar fvar val, faEqgx := faEqgx.replaceFVar fvar val, extra}
 
 def ForallData.replaceFVar (fvar val : PExpr) : ForallData EExpr → ForallData EExpr
-| {u, v, A, U, V, a, UaEqVx, extra} => Id.run $ do
+| {u, v, A, U, V, a, UaEqVx, extra, ..} => Id.run $ do
   Id.run $ do
     let extra := match extra with
-    | .AB {B, hAB, b, vaEqb} =>
+    | .AB {B, hAB, b, vaEqb, ..} =>
       .AB {B := B.replaceFVar fvar val, hAB := hAB.replaceFVar fvar val, b := b.replaceFVar fvar val, vaEqb := vaEqb.replaceFVar fvar val}
     | .ABApp {b, vaEqb} =>
       .ABApp {b := b.replaceFVar fvar val, vaEqb := vaEqb.replaceFVar fvar val}
@@ -388,19 +517,19 @@ def ForallData.replaceFVar (fvar val : PExpr) : ForallData EExpr → ForallData 
 def AppData.replaceFVar (fvar val : PExpr) : AppData EExpr → AppData EExpr
 | {u, v, A, U, f, a, extra} => Id.run $ do
   let extra := match extra with
-  | .ABUV {B, hAB, V, hUV, g, fEqg, b, aEqb} =>
+  | .ABUV {B, hAB, V, hUV, g, fEqg, b, aEqb, ..} =>
     .ABUV {B := B.replaceFVar fvar val, hAB := hAB.replaceFVar fvar val, V := V.replaceFVarU fvar val, hUV := hUV.replaceFVar fvar val, g := g.replaceFVar fvar val, fEqg := fEqg.replaceFVar fvar val, b := b.replaceFVar fvar val, aEqb := aEqb.replaceFVar fvar val}
-  | .UV {V, hUV, g, fEqg, b, aEqb} =>
+  | .UV {V, hUV, g, fEqg, b, aEqb, ..} =>
     .UV {V := V.replaceFVarU fvar val, hUV := hUV.replaceFVar fvar val, g := g.replaceFVar fvar val, fEqg := fEqg.replaceFVar fvar val, b := b.replaceFVar fvar val, aEqb := aEqb.replaceFVar fvar val}
-  | .UVFun {V, hUV, g, fEqg} =>
+  | .UVFun {V, hUV, g, fEqg, ..} =>
     .UVFun {V := V.replaceFVarU fvar val, hUV := hUV.replaceFVar fvar val, g := g.replaceFVar fvar val, fEqg := fEqg.replaceFVar fvar val}
-  | .AB {B, hAB, g, fEqg, b, aEqb} =>
+  | .AB {B, hAB, g, fEqg, b, aEqb, ..} =>
     .AB {B := B.replaceFVar fvar val, hAB := hAB.replaceFVar fvar val, g := g.replaceFVar fvar val, fEqg := fEqg.replaceFVar fvar val, b := b.replaceFVar fvar val, aEqb := aEqb.replaceFVar fvar val}
-  | .none {g, fEqg, b, aEqb} =>
+  | .none {g, fEqg, b, aEqb, ..} =>
     .none {g := g.replaceFVar fvar val, fEqg := fEqg.replaceFVar fvar val, b := b.replaceFVar fvar val, aEqb := aEqb.replaceFVar fvar val}
-  | .Fun {g, fEqg} =>
+  | .Fun {g, fEqg, ..} =>
     .Fun {g := g.replaceFVar fvar val, fEqg := fEqg.replaceFVar fvar val}
-  | .Arg {b, aEqb} =>
+  | .Arg {b, aEqb, ..} =>
     .Arg {b := b.replaceFVar fvar val, aEqb := aEqb.replaceFVar fvar val}
   {u, v, A := A.replaceFVar fvar val, U := U.replaceFVarU fvar val, f := f.replaceFVar fvar val, a := a.replaceFVar fvar val, extra}
 
