@@ -152,7 +152,8 @@ def addDecl' (env : Environment) (decl : @& Declaration) (allowAxiomReplace := f
   | .mutualDefnDecl vs =>
     let vs ← patchMutual env vs
     return vs.foldl (init := env) (fun env v => add env v)
-  | .quotDecl => addQuot env
+  | .quotDecl =>
+    addQuot env
   | .inductDecl lparams nparams types isUnsafe =>
     let allowPrimitive ← checkPrimitiveInductive env lparams nparams types isUnsafe
     addInductive env lparams nparams types isUnsafe allowPrimitive -- TODO handle any possible patching in inductive type declarations (low priority)

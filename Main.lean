@@ -15,7 +15,14 @@ open Lean
 open Lean4Lean
 open Cli
 
-open private add from Lean.Environment
+open private add markQuotInit from Lean.Environment
+
+def add' (env : Environment) (ci : ConstantInfo) : Environment :=
+  let env := match ci with
+    | .quotInfo _ =>
+      markQuotInit env
+    | _ => env
+  add env ci
 
 def outDir : System.FilePath := System.mkFilePath [".", "out"]
 
@@ -88,7 +95,7 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
         Lean.withImportModules #[{module := mod}] {} 0 fun env => do
           let mut env := env
           for (_, c) in lemmEnv.constants do
-            env := add env c
+            env := add' env c
           _ ← Lean4Less.checkL4L (onlyConsts.map (·.toName)) env (printProgress := true)
       else
         let outDir := ((← IO.Process.getCurrentDir).join "out")
@@ -121,7 +128,7 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
                     let (mod, _) ← readModuleData mfile
                     let mut env := (← get).env
                     for c in mod.constants do
-                      env := add env c
+                      env := add' env c
                     modify fun s => {s with env}
                     pure true
                   else
