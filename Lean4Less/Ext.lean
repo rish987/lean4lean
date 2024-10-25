@@ -64,6 +64,7 @@ section
 structure ExtMethods (m : Type → Type u) where
   isDefEq : Nat → PExpr → PExpr → m (Bool × Option EExpr)
   isDefEqPure : Nat → PExpr → PExpr → m Bool
+  isDefEqLean : PExpr → PExpr → m Bool
   whnf  : Nat → PExpr → m (PExpr × Option EExpr)
   whnfPure  : Nat → PExpr → m PExpr
   mkId  : Nat → m Name
@@ -77,6 +78,8 @@ structure ExtMethods (m : Type → Type u) where
   appPrfIrrel : PExpr → PExpr →  PExpr → m EExpr
   appHEqTrans? : PExpr → PExpr → PExpr → Option EExpr → Option EExpr → m (Option EExpr)
   trace : String → m Unit
+  ttrace : String → m Unit
+  shouldTTrace : m Bool
 
 namespace TypeChecker
 

@@ -214,10 +214,10 @@ def mkAppEqProof (T S : PExpr) (TEqS? : Option EExpr) (as bs : Array PExpr) (asE
     pure none
 
 -- TODO generalize so can also be used for lambdas
-def forallAbs (max : Nat) (tfT sfT : Expr) : m
-    (PExpr × Array (FVarId × Name × PExpr) × Array PExpr ×
+def forallAbs (max : Nat) (tfT' sfT' : Expr) : m
+    (Option (PExpr × Array (FVarId × Name × PExpr) × Array PExpr ×
      PExpr × Array (FVarId × Name × PExpr) × Array PExpr ×
-     Array (Option EExpr) × Std.HashSet Nat) := do
+     Array (Option EExpr) × Std.HashSet Nat)) := do
   let rec loop tfT sfT tDomsVars tDoms sDomsVars sDoms tDomsEqsDoms (absArgs' : Std.HashSet Nat) idx' (origDomVars origDomVarsAbs : Array (FVarId × FVarId)) (origDomVarsRefs : Std.HashMap (FVarId × FVarId) (Std.HashSet (FVarId × FVarId))) (origDomVarsToNewDomVars : Std.HashMap (FVarId × FVarId) (FVarId × FVarId)) := do
 
     let withMaybeAbs tType sType tTypeEqsType? f (tName := `tT) (sName := `sT) (tBi := default) (sBi := default) := do 
@@ -255,7 +255,7 @@ def forallAbs (max : Nat) (tfT sfT : Expr) : m
             let sDom := (← getLCtx).mkLambda (origDepVars.map fun (_, svar) => (Expr.fvar svar)) sType |>.toPExpr
             let tDoms := tDoms.push tDom
             let sDoms := sDoms.push sDom
-            let (true, tDomEqsDom?) ← meth.isDefEq 216 tDom sDom | unreachable!
+            let (true, tDomEqsDom?) ← meth.isDefEq 216 tDom sDom | return none
             let tDomsEqsDoms := tDomsEqsDoms.push tDomEqsDom?
             let newtType := Lean.mkAppN (.fvar MtVar.1) (depVars.map (.fvar ·.1))
             let newsType := Lean.mkAppN (.fvar MsVar.1) (depVars.map (.fvar ·.2))
@@ -264,7 +264,7 @@ def forallAbs (max : Nat) (tfT sfT : Expr) : m
         f none tDomsVars sDomsVars tDoms sDoms tDomsEqsDoms
 
     let cont tBod sBod := do 
-      let (true, tBodEqsBod?) ← meth.isDefEq 217 tBod.toPExpr sBod.toPExpr | unreachable!
+      let (true, tBodEqsBod?) ← meth.isDefEq 217 tBod.toPExpr sBod.toPExpr | return none
       withMaybeAbs tBod sBod tBodEqsBod? fun newtsBod? tDomsVars sDomsVars tDoms sDoms tDomsEqsDoms => do
         let (newtBod, newsBod) := newtsBod?.getD (tBod, sBod)
         let mut newDomVars := #[]
@@ -284,7 +284,7 @@ def forallAbs (max : Nat) (tfT sfT : Expr) : m
 
           let idt := ⟨← meth.mkId 207⟩
 
-          let (true, tDomEqsDom?) ← meth.isDefEq 220 tDom.toPExpr sDom.toPExpr | unreachable!
+          let (true, tDomEqsDom?) ← meth.isDefEq 220 tDom.toPExpr sDom.toPExpr | return none
 
           let cont' ids := do
             let tBod := tBod.instantiate1 (.fvar idt)
@@ -331,7 +331,7 @@ def forallAbs (max : Nat) (tfT sfT : Expr) : m
           cont tBod sBod
     else
       cont tfT sfT
-  loop tfT sfT #[] #[] #[] #[] #[] default 0 #[] #[] default default
+  loop tfT' sfT' #[] #[] #[] #[] #[] default 0 #[] #[] default default
 
 mutual
 def deconstructAppHEq' (n : Nat) (t s : PExpr) (tEqs : EExpr) (T? : Option PExpr) : m (Option (Array PExpr × Array PExpr × Array (Option EExpr) × Array (FVarId × Name × PExpr) × Array (FVarId × Name × PExpr) × PExpr × PExpr)) :=
@@ -480,7 +480,7 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
 
         -- TODO
         let ((tfVar : FVarId × Name × PExpr), tfTAbsDomsVars, tfTAbsDoms, (sfVar : FVarId × Name × PExpr), sfTAbsDomsVars, sfTAbsDoms, tfTAbsDomsEqsfTAbsDoms?, absArgs') ← do
-          let (tfType, tfTAbsDomsVars, tfTAbsDoms, sfType, sfTAbsDomsVars, sfTAbsDoms, tfTAbsDomsEqsfTAbsDoms?, absArgsOffset') ← forallAbs meth (tArgs.size - idx) tfT.toExpr sfT.toExpr
+          let (.some (tfType, tfTAbsDomsVars, tfTAbsDoms, sfType, sfTAbsDomsVars, sfTAbsDoms, tfTAbsDomsEqsfTAbsDoms?, absArgsOffset')) ← forallAbs meth (tArgs.size - idx) tfT.toExpr sfT.toExpr | return (false, none)
           let mut absArgs' := default
           for pos in absArgsOffset' do
             absArgs' := absArgs'.insert (pos + idx)
