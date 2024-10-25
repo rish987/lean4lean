@@ -92,7 +92,7 @@ match fuel with
       --   | _ => unreachable!
       -- dbg_trace s!"{s.numCalls}: {stack[9]!.2}, {stack.map (·.1)}"
 
-    let traceId := Option.some 7113
+    let traceId := Option.some 14159
     -- let traceId := none
     try
       let ret ← withCallId s.numCalls traceId do
@@ -111,16 +111,15 @@ match fuel with
       --   dbg_trace s!"DBG[22]: Methods.lean:110 (after dbg_trace s!DBG[21]: Methods.lean:46 (af…)"
       pure ret
     catch e =>
-      if s.numCalls == 7229 then
-        let stack := (← readThe Context).callStack--.map (·.2.2)
-        let d := stack[stack.size - 2]!
-        dbg_trace s!"DBG[10]: Methods.lean:117 {d}"
-        match d.2.2 with
-        | .isDefEqCore t s .. => 
-          let ret ← isDefEqLean t s 1000 (Methods.withFuel fuel')
-          dbg_trace s!"DBG[11]: Methods.lean:119: ret={ret}"
-          pure ()
-        | _ => unreachable!
+      -- if s.numCalls == 7229 then
+      --   let stack := (← readThe Context).callStack--.map (·.2.2)
+      --   let d := stack[stack.size - 2]!
+      --   match d.2.2 with
+      --   | .isDefEqCore t s .. => 
+      --     let ret ← isDefEqLean t s 1000 (Methods.withFuel fuel')
+      --     dbg_trace s!"DBG[11]: Methods.lean:119: ret={ret}"
+      --     pure ()
+      --   | _ => unreachable!
         -- isDefEqLean 
       dbg_trace s!"err calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}"
       throw e

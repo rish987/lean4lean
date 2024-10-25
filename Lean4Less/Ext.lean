@@ -79,6 +79,8 @@ structure ExtMethods (m : Type → Type u) where
   appHEqTrans? : PExpr → PExpr → PExpr → Option EExpr → Option EExpr → m (Option EExpr)
   trace : String → m Unit
   ttrace : String → m Unit
+  callId : m Nat
+  numCalls : m Nat
   shouldTTrace : m Bool
 
 namespace TypeChecker

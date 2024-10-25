@@ -516,7 +516,12 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
     if let some _p? := targsEqsargs?.get? idx then
       taEqsa? := _p?
     else
+      -- if (← meth.shouldTTrace) && (idx == 3) then
+      --   dbg_trace s!"DBG[0]: App.lean:521 {← meth.numCalls}"
       let (.true, _p?) ← meth.isDefEq 229 ta sa | return (false, none)
+      -- meth.ttrace s!"DBG[2]: App.lean:521 {idx}, {_p?.isSome}, {ta}, {sa}"
+      -- if (← meth.shouldTTrace) && (idx == 3) then
+      --   meth.ttrace s!"DBG[3]: App.lean:521 {← meth.isDefEqPure 0 ta sa}"
       taEqsa? := _p?
     let taEqsaData? := taEqsa?.map (ta, sa, ·)
     taEqsaDatas := taEqsaDatas.push taEqsaData?

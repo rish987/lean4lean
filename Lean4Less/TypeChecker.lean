@@ -485,6 +485,8 @@ def meths : ExtMethods RecM := {
     trace := trace
     ttrace := ttrace
     shouldTTrace := shouldTTrace
+    callId := do pure (← readThe Context).callId
+    numCalls := do pure (← get).numCalls
   }
 
 def isDefEqForall' (t s : PExpr) (numBinds : Nat) (f : Option EExpr → RecM (Option T)) (explicit := false) : RecM (Bool × Option T) := do
@@ -1795,8 +1797,8 @@ def isDefEqCore' (t s : PExpr) : RecB := do
       let (r, teEqse?) ← isDefEq 78 te.toPExpr se.toPExpr
 
       if r then
-        let ret := (true, ← appProjThm? tTypeName ti te.toPExpr se.toPExpr teEqse?)
-        return ret
+        let tn'Eqsn'? ← appProjThm? tTypeName ti te.toPExpr se.toPExpr teEqse?
+        return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)
   | .app .., .app .. =>
     let tf := tn'.toExpr.getAppFn
     let sf := sn'.toExpr.getAppFn
