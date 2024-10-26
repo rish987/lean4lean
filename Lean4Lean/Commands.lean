@@ -38,8 +38,6 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn :
         for skipConst in skippedConsts do
           map := map.erase skipConst
 
-        -- for (n, const) in modEnv.constants do
-        --   dbg_trace s!"DBG[11]: {n}"
         let rp := replay addDeclFn {newConstants := map.erase const, opts := {}} modEnv (printProgress := printProgress)
 
         if not (initConsts.contains const) && consts.size == 1 && const != `temp then
@@ -49,8 +47,6 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn :
           let outPath := outDir.join outName
           if ← System.FilePath.pathExists outPath then
             let (mod, _) ← readModuleData outPath
-            -- for const in mod.constants do
-            --   dbg_trace s!"DBG[9]: {const.name}"
             let module := modEnv.mainModule
             let (_, s) ← importModulesCore mod.imports
               |>.run (s := { moduleNameSet := ({} : NameHashSet).insert module })

@@ -168,7 +168,7 @@ def checkLevel (tc : Context) (l : Level) : Except KernelException Unit := do
 def inferFVar (tc : Context) (name : FVarId) : Except KernelException Expr := do
   if let some decl := tc.lctx.find? name then
     return decl.type
-  throw <| .other "unknown free variable"
+  throw <| .other s!"unknown free variable '{name.name}'"
 
 def inferConstant (tc : Context) (name : Name) (ls : List Level) (inferOnly : Bool) :
     Except KernelException Expr := do
@@ -395,11 +395,18 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
         inferApp e
       else
         let fType ← ensureForallCore (← inferType' f inferOnly) e
-        let aType ← inferType' a inferOnly
         let dType := fType.bindingDomain!
+
+        let aType ← try
+          inferType' a inferOnly
+        catch e =>
+          -- dbg_trace s!"DBG4: {dType}\n"
+          throw e
+
         -- trace s!"{(← rctx).callId}, {← callStackToStr}, {e.getAppArgs.size}, {e.getAppFn} \n\n{dType}\n\n{aType}"
         if !(← isDefEq 54 dType aType) then
-          -- dbg_trace s!"DBG: {a}\n\n{aType}\n"
+          -- dbg_trace s!"DBG2: {f}\n"
+          -- dbg_trace s!"DBG3: {a}\n\n{aType}"
           -- dbg_trace s!"DBG[2]: TypeChecker.lean:292 {(← aType.getWhnfAt [1, .fn])}\n"
           -- dbg_trace s!"DBG[3]: TypeChecker.lean:292 {(← dType.getWhnfAt [1, .fn, .proj 1])}\n"
           throw <| .appTypeMismatch (← getEnv) (← getLCtx) e fType aType
@@ -663,7 +670,8 @@ def tryEtaStructCore (t s : Expr) : RecM Bool := do
   let tType ← inferType 73 t
   for h : i in [fInfo.numParams:args.size] do
     let idx := (i - fInfo.numParams)
-    if !(← isValidProj fInfo.induct idx t tType) then return false
+    if not (← readThe Context).opts.proofIrrelevance then
+      if !(← isValidProj fInfo.induct idx t tType) then return false -- TODO would combining these conditions break the short-circuiting of the evaluation of `isValidProj`?
     unless ← isDefEq 64 (.proj fInfo.induct idx t) (args[i]'h.2) do return false
   return true
 
