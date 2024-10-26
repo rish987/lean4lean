@@ -88,7 +88,7 @@ structure TypeChecker.Context where
   Mapping from free variables to proofs of their equality,
   introduced by isDefEqLambda.
   -/
-  eqFVars : Std.HashMap (FVarId × FVarId) (LocalDecl × EExpr) := {}
+  eqFVars : Std.HashMap (FVarId × FVarId) FVarDataE := {}
   safety : DefinitionSafety := .safe
   cheapK := false
   callId : Nat := 0
@@ -123,7 +123,7 @@ instance [Monad m] : MonadNameGenerator (StateT State m) where
 instance (priority := low) : MonadWithReaderOf LocalContext M where
   withReader f := withReader fun s => { s with lctx := f s.lctx }
 
-instance (priority := low) : MonadWithReaderOf (Std.HashMap (FVarId × FVarId) (LocalDecl × EExpr)) M where
+instance (priority := low) : MonadWithReaderOf (Std.HashMap (FVarId × FVarId) FVarDataE) M where
   withReader f := withReader fun s => { s with eqFVars := f s.eqFVars }
 
 structure Methods where
@@ -334,16 +334,16 @@ def getTypeLevel (e : PExpr) : RecM (Level × PExpr) := do
   let eTypeSort' ← ensureSortCorePure eTypeSort eType
   pure (eTypeSort'.toExpr.sortLevel!, eType)
 
-def appHEqSymm (t s : PExpr) (theqs : EExpr) (info : Option (Level × PExpr × PExpr) := none) : RecM EExpr := do
-  let (lvl, tType, sType) ← info.getDM do
-    let (lvl, tType) ← getTypeLevel t
-    let sType ← inferTypePure 3 s
-    pure (lvl, tType, sType)
-  pure $ .rev t s tType sType lvl theqs
+def appHEqSymm (theqs : EExpr) : RecM EExpr := do
+  -- let (lvl, tType, sType) ← info.getDM do
+  --   let (lvl, tType) ← getTypeLevel t
+  --   let sType ← inferTypePure 3 s
+  --   pure (lvl, tType, sType)
+  pure $ .rev theqs
 
-def appHEqSymm? (t s : PExpr) (theqs? : Option EExpr) : RecM (Option EExpr) := do
+def appHEqSymm? (theqs? : Option EExpr) : RecM (Option EExpr) := do
   let some theqs := theqs? | return none
-  appHEqSymm t s theqs
+  appHEqSymm theqs
 
 /--
 Returns whether `t` and `s` are definitionally equal according to Lean's
@@ -424,7 +424,7 @@ def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : P
             withLCtx ((← getLCtx).mkLocalDecl idsEqt default seqtType default) do
               let some vtEqs := (← getLCtx).find? idtEqs | unreachable!
               let some vsEqt := (← getLCtx).find? idsEqt | unreachable!
-              withEqFVar idt ids (vtEqs, (vtEqs.toExpr.toEExpr.reverse 0 tvar.toExpr.toPExpr svar.toExpr.toPExpr tDom sDom lvl).run) do
+              withEqFVar idt ids { aEqb := vtEqs, bEqa := vsEqt, a := tvar.toExpr.toPExpr, b := svar.toExpr.toPExpr, A := tDom, B := sDom, u := lvl } do
                 cont (.some (svar, vtEqs, vsEqt, p?)) svar 
       else
         cont none tvar
@@ -526,7 +526,7 @@ def isDefEqForall' (t s : PExpr) (numBinds : Nat) (f : Option EExpr → RecM (Op
           let B := b.type.toPExpr
           if let some hAB := hAB? then
             pure $ .AB {B, b, vaEqb := {aEqb, bEqa}, hAB}
-          else -- (if explicit == false)
+          else -- (if explicit == true)
             pure $ .ABApp {b, vaEqb := {aEqb, bEqa}}
         else
           -- sanity check
@@ -652,7 +652,7 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
         let (newPrfVars, newPrfVals, vCast) ←
           match extra with
           | .AB {B, b, vaEqb, hAB} =>
-            let hBA ← appHEqSymm A B hAB (info := .some (u, (Expr.sort (.succ u)).toPExpr, (Expr.sort (.succ u)).toPExpr))
+            let hBA ← appHEqSymm hAB
             let vCast ← mkCast'' `L4L.castHEq B.toExpr A.toExpr hBA v prfVars prfVals u
             let vCastEqv ← mkCast'' `L4L.castOrigHEq B.toExpr A.toExpr hBA v prfVars prfVals u
             pure (#[a.toExpr, b.toExpr, vaEqb.aEqb.toExpr], #[vCast, v, vCastEqv], vCast)
@@ -1141,7 +1141,9 @@ def reduceBinNatOp (op : Name) (f : Nat → Nat → Nat) (a b : PExpr) : RecM (O
   let mut appEqapp'? ← if pa?.isSome || pb?.isSome then
       let pa ← pa?.getDM (mkHRefl (.succ .zero) nat a')
       let pb ← pb?.getDM (mkHRefl (.succ .zero) nat b')
-      pure $ .some $ Lean.mkAppN (← getConst `L4L.appHEqBinNatFn []) #[nat, nat, .const op [], a, a', b, b', pa, pb] |>.toEExpr
+      let fab := Lean.mkAppN (.const op []) #[a, b] |>.toPExpr
+      let fab' := Lean.mkAppN (.const op []) #[a', b'] |>.toPExpr
+      pure $ .some $ Lean.mkAppN (← getConst `L4L.appHEqBinNatFn []) #[nat, nat, .const op [], a, a', b, b', pa, pb] |>.toEExpr (.succ .zero) nat nat fab fab'
     else
       pure none
   let result := (Expr.lit <| .natVal <| f v1 v2).toPExpr
@@ -1167,10 +1169,13 @@ def reduceBinNatPred (op : Name) (f : Nat → Nat → Bool) (a b : PExpr) : RecM
   let (b', pb?) := (← whnf 39 b)
   let some v1 := natLitExt? a' | return none
   let some v2 := natLitExt? b' | return none
+  let bool := (Expr.const `Bool []).toPExpr
   let ret? ← if pa?.isSome || pb?.isSome then
-      let pa ← pa?.getDM (mkHRefl (.succ .zero) (Expr.const `Nat []).toPExpr a')
-      let pb ← pb?.getDM (mkHRefl (.succ .zero) (Expr.const `Nat []).toPExpr b')
-      pure $ .some $ Lean.mkAppN (← getConst `L4L.appHEqBinNatFn []) #[.const `Nat [], .const `Bool [], .const op [], a, a', b, b', pa, pb] |>.toEExpr
+      let pa ← pa?.getDM (mkHRefl (.succ .zero) (Expr.const `Bool []).toPExpr a')
+      let pb ← pb?.getDM (mkHRefl (.succ .zero) (Expr.const `Bool []).toPExpr b')
+      let fab := Lean.mkAppN (.const op []) #[a, b] |>.toPExpr
+      let fab' := Lean.mkAppN (.const op []) #[a', b'] |>.toPExpr
+      pure $ .some $ Lean.mkAppN (← getConst `L4L.appHEqBinNatFn []) #[.const `Nat [], .const `Bool [], .const op [], a, a', b, b', pa, pb] |>.toEExpr (.succ .zero) bool bool fab fab'
     else
       pure none
   return (toExpr (f v1 v2) |>.toPExpr, ret?)
@@ -1264,10 +1269,10 @@ def isDefEqLambda (t s : PExpr) : RecB := do
     pure faEqgx?
 
 def isDefEqFVar (idt ids : FVarId) : RecLB := do
-  if let some (tEqs, _) := (← readThe Context).eqFVars.get? (idt, ids) then
-    return (.true, some tEqs.toExpr.toEExpr)
-  else if let some (_, tEqs) := (← readThe Context).eqFVars.get? (ids, idt) then
-    return (.true, some tEqs)
+  if let some d := (← readThe Context).eqFVars.get? (idt, ids) then
+    return (.true, some $ .fvar d)
+  else if let some d := (← readThe Context).eqFVars.get? (ids, idt) then
+    return (.true, some $ .rev $ .fvar d)
   return (.undef, none)
 
 /--
@@ -1316,7 +1321,7 @@ def tryEtaExpansion (t s : PExpr) : RecB := do
   | ret@(true, _) => pure ret 
   | (false, _) => 
     let (true, sEqt?) ← tryEtaExpansionCore s t | return (false, none)
-    return (true, ← appHEqSymm? s t sEqt?)
+    return (true, ← appHEqSymm? sEqt?)
 
 /--
 Checks if `t` and `s` are application-defeq (as in `isDefEqApp`)
@@ -1352,7 +1357,7 @@ def tryEtaStruct (t s : PExpr) : RecB := do
   | ret@(true, _) => pure ret
   | (false, _) =>
     let (true, sEqt?) ← tryEtaStructCore s t | return (false, none)
-    return (true, ← appHEqSymm? s t sEqt?)
+    return (true, ← appHEqSymm? sEqt?)
 
 def reduceRecursor (e : PExpr) (cheapK : Bool) : RecM (Option (PExpr × Option EExpr)) := do
   let env ← getEnv
@@ -1561,7 +1566,7 @@ def lazyDeltaReductionStep (ltn lsn : PExpr) : RecM ReductionStatus := do
     | (.undef, _) =>
       pure $ .continue nltn nlsn pltnEqnltn? plsnEqnlsn?
     | (.true, pnltnEqnlsn?) => do
-      pure $ .bool .true (← appHEqTrans? ltn nltn lsn pltnEqnltn? <| ← appHEqTrans? nltn nlsn lsn pnltnEqnlsn? <| ← appHEqSymm? lsn nlsn plsnEqnlsn?)
+      pure $ .bool .true (← appHEqTrans? ltn nltn lsn pltnEqnltn? <| ← appHEqTrans? nltn nlsn lsn pnltnEqnlsn? <| ← appHEqSymm? plsnEqnlsn?)
     | (.false, _) => pure $ .bool false none
   let deltaCont_t := do
     pure () -- FIXME why is this needed to block `delta` below from being run immediately in the outer monad context?
@@ -1671,7 +1676,7 @@ def lazyDeltaReduction (tn sn : PExpr) : RecM ReductionStatus := loop tn sn none
         return .bool ret tnEqsn?
       else if let some (lsn', lsnEqlsn'?) ← reduceNat lsn then
         let (ret, ptnEqsn'?) ← isDefEqCore 66 ltn lsn'
-        let tnEqsn? ← appHEqTrans? ltn lsn' lsn ptnEqsn'? (← appHEqSymm? lsn lsn' lsnEqlsn'?)
+        let tnEqsn? ← appHEqTrans? ltn lsn' lsn ptnEqsn'? (← appHEqSymm? lsnEqlsn'?)
         return .bool ret tnEqsn?
     let env ← getEnv
     if let some (ltn', pltnEqLtn'?) ← reduceNative env ltn then
@@ -1682,7 +1687,7 @@ def lazyDeltaReduction (tn sn : PExpr) : RecM ReductionStatus := loop tn sn none
     else if let some (lsn', lsnEqlsn'?) ← reduceNative env lsn then
       -- TODO does this case ever happen?
       let (ret, ptnEqsn'?) ← isDefEqCore 68 ltn lsn'
-      let tnEqsn? ← appHEqTrans? ltn lsn' lsn ptnEqsn'? (← appHEqSymm? lsn lsn' lsnEqlsn'?)
+      let tnEqsn? ← appHEqTrans? ltn lsn' lsn ptnEqsn'? (← appHEqSymm? lsnEqlsn'?)
       return .bool ret tnEqsn?
 
     match ← lazyDeltaReductionStep ltn lsn with
@@ -1696,7 +1701,7 @@ def lazyDeltaReduction (tn sn : PExpr) : RecM ReductionStatus := loop tn sn none
     | .notDelta =>
       return .unknown ltn lsn tnEqltn? snEqlsn?
     | .bool .true ltnEqlsn? =>
-      return .bool .true (← appHEqTrans? tn ltn sn tnEqltn? <| ← appHEqTrans? ltn lsn sn ltnEqlsn? <| ← appHEqSymm? sn lsn snEqlsn?)
+      return .bool .true (← appHEqTrans? tn ltn sn tnEqltn? <| ← appHEqTrans? ltn lsn sn ltnEqlsn? <| ← appHEqSymm? snEqlsn?)
     | .bool .false _ =>
       return .bool .false none
     | .unknown .. => throw $ .other "unreachable 11"
@@ -1759,7 +1764,7 @@ def isDefEqCore' (t s : PExpr) : RecB := do
 
   let mktEqs? (t' s' : PExpr) (tEqt'? sEqs'? t'Eqs'? : Option EExpr) := do 
     let tEqs'? ← appHEqTrans? t t' s' tEqt'? t'Eqs'?
-    let s'Eqs? ← appHEqSymm? s s' sEqs'?
+    let s'Eqs? ← appHEqSymm? sEqs'?
     appHEqTrans? t s' s tEqs'? s'Eqs?
 
   if !(tn == t && sn == s) then

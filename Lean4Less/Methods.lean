@@ -92,8 +92,8 @@ match fuel with
       --   | _ => unreachable!
       -- dbg_trace s!"{s.numCalls}: {stack[9]!.2}, {stack.map (·.1)}"
 
-    let traceId := Option.some 14159
-    -- let traceId := none
+    -- let traceId := Option.some 14159
+    let traceId := none
     try
       let ret ← withCallId s.numCalls traceId do
         withCallData idx s.numCalls d do 

@@ -16,7 +16,7 @@ structure ExtMethodsA (m : Type → Type u) extends ExtMethods m where
   -- alignForAll (numBinds : Nat) (ltl ltr : Expr) : m (Expr × Expr)
   opt : Bool := true
 
-variable [Monad m] [MonadLCtx m] [MonadExcept KernelException m] [MonadNameGenerator m] [MonadWithReaderOf LocalContext m] [MonadWithReaderOf (Std.HashMap (FVarId × FVarId) (LocalDecl × EExpr)) m] (env : Environment)
+variable [Monad m] [MonadLCtx m] [MonadExcept KernelException m] [MonadNameGenerator m] [MonadWithReaderOf LocalContext m] [MonadWithReaderOf (Std.HashMap (FVarId × FVarId) FVarDataE) m] (env : Environment) -- TODO more central place to declare these?
   (meth : ExtMethodsA m)
 
 def mkAppEqProof? (aVars bVars : Array LocalDecl) (us vs : Array Level) (Uas Vbs : Array PExpr) (UasEqVbs? : Array (Option EExpr))(ds? : Array (Option (LocalDecl × LocalDecl × EExpr))) (as bs : Array PExpr) (asEqbs? : Array (Option EExpr)) (f g : PExpr) (fEqg? : Option EExpr := none)
@@ -201,7 +201,7 @@ def mkAppEqProof (T S : PExpr) (TEqS? : Option EExpr) (as bs : Array PExpr) (asE
             withLCtx ((← getLCtx).mkLocalDecl idbEqa default seqtType default) do
               let some vaEqb := (← getLCtx).find? idaEqb | unreachable!
               let some vbEqa := (← getLCtx).find? idbEqa | unreachable!
-              withEqFVar ida idb (vaEqb, (vaEqb.toExpr.toEExpr.reverse 0 aVar.toExpr.toPExpr bVar.toExpr.toPExpr A B u).run) do
+              withEqFVar ida idb {aEqb := vaEqb, bEqa := vbEqa, a := (Expr.fvar ida).toPExpr, b := (Expr.fvar idb).toPExpr, A := A, B := B, u} do
                 let d := (vaEqb, vbEqa, AEqB)
                 cont (.some d) bVar
       else
@@ -323,7 +323,7 @@ def forallAbs (max : Nat) (tfT' sfT' : Expr) : m
                   withLCtx ((← getLCtx).mkLocalDecl idsEqt default seqtType default) do
                     let some vtEqs := (← getLCtx).find? idtEqs | unreachable!
                     -- let some vsEqt := (← getLCtx).find? idsEqt | unreachable!
-                    withEqFVar idt ids (vtEqs, (vtEqs.toExpr.toEExpr.reverse 0 tVar.toExpr.toPExpr sVar.toExpr.toPExpr tDom.toPExpr sDom.toPExpr lvl).run) do -- TODO verify that we actually need this
+                    withEqFVar idt ids {aEqb := vtEqs, bEqa := default, a := tVar.toExpr.toPExpr, b := sVar.toExpr.toPExpr, A := tDom.toPExpr, B := sDom.toPExpr, u := lvl} do -- TODO is this really needed?
                       cont' ids
             else
               cont' idt
