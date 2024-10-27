@@ -96,7 +96,7 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
           let mut env := env
           for (_, c) in lemmEnv.constants do
             env := add' env c
-          _ ← Lean4Less.checkL4L (onlyConsts.map (·.toName)) env (printProgress := true)
+          _ ← Lean4Less.checkL4L (onlyConsts.map (·.toName)) env (printProgress := true) (printOutput := p.hasFlag "print")
       else
         let outDir := ((← IO.Process.getCurrentDir).join "out")
         if (← outDir.pathExists) && not cachedPath?.isSome then
@@ -173,6 +173,7 @@ unsafe def transCmd : Cmd := `[Cli|
     -- p, print;               "Print translation of specified constants to standard output (relevant only with '-o ...')."
     -- w, write;               "Also write translation of specified constants (with dependencies) to file (relevant only with '-p')."
     o, only : Array String; "Only translate the specified constants and their dependencies."
+    p, print : Array String; "Print translated constant specified by --only ."
     a, appopt : Bool; "Optimize application case"
     c, cached : String; "Use cached library translation files from specified directory."
 

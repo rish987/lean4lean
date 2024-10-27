@@ -955,6 +955,7 @@ def SorryData.toExpr : SorryData → EM Expr
     pure $ Lean.mkAppN (.const `sorryAx [0]) #[Lean.mkAppN (.const ``HEq [u]) #[A, a, B, b], .const `Bool.false []]
 
 def EExpr.toExpr' (e : EExpr) : EM Expr := do
+  dbg_trace s!"DBG[1]: EExpr.lean:957 (after def EExpr.toExpr (e : EExpr) : EM Expr :…)"
   -- if let some ex := (← get).toExprCache[e]? then
   --   return ex
   let ret ← match e with
@@ -977,6 +978,7 @@ def EExpr.toExpr' (e : EExpr) : EM Expr := do
   | .rev e => do
     let ret ← (swapRev e.toExpr')
     pure ret
+  dbg_trace s!"DBG[2]: EExpr.lean:980 (after pure ret)"
 
   -- modify fun st => { st with toExprCache := st.toExprCache.insert e ret }
   pure ret
@@ -1005,5 +1007,11 @@ toString e? := toString $ e?.map (·.toExpr)
 
 -- instance : Coe EExpr Expr := ⟨toExpr⟩
 instance : Coe EExpr PExpr := ⟨(EExpr.toPExpr)⟩
+
+structure BinderData where
+name : Name
+dom : PExpr
+info : BinderInfo
+deriving Inhabited
 
 end Lean4Less

@@ -19,6 +19,8 @@ structure ExtMethodsA (m : Type → Type u) extends ExtMethods m where
 variable [Monad m] [MonadLCtx m] [MonadExcept KernelException m] [MonadNameGenerator m] [MonadWithReaderOf LocalContext m] [MonadWithReaderOf (Std.HashMap (FVarId × FVarId) FVarDataE) m] (env : Environment) -- TODO more central place to declare these?
   (meth : ExtMethodsA m)
 
+namespace App
+
 def mkAppEqProof? (aVars bVars : Array LocalDecl) (us vs : Array Level) (Uas Vbs : Array PExpr) (UasEqVbs? : Array (Option EExpr))(ds? : Array (Option (LocalDecl × LocalDecl × EExpr))) (as bs : Array PExpr) (asEqbs? : Array (Option EExpr)) (f g : PExpr) (fEqg? : Option EExpr := none)
 : m (Option EExpr) := do
   let mut fEqg? := fEqg?
@@ -95,12 +97,6 @@ def mkAppEqProof? (aVars bVars : Array LocalDecl) (us vs : Array Level) (Uas Vbs
     f := f.toExpr.app a |>.toPExpr
     g := g.toExpr.app b |>.toPExpr
   pure fEqg?
-
-structure BinderData where
-name : Name
-dom : PExpr
-info : BinderInfo
-deriving Inhabited
 
 def mkAppEqProof (T S : PExpr) (TEqS? : Option EExpr) (as bs : Array PExpr) (asEqbs? : Array (Option EExpr)) (f g : PExpr) (fEqg? : Option EExpr := none) : m (Option EExpr) := do
   let rec loop idx T S aVars bVars Uas Vbs UasEqVbs? ds? us vs : m (Option EExpr) := do
@@ -624,22 +620,4 @@ def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
     isDefEqAppOpt''' meth tf sf tArgs sArgs targsEqsargs? tfEqsf?
   else
     isDefEqApp''' meth tf sf tArgs sArgs targsEqsargs? tfEqsf?
-
-/--
-Checks if applications `t` and `s` (should be WHNF) are defeq on account of
-their function heads and arguments being defeq.
--/
-def isDefEqApp' (t s : PExpr)
-   (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default) (tfEqsf? : Option (Option EExpr) := none) : m (Bool × (Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))) := do
-  unless t.toExpr.isApp && s.toExpr.isApp do return (false, none)
-  t.toExpr.withApp fun tf tArgs =>
-  s.toExpr.withApp fun sf sArgs => 
-    let tf := tf.toPExpr
-    let sf := sf.toPExpr
-    let tArgs := tArgs.map (·.toPExpr)
-    let sArgs := sArgs.map (·.toPExpr)
-    isDefEqApp'' meth tf sf tArgs sArgs targsEqsargs? tfEqsf?
-
-def isDefEqApp (t s : PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default) (tfEqsf? : Option (Option EExpr) := none) : m (Bool × Option EExpr) := do
-  let (isDefEq, data?) ← isDefEqApp' meth t s targsEqsargs? tfEqsf?
-  pure (isDefEq, data?.map (·.1))
+end App
