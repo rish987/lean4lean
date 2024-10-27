@@ -169,6 +169,12 @@ def dottrace (msg : Unit → RecM String) : RecM Unit := do -- TODO macro to mak
   if ← shouldTTrace then
     dbg_trace (← msg ())
 
+def callId : RecM Nat := do
+  pure (← readThe Context).callId
+
+def numCalls : RecM Nat := do
+  pure (← get).numCalls
+
 def mkId (n : Nat) : RecM Name := do
   let id ← mkFreshId
   -- if id == "_kernel_fresh.39".toName then
@@ -1409,6 +1415,7 @@ def reduceRecursor (e : PExpr) (cheapK : Bool) : RecM (Option (PExpr × Option E
 
 @[inherit_doc whnfCore]
 private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecEE := do
+  ttrace s!"DBG[4]: TypeChecker.lean:1791 (after def isDefEqCore (t s : PExpr) : RecB := …)"
   -- TODO whnfPure optimization
   let e := e'.toPExpr
   match e' with
@@ -1416,19 +1423,22 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
   | .mdata _ e => return ← _whnfCore' e cheapK cheapProj
   | .fvar id => if !isLetFVar (← getLCtx) id then return (e, none)
   | .app .. | .letE .. | .proj .. => pure ()
-  if let some r := (← get).whnfCoreCache.get? e then -- FIXME important to optimize this -- FIXME should this depend on cheapK?
-    return r
+  -- if let some r := (← get).whnfCoreCache.get? e then -- FIXME important to optimize this -- FIXME should this depend on cheapK?
+  --   ttrace s!"DBG[5]: TypeChecker.lean:1426 (after if let some r := (← get).whnfCoreCache…)"
+  --   return r
   let rec save r := do
     if !cheapK && !cheapProj then
       modify fun s => { s with whnfCoreCache := s.whnfCoreCache.insert e r }
       if cheapK && r.2.isNone then
         modify fun s => { s with whnfCoreCache := s.whnfCoreCache.insert e r }
     pure r
+  ttrace s!"DBG[6]: TypeChecker.lean:1434 (after pure r)"
   let ret ← match e' with
   | .bvar .. | .sort .. | .mvar .. | .forallE .. | .const .. | .lam .. | .lit ..
   | .mdata .. => throw $ .other "unreachable 9"
   | .fvar _ => return ← whnfFVar e cheapK cheapProj
   | .app .. => -- beta-reduce at the head as much as possible, apply any remaining `rargs` to the resulting expression, and re-run `whnfCore`
+    ttrace s!"DBG[7]: TypeChecker.lean:1440 {e'}"
     e'.withAppRev fun f0 rargs => do
     let f0 := f0.toPExpr
     -- the head may still be a let variable/binding, projection, or mdata-wrapped expression
@@ -1459,6 +1469,7 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
           pure (frargs, rargs, eEqfrargs'?)
       else
         pure (frargs, rargs, none)
+    ttrace s!"DBG[8]: TypeChecker.lean:1471 (after pure (frargs, rargs, none))"
 
 
     if let (.lam _ _ body _) := f.toExpr then
@@ -1490,11 +1501,14 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
   | .letE _ _ val body _ =>
     save <|← whnfCore 57 (body.instantiate1 val).toPExpr cheapK cheapProj
   | .proj typeName idx s =>
+    ttrace s!"DBG[9]: TypeChecker.lean:1503 (after | .proj typeName idx s =>)"
     if let some (m, eEqm?) ← reduceProj typeName idx s.toPExpr cheapK cheapProj then
+      ttrace s!"DBG[2]: TypeChecker.lean:1501 (after if let some (m, eEqm?) ← reduceProj ty…)"
       let (r', mEqr'?) ← whnfCore 58 m cheapK cheapProj
       let eEqr'? ← appHEqTrans? e m r' eEqm? mEqr'?
       save (r', eEqr'?)
     else
+      ttrace s!"DBG[3]: TypeChecker.lean:1506 (after else)"
       save (e, none)
   -- let (eNew, p?) := ret
   -- if p?.isNone then
@@ -1795,6 +1809,7 @@ def isDefEqCore' (t s : PExpr) : RecB := do
   --   let tType ← inferTypePure 99 t
   --   return (true, .some $ p.reverse s t sType tType lvl)
 
+  ttrace s!"DBG[11]: TypeChecker.lean:1800 {← numCalls}"
   let (tn, tEqtn?) ← whnfCore 76 t (cheapK := true) (cheapProj := true)
   let (sn, sEqsn?) ← whnfCore 77 s (cheapK := true) (cheapProj := true)
 
@@ -1805,9 +1820,9 @@ def isDefEqCore' (t s : PExpr) : RecB := do
 
   if (tn == t && sn == s) then
     if !(unsafe ptrEq tn t) then
-      dbg_trace s!"DBG[7]: TypeChecker.lean:1808 (after sorry)"
+      dbg_trace s!"DBG[7]: {← callId}, {tn}"
     if !(unsafe ptrEq sn s) then
-      dbg_trace s!"DBG[8]: {unsafe ptrEq sn.toExpr s.toExpr}"
+      dbg_trace s!"DBG[8]: {sn}"
     pure ()
   else
     let (r, tnEqsn?) ← quickIsDefEq 89 tn sn
