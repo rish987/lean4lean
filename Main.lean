@@ -8,6 +8,7 @@ import Cli
 import Lean.Util.FoldConsts
 import Lean4Lean.Environment
 import Lean4Lean.Replay
+import Lean4Lean.Commands
 
 open Lean
 open Cli
@@ -25,6 +26,8 @@ You can also use `lake exe lean4lean --fresh Mathlib.Data.Nat.Basic` to replay a
 -/
 unsafe def runRunCmd (p : Parsed) : IO UInt32 := do
   initSearchPath (← findSysroot)
+  let onlyConsts? := p.flag? "only" |>.map fun onlys => 
+    onlys.as! (Array String)
   let fresh : Bool := p.hasFlag "fresh"
   let verbose : Bool := p.hasFlag "verbose"
   let compare : Bool := p.hasFlag "compare"
@@ -42,6 +45,10 @@ unsafe def runRunCmd (p : Parsed) : IO UInt32 := do
     | .some mod => match mod.value.toName with
       | .anonymous => throw <| IO.userError s!"Could not resolve module: {mod}"
       | m =>
+        if let some onlyConsts := onlyConsts? then
+          Lean.withImportModules #[{module := m}] {} 0 fun env => do
+            let map := onlyConsts.foldl (init := default) fun acc n => .insert acc n.toName
+            let _ ← checkConstants (printErr := true) env map Lean4Lean.addDecl (op := "typecheck") (printProgress := true)
         if fresh then
           replayFromFresh addDecl m (verbose := verbose) (compare := compare) (opts := opts)
         else
@@ -81,6 +88,7 @@ unsafe def runCmd : Cmd := `[Cli|
   "Run Lean4Lean"
 
   FLAGS:
+    o, only : Array String;         "Only translate the specified constants and their dependencies."
     f, fresh;                       "Typecheck imported modules"
     v, verbose;                     "Verbose mode"
     c, compare;                     "Compare Lean4Lean and kernel runtimes"
