@@ -1803,12 +1803,19 @@ def isDefEqCore' (t s : PExpr) : RecB := do
     let s'Eqs? ← appHEqSymm? sEqs'?
     appHEqTrans? t s' s tEqs'? s'Eqs?
 
-  if !(tn == t && sn == s) then
+  if (tn == t && sn == s) then
+    if !(unsafe ptrEq tn t) then
+      dbg_trace s!"DBG[7]: TypeChecker.lean:1808 (after sorry)"
+    if !(unsafe ptrEq sn s) then
+      dbg_trace s!"DBG[8]: {unsafe ptrEq sn.toExpr s.toExpr}"
+    pure ()
+  else
     let (r, tnEqsn?) ← quickIsDefEq 89 tn sn
     if r == .false then
       return (false, none)
     else if r == .true then
       return (true, ← mktEqs? tn sn tEqtn? sEqsn? tnEqsn?)
+
   let (r, tnEqsn?) ← isDefEqProofIrrel tn sn
   if r != .undef then 
     if r == .true then
@@ -1834,6 +1841,8 @@ def isDefEqCore' (t s : PExpr) : RecB := do
   | .fvar tv, .fvar sv => if tv == sv then return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? none)
   | .proj tTypeName ti te, .proj _ si se =>
     if ti == si then
+      if !(unsafe ptrEq ti si) then
+        dbg_trace s!"DBG[5]: TypeChecker.lean:1837 (after if !(unsafe ptrEq ti si) then)"
       -- optimized by above functions using `cheapProj = true`
       let (r, teEqse?) ← isDefEq 78 te.toPExpr se.toPExpr
 
@@ -1859,7 +1868,13 @@ def isDefEqCore' (t s : PExpr) : RecB := do
   -- above functions used `cheapProj = true`, `cheapK = true`, so we may not have a complete WHNF
   let (tn'', tn'Eqtn''?) ← whnfCore 79 tn'
   let (sn'', sn'Eqsn''?) ← whnfCore 80 sn'
-  if !(tn'' == tn' && sn'' == sn') then
+  if (tn'' == tn' && sn'' == sn') then
+    if !(unsafe ptrEq tn'' tn') then
+      dbg_trace s!"DBG[9]: TypeChecker.lean:1875 (after dbg_trace s!DBG[7]: TypeChecker.lean:180…)"
+    if !(unsafe ptrEq sn'' sn') then
+      dbg_trace s!"DBG[10]: TypeChecker.lean:1877 (after dbg_trace s!DBG[8]: TypeChecker.lean:180…)"
+    pure ()
+  else
     -- if projection reduced, need to re-run (as we may not have a WHNF)
     let tEqtn''? ← appHEqTrans? t tn' tn'' tEqtn'? tn'Eqtn''?
     let sEqsn''? ← appHEqTrans? s sn' sn'' sEqsn'? sn'Eqsn''?
