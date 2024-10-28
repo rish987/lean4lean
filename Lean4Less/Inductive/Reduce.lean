@@ -203,7 +203,7 @@ def inductiveReduceRec [Monad m] [MonadExcept KernelException m] (env : Environm
     for idx in [majorIdx + 1:newRecArgs.size] do
       let (domType, fType') ← match (← meth.whnfPure 122 fType).toExpr with
         | .forallE _ d  b _=> pure (d, b)
-        | _ => throw $ .other "unreachable"
+        | _ => throw $ .other "unreachable (Reduce.lean)"
       let newArg' := newRecArgs[idx]!.toPExpr
       let argType ← meth.inferTypePure 123 newArg'
       let (true, newArg) ← meth.smartCast 124 argType domType.toPExpr newArg' | unreachable!

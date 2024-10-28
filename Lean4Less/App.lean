@@ -47,26 +47,8 @@ def mkAppEqProof? (aVars bVars : Array LocalDecl) (us vs : Array Level) (Uas Vbs
 
         let (U, V) := ((Ua, aVar), (Vb, bVar))
 
-        let extra ← if let .some (vaEqb, vbEqa, hAB) := d? then
-          let B := bVar.type.toPExpr
-
-          let some fEqg := fEqg? | unreachable!
-          let some aEqb := aEqb? | unreachable!
-
-          -- Ua and Vb may still contain references to a and b despite being
-          -- defeq (if dep == true), so we need to consider this case, and
-          -- cannot immediately fall back to .AB (which has no dependent variant)
-          let dep := Ua.containsFVar' aVar || Vb.containsFVar' bVar
-
-          if UaEqVb?.isSome || dep then
-            let UaEqVb ← UaEqVb?.getDM $ meth.mkHRefl v.succ (Expr.sort v).toPExpr Ua
-            let hUV := {a := aVar, UaEqVb, extra := .some {b := bVar, vaEqb := {aEqb := vaEqb, bEqa := vbEqa}}}
-            pure $ .ABUV {B, hAB, V, hUV, g, fEqg, b, aEqb}
-          else
-            assert! not dep
-            pure $ .AB {B, hAB, g, fEqg, b, aEqb}
-        else
-          let elseCase := do -- TODO FIXME only needed because I can't combine the conditions below
+        let elseCase := do
+          let elseCase' := do -- TODO FIXME only needed because I can't combine the conditions below
             if let some fEqg := fEqg? then
               if let some aEqb := aEqb? then
                 pure $ .none {g, fEqg, b, aEqb}
@@ -87,9 +69,34 @@ def mkAppEqProof? (aVars bVars : Array LocalDecl) (us vs : Array Level) (Uas Vbs
             else
               -- let defEq ← meth.isDefEqPure 241 Ua Vb --sanity check
               -- assert! defEq
-              elseCase
+              elseCase'
           else
+            elseCase'
+
+        let extra ← if let .some (vaEqb, vbEqa, hAB) := d? then
+          let B := bVar.type.toPExpr
+
+          let some fEqg := fEqg? | do
+            assert! (← meth.isDefEqPure 0 A B)
             elseCase
+          let some aEqb := aEqb? |
+            assert! (← meth.isDefEqPure 0 A B)
+            elseCase
+
+          -- Ua and Vb may still contain references to a and b despite being
+          -- defeq (if dep == true), so we need to consider this case, and
+          -- cannot immediately fall back to .AB (which has no dependent variant)
+          let dep := Ua.containsFVar' aVar || Vb.containsFVar' bVar
+
+          if UaEqVb?.isSome || dep then
+            let UaEqVb ← UaEqVb?.getDM $ meth.mkHRefl v.succ (Expr.sort v).toPExpr Ua
+            let hUV := {a := aVar, UaEqVb, extra := .some {b := bVar, vaEqb := {aEqb := vaEqb, bEqa := vbEqa}}}
+            pure $ .ABUV {B, hAB, V, hUV, g, fEqg, b, aEqb}
+          else
+            assert! not dep
+            pure $ .AB {B, hAB, g, fEqg, b, aEqb}
+        else
+          elseCase
 
         pure $ .some $ .app {u, v, A, U, f, a, extra}
       else
