@@ -173,7 +173,7 @@ unsafe def transCmd : Cmd := `[Cli|
     -- p, print;               "Print translation of specified constants to standard output (relevant only with '-o ...')."
     -- w, write;               "Also write translation of specified constants (with dependencies) to file (relevant only with '-p')."
     o, only : Array String; "Only translate the specified constants and their dependencies."
-    p, print : Array String; "Print translated constant specified by --only ."
+    p, print; "Print translated constant specified by --only ."
     a, appopt : Bool; "Optimize application case"
     c, cached : String; "Use cached library translation files from specified directory."
 

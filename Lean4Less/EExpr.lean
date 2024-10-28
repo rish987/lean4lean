@@ -981,12 +981,26 @@ def EExpr.toExpr' (e : EExpr) : EM Expr := do
   -- modify fun st => { st with toExprCache := st.toExprCache.insert e ret }
   pure ret
 
+-- def EExpr.toSorry (e : EExpr) : EExpr :=
+--   match e with
+--   | .other l T S t s _ => .sry {u := l, A := T, B := S, a := t, b := s}
+--   | .lam d => .sry {u := .ima, A := T, B := S, a := t, b := s}
+--   | .forallE d
+--   | .app d
+--   | .fvar d
+--   | .trans d
+--   -- | .symm d
+--   | .refl d
+--   | .prfIrrel d
+--   | .sry d  => d.toExpr
+--   -- | .rev .. => panic! "encountered thunked reversal"
+--   | .rev e => sorry
+
+
 end
 
 def EExpr.toExpr (e : EExpr) (dbg := false) : Expr := Id.run $ do
-  dbg_trace s!">> toExpr"
   let ret ← e.toExpr'.run dbg
-  dbg_trace s!"<< toExpr"
   pure ret
 
 namespace EExpr

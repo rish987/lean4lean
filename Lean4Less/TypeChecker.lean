@@ -31,6 +31,7 @@ structure TypeChecker.State where
   isDefEqAppCache : Std.HashMap (Array PExpr × Array PExpr) (Option (EExpr × Array (Option (PExpr × PExpr × EExpr)))) := {}
   fvarRegistry : Std.HashMap Name Nat := {} -- for debugging purposes
   eqvManager : EquivManager := {}
+  lctx : LocalContext := {}
   numCalls : Nat := 0
   leanMinusState : Lean.TypeChecker.State := {}
   failure : Std.HashSet (Expr × Expr) := {}
@@ -84,7 +85,6 @@ structure TypeChecker.Context where
   pure : Bool := false -- (for debugging purposes)
   forallOpt : Bool := true -- (for debugging purposes)
   const : Name -- (for debugging purposes)
-  lctx : LocalContext := {}
   /--
   Mapping from free variables to proofs of their equality,
   introduced by isDefEqLambda.
@@ -108,21 +108,26 @@ abbrev MLB := M (LBool × Option EExpr)
 
 def M.run (env : Environment) (const : Name) (safety : DefinitionSafety := .safe) (lctx : LocalContext := {})
     (x : M α) : Except KernelException α :=
-  x { env, safety, lctx, const } |>.run' {}
+  x { env, safety, const } |>.run' {lctx}
 
 instance : MonadEnv M where
   getEnv := return (← read).env
   modifyEnv _ := pure ()
 
 instance : MonadLCtx M where
-  getLCtx := return (← read).lctx
+  getLCtx := return (← get).lctx
 
 instance [Monad m] : MonadNameGenerator (StateT State m) where
   getNGen := return (← get).ngen
   setNGen ngen := modify fun s => { s with ngen }
 
 instance (priority := low) : MonadWithReaderOf LocalContext M where
-  withReader f := withReader fun s => { s with lctx := f s.lctx }
+  withReader f := fun x => do
+    let sOrig ← get
+    modify fun s => { s with lctx := f s.lctx }
+    let ret ← x
+    modify fun s => { s with lctx := sOrig.lctx }
+    pure ret
 
 instance (priority := low) : MonadWithReaderOf (Std.HashMap (FVarId × FVarId) FVarDataE) M where
   withReader f := withReader fun s => { s with eqFVars := f s.eqFVars }
@@ -291,7 +296,7 @@ def checkLevel (tc : Context) (l : Level) : Except KernelException Unit := do
   if let some n2 := l.getUndefParam tc.lparams then
     throw <| .other s!"invalid reference to undefined universe level parameter '{n2}' {tc.lparams}"
 
-def inferFVar (tc : Context) (name : FVarId) (idx : Option Nat) : Except KernelException PExpr := do
+def inferFVar (tc : State) (name : FVarId) (idx : Option Nat) : Except KernelException PExpr := do
   if let some decl := tc.lctx.find? name then
     return decl.type.toPExpr
   throw <| .other s!"unknown free variable (index {idx}, name {name.name})"
@@ -371,8 +376,19 @@ def quickIsDefEq (n : Nat) (t s : PExpr) (useHash : Bool := false) : RecLB := fu
 
 @[inherit_doc isDefEqCore]
 def isDefEq (n : Nat) (t s : PExpr) : RecB := do
+  -- if let some p := (← get).isDefEqCache.get? (t, s) then
+  if ((← get).isDefEqCache.get? (t, s)).isSome || ((← get).isDefEqCache.get? (s, t)).isSome then
+    -- return (true, .some p)
+    let (u, A) ← getTypeLevel t
+    return (true, .some $ .sry {u, A, B := (← inferTypePure 0 s), a := t, b := s}) -- TODO use let variables
+  -- else if let some p := (← get).isDefEqCache.get? (s, t) then
+  --   let (lvl, sType) ← getTypeLevel s
+  --   let tType ← inferTypePure 99 t
+  --   return (true, .some $ p.reverse s t sType tType lvl)
+
   let r ← isDefEqCore n t s
   let (result, p?) := r
+
   if result then
     if let some p := p? then
       modify fun st => { st with isDefEqCache := st.isDefEqCache.insert (t, s) p }
@@ -986,7 +1002,7 @@ def inferType' (e : Expr) (_dbg := false) : RecPE := do
       -- let (t, e'?) ← inferType 96 e
       let e' := e'?.getD e.toPExpr
       inferProj s idx e' e'?.isSome t
-    | .fvar n => pure (← inferFVar (← readThe Context) n ((← get).fvarRegistry.get? n.name), none)
+    | .fvar n => pure (← inferFVar (← get) n ((← get).fvarRegistry.get? n.name), none)
     | .mvar _ => throw <| .other "patcher does not support meta variables"
     | .bvar _ => throw $ .other "unreachable 1"
     | .sort l =>
@@ -1192,7 +1208,7 @@ def reduceBinNatOp (op : Name) (f : Nat → Nat → Nat) (a b : PExpr) : RecM (O
   let app := Lean.mkAppN (.const op []) #[a, b] |>.toPExpr
   let app' := Lean.mkAppN (.const op []) #[a', b'] |>.toPExpr
   let sorryProof? ← if op == `Nat.gcd then
-      trace s!"dbg: GCD used: {v1} {v2}"
+      dbg_trace s!"dbg: GCD used: {v1} {v2}"
       pure $ .some $ .sry {u := 1, A := nat, a := a', B := nat, b := b'}
     else 
       pure none
@@ -1324,9 +1340,9 @@ Otherwise, defers to the calling function.
 -/
 def quickIsDefEq' (t s : PExpr) (useHash := false) : RecLB := do
   -- optimization for terms that are already α-equivalent
-  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 (eqvManager := m)) => -- TODO why do I have to list these?
+  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 (eqvManager := m)) => -- TODO why do I have to list these?
     let (b, m) := m.isEquiv useHash t s
-    (b, .mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 (eqvManager := m))
+    (b, .mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 (eqvManager := m))
   then
     return (.true, none)
   let res : Option (Bool × PExpr) ← match t.toExpr, s.toExpr with
@@ -1438,7 +1454,7 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
   | .mdata .. => throw $ .other "unreachable 9"
   | .fvar _ => return ← whnfFVar e cheapK cheapProj
   | .app .. => -- beta-reduce at the head as much as possible, apply any remaining `rargs` to the resulting expression, and re-run `whnfCore`
-    ttrace s!"DBG[7]: TypeChecker.lean:1440 {e'}"
+    ttrace s!"DBG[7]: TypeChecker.lean:1440"
     e'.withAppRev fun f0 rargs => do
     let f0 := f0.toPExpr
     -- the head may still be a let variable/binding, projection, or mdata-wrapped expression
@@ -1801,13 +1817,6 @@ def isDefEqCore' (t s : PExpr) : RecB := do
   if !t.toExpr.hasFVar && s.toExpr.isConstOf ``true then
     let (t, p?) ← whnf 75 t
     if t.toExpr.isConstOf ``true then return (true, p?)
-
-  if let some p := (← get).isDefEqCache.get? (t, s) then
-    return (true, .some p)
-  -- else if let some p := (← get).isDefEqCache.get? (s, t) then
-  --   let (lvl, sType) ← getTypeLevel s
-  --   let tType ← inferTypePure 99 t
-  --   return (true, .some $ p.reverse s t sType tType lvl)
 
   ttrace s!"DBG[11]: TypeChecker.lean:1800 {← numCalls}"
   let (tn, tEqtn?) ← whnfCore 76 t (cheapK := true) (cheapProj := true)

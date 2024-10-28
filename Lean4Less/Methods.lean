@@ -93,7 +93,7 @@ match fuel with
       -- dbg_trace s!"{s.numCalls}: {stack[9]!.2}, {stack.map (·.1)}"
 
     let traceId : Option Nat := none
-    let traceId := Option.some 1111
+    -- let traceId := Option.some 5053
     try
       let ret ← withCallId s.numCalls traceId do
         withCallData idx s.numCalls d do 
