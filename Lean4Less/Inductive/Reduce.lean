@@ -12,6 +12,7 @@ structure ExtMethodsR (m : Type → Type u) extends ExtMethods m where
   isDefEqApp' : PExpr → PExpr → Std.HashMap Nat (Option EExpr) → m (Bool × Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))
   isDefEqApp : PExpr → PExpr → Std.HashMap Nat (Option EExpr) → m (Bool × Option EExpr)
   smartCast : Nat → PExpr → PExpr → PExpr → m (Bool × PExpr)
+  smartCast' : Nat → PExpr → PExpr → PExpr → m ((Bool × Option EExpr) × PExpr)
   isDefEqProofIrrel' : PExpr → PExpr → PExpr → PExpr → Option EExpr → m (Option EExpr)
 
 variable [Monad m] [MonadExcept KernelException M] (env : Environment)
@@ -194,37 +195,38 @@ def inductiveReduceRec [Monad m] [MonadExcept KernelException m] (env : Environm
     if let some (_, e, _) := indEq? then
       newRecArgs := newRecArgs.set! recIdx e
 
+  let e' := (mkAppN recFn recArgs[:majorIdx + 1]) |>.toPExpr
   let eNewMajor' := (mkAppN recFn newRecArgs[:majorIdx + 1]) |>.toPExpr
-  -- let (_, eNewMajor?) := (← meth.inferType 121 eNewMajor') -- cast remaining args as necessary
-  -- let eNewMajor := eNewMajor?.getD eNewMajor'
+  let (.true, eEqeNewMajor'?) ← meth.isDefEqApp e' eNewMajor' map | unreachable!
 
-  if majorIdx + 1 < newRecArgs.size then
-    let mut fType ← meth.inferTypePure 121 eNewMajor'
-    for idx in [majorIdx + 1:newRecArgs.size] do
-      let (domType, fType') ← match (← meth.whnfPure 122 fType).toExpr with
-        | .forallE _ d  b _=> pure (d, b)
-        | _ => throw $ .other "unreachable (Reduce.lean)"
-      let newArg' := newRecArgs[idx]!.toPExpr
-      let argType ← meth.inferTypePure 123 newArg'
-      let (true, newArg) ← meth.smartCast 124 argType domType.toPExpr newArg' | unreachable!
+  let eType' ← meth.inferTypePure 125 e'
+  let eNewMajorType' ← meth.inferTypePure 121 eNewMajor'
 
-      fType := (fType'.instantiate1 newArg).toPExpr
-      
-      newRecArgs := newRecArgs.set! idx newArg
+  let eNewMajorAbs := sorry
+  -- in new fvar context
+  let ((true, p?), eNewMajorAbsCast) ← meth.smartCast' 126 eNewMajorType' eType' eNewMajorAbs | unreachable!
 
-  let eNewMajor := mkAppN recFn newRecArgs |>.toPExpr
+  let (.true, eNewMajorAbsEqeNewMajorAbsCast?) ← if p?.isNone then pure (true, none) else meth.isDefEq 127 eNewMajorAbs eNewMajorAbsCast | unreachable!
+  --
 
-  _ ← meth.inferTypePure 5000 eNewMajor -- sanity check TODO remove
+  let eNewMajorCast := sorry -- TODO instantiate eNewMajorAbsCast with eNewMajor'
+  let eNewMajorEqeNewMajorCast? := sorry -- TODO instantiate eNewMajorAbsCast with eNewMajor'
+  let eEqeNewMajorCast'? ← meth.appHEqTrans? e' eNewMajor' eNewMajorCast eEqeNewMajor'? eNewMajorEqeNewMajorCast?
+  let eEqeNewMajorCast? := sorry -- TODO use isDefEqApp'' with eEqeNewMajorCast'? as function equality proof
 
   -- get parameters from recursor application (recursor rules don't need the indices,
   -- as these are determined by the constructor and its parameters/fields)
   rhs := mkAppRange rhs 0 info.getFirstIndexIdx newRecArgs
   -- get fields from constructor application
   rhs := mkAppRange rhs (majorArgs.size - rule.nfields) majorArgs.size majorArgs
-  if majorIdx + 1 < newRecArgs.size then
-    rhs := mkAppRange rhs (majorIdx + 1) newRecArgs.size newRecArgs
-  _ ← meth.inferTypePure 6000 rhs.toPExpr -- sanity check TODO remove
-  let (.true, eEqeNewMajor?) ← meth.isDefEqApp e eNewMajor map | unreachable!
-  return .some (rhs.toPExpr, eEqeNewMajor?)
+
+  let rhsCast := sorry -- TODO instantiate eNewMajorAbsCast with rhs
+
+  let newe :=
+    if majorIdx + 1 < newRecArgs.size then
+      mkAppRange rhsCast (majorIdx + 1) newRecArgs.size newRecArgs
+    else rhsCast
+
+  return .some (newe.toPExpr, eEqeNewMajorCast?)
 
 end

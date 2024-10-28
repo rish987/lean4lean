@@ -765,7 +765,7 @@ def LamData.toExpr (e : LamData EExpr) : EM Expr := match e with
         pure $ (#[B.toExpr, A, V, U, g, f, (← hAB.toExpr'), hfg], dep)
     | .UV {V} => 
         let (U, V, dep) := getMaybeDepLemmaApp2 U V
-        pure (#[A.toExpr, V, U, f, g, hfg], dep)
+        pure (#[A.toExpr, V, U, g, f, hfg], dep)
     | .none => 
         let (U, dep) := getMaybeDepLemmaApp1 U
         pure (#[A.toExpr, U, g, f, hfg], dep)

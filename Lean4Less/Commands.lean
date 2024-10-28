@@ -40,6 +40,14 @@ The set of all constants used to patch terms, in linearised order based on
 dependencies in the patched versions of their types/values.
 -/
 def patchConsts : Array Name := #[
+-- `L4L.prfIrrelEq,
+-- `L4L.prfIrrelHEq,
+-- `L4L.prfIrrel,
+--
+-- `L4L.forallEq',
+-- `L4L.appArgEq,
+-- `L4L.appArgEq,
+
 `L4L.eq_of_heq,
 `cast,
 `L4L.castHEq,

@@ -1,4 +1,6 @@
 import Std
+import Lean4Less.Commands
+import patch.PatchTheoremsAx
 
 universe u v
 
@@ -155,6 +157,10 @@ axiom hk : BK (@K.rec (fun _ => Bool) true k)
 def KT : Type := (@K.rec (fun _ => Type) (Nat → Prop) k)
 axiom Temp : (Nat → KT) → Type
 def temp : Type := Temp (fun n m => P)
+
+-- #check_off L4L.forallEq'
+-- #check Quot.mk
+#print Eq.rec
 
 abbrev gcd (m : @& Nat) : Nat :=
   if let Nat.succ m' := m then

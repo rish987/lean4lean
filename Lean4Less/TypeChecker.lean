@@ -1422,6 +1422,8 @@ def reduceRecursor (e : PExpr) (cheapK : Bool) : RecM (Option (PExpr × Option E
   if env.header.quotInit then
     if let some r ← quotReduceRec e (whnf 51) (fun x y tup => isDefEqApp x y (targsEqsargs? := Std.HashMap.insert default tup.1 tup.2)) then
       return r
+  else
+    dbg_trace s!"DBG[13]: TypeChecker.lean:1426 (after else)"
   let whnf' := whnf (cheapK := cheapK)
   let meths := {methsR with whnf := whnf'}
   let recReduced? ← inductiveReduceRec meths (cheapK := cheapK) env e
