@@ -105,7 +105,7 @@ def mkAppEqProof? (aVars bVars : Array LocalDecl) (us vs : Array Level) (Uas Vbs
     g := g.toExpr.app b |>.toPExpr
   pure fEqg?
 
-def mkAppEqProof (T S : PExpr) (TEqS? : Option EExpr) (as bs : Array PExpr) (asEqbs? : Array (Option EExpr)) (f g : PExpr) (fEqg? : Option EExpr := none) : m (Option EExpr) := do
+def mkAppEqProof (T S : PExpr) (f g : PExpr) (as bs : Array PExpr) (asEqbs? : Array (Option EExpr)) (fEqg? : Option EExpr := none) : m (Option EExpr) := do
   let rec loop idx T S aVars bVars Uas Vbs UasEqVbs? ds? us vs : m (Option EExpr) := do
     -- try
     --   let fType ← meth.inferTypePure 2071 (Lean.mkAppN f.toExpr (as[:idx].toArray.map (·.toExpr))).toPExpr -- sanity check TODO remove
@@ -130,8 +130,8 @@ def mkAppEqProof (T S : PExpr) (TEqS? : Option EExpr) (as bs : Array PExpr) (asE
       {name := bName, dom := B, info := bBi}) := (dA, dB)
 
     -- sanity check
-    let aType ← meth.inferTypePure 207 a
-    let bType ← meth.inferTypePure 208 b
+    -- let aType ← meth.inferTypePure 207 a
+    -- let bType ← meth.inferTypePure 208 b
     -- let .true ← meth.isDefEqPure 209 A aType | do
     --   -- throw $ .other s!"expected 1: {A}\n inferred: {aType}\n a: {a}"
     --   throw $ .other s!"failed sanity check 1"
@@ -425,7 +425,9 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
       --   let T := tLCtx.mkForall (tVars[sBodArgs.size - sEtaVars:].toArray.map (.fvar ·.1)) tBodT
       --   if not (← meth.isDefEqPure 209 T.toPExpr iT) then
 
-      let p? ← mkAppEqProof meth tfType.toPExpr sfType.toPExpr none tArgs' sArgs' taEqsas' tf'.toPExpr sf'.toPExpr
+      if tfEqsf?.isSome then
+        assert! (← meth.isDefEqPure 0 tf'.toPExpr sf'.toPExpr) -- FIXME need to handle this case and pass in fEqg? arg below?
+      let p? ← mkAppEqProof meth tfType.toPExpr sfType.toPExpr tf'.toPExpr sf'.toPExpr tArgs' sArgs' taEqsas' 
       pure p?
     else
       pure none
@@ -475,7 +477,7 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
       else -- the current partial application needs to be abstracted as a function
         let tfEqsf'? ←
           if idx == 0 && tfEqsf?.isSome then
-            pure (tfEqsf?)
+            pure tfEqsf?
           else
             mkAppEqProof' tVars sVars tArgs' sArgs' taEqsas' tBodFun sBodFun tBodArgs sBodArgs tArgsVars sArgsVars tBodT sBodT tEtaVars sEtaVars idx
         let tf := (Lean.mkAppN tf (tArgs[:idx].toArray.map (·.toExpr))).toPExpr
@@ -615,7 +617,7 @@ def isDefEqApp''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
   -- let (defEq, tEqs?) ← meth.isDefEqForall tfT'.toPExpr sfT'.toPExpr tArgs.size fun tfTEqsfT? =>
   --   mkAppEqProof meth tfT sfT tfTEqsfT? tArgs sArgs (taEqsas.map (·.map (·.2.2))) tf sf _ret?
   -- assert! defEq
-  let tEqs? ← mkAppEqProof meth tfT sfT none tArgs sArgs (taEqsas.map (·.map (·.2.2))) tf sf _ret?
+  let tEqs? ← mkAppEqProof meth tfT sfT tf sf tArgs sArgs (taEqsas.map (·.map (·.2.2))) _ret?
 
   -- TODO(perf) restrict data collection to the case of `taEqsa?.isSome || ret?.isSome`
   return (true, (tEqs?.map fun tEqs => (tEqs, taEqsas)))

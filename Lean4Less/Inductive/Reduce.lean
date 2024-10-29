@@ -5,12 +5,17 @@ import Lean4Less.Ext
 
 namespace Lean4Less
 open Lean
+open Lean4Less.TypeChecker
 
 section
 
 structure ExtMethodsR (m : Type → Type u) extends ExtMethods m where
+  isDefEqApp'' : PExpr → PExpr → Array PExpr → Array PExpr → Option EExpr → m (Bool × Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))
   isDefEqApp' : PExpr → PExpr → Std.HashMap Nat (Option EExpr) → m (Bool × Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))
   isDefEqApp : PExpr → PExpr → Std.HashMap Nat (Option EExpr) → m (Bool × Option EExpr)
+  whnfK  : Nat → PExpr → m (PExpr × Option EExpr)
+  appHEqSymm : EExpr → m EExpr
+  mkAppEqProof (T S : PExpr) (f g : PExpr) (as bs : Array PExpr) (asEqbs? : Array (Option EExpr)) (fEqg? : Option EExpr) : m (Option EExpr)
   smartCast : Nat → PExpr → PExpr → PExpr → m (Bool × PExpr)
   smartCast' : Nat → PExpr → PExpr → PExpr → m ((Bool × Option EExpr) × PExpr)
   isDefEqProofIrrel' : PExpr → PExpr → PExpr → PExpr → Option EExpr → m (Option EExpr)
@@ -98,7 +103,7 @@ constructor application). The reduction is done by applying the
 `RecursorRule.rhs` associated with the constructor to the parameters from the
 recursor application and the fields of the constructor application.
 -/
-def inductiveReduceRec [Monad m] [MonadExcept KernelException m] (env : Environment) (e : PExpr) (cheapK : Bool := false)
+def inductiveReduceRec [Monad m] [MonadWithReaderOf LocalContext m] [MonadLCtx m] [MonadExcept KernelException m] (env : Environment) (e : PExpr) (cheapK : Bool := false)
     : m (Option (PExpr × Option EExpr)) := do
   let recFn := e.toExpr.getAppFn
   let .const recFnName ls := recFn | return none
@@ -202,31 +207,44 @@ def inductiveReduceRec [Monad m] [MonadExcept KernelException m] (env : Environm
   let eType' ← meth.inferTypePure 125 e'
   let eNewMajorType' ← meth.inferTypePure 121 eNewMajor'
 
-  let eNewMajorAbs := sorry
-  -- in new fvar context
-  let ((true, p?), eNewMajorAbsCast) ← meth.smartCast' 126 eNewMajorType' eType' eNewMajorAbs | unreachable!
+  let id := .mk (← meth.mkId 127)
+  withLCtx ((← getLCtx).mkLocalDecl id default eNewMajorType' default) do
+    let eNewMajorAbs := Expr.fvar id |>.toPExpr
+    -- in new fvar context
+    let ((true, p?), eNewMajorAbsCast) ← meth.smartCast' 126 eNewMajorType' eType' eNewMajorAbs | unreachable!
 
-  let (.true, eNewMajorAbsEqeNewMajorAbsCast?) ← if p?.isNone then pure (true, none) else meth.isDefEq 127 eNewMajorAbs eNewMajorAbsCast | unreachable!
-  --
+    let p? ←
+      if p?.isSome then
+        pure (← meth.whnfK 127 eNewMajorAbsCast).2
+      else
+        pure none
+    let eNewMajorAbsEqeNewMajorAbsCast? ← p?.mapM (meth.appHEqSymm ·)
+    --
 
-  let eNewMajorCast := sorry -- TODO instantiate eNewMajorAbsCast with eNewMajor'
-  let eNewMajorEqeNewMajorCast? := sorry -- TODO instantiate eNewMajorAbsCast with eNewMajor'
-  let eEqeNewMajorCast'? ← meth.appHEqTrans? e' eNewMajor' eNewMajorCast eEqeNewMajor'? eNewMajorEqeNewMajorCast?
-  let eEqeNewMajorCast? := sorry -- TODO use isDefEqApp'' with eEqeNewMajorCast'? as function equality proof
+    let eNewMajorCast' := eNewMajorAbsCast.toExpr.replaceFVar eNewMajorAbs eNewMajor' |>.toPExpr -- TODO instantiate eNewMajorAbsCast with eNewMajor'
+    let eNewMajorEqeNewMajorCast'? := eNewMajorAbsEqeNewMajorAbsCast?.map (·.replaceFVar eNewMajorAbs eNewMajor') -- TODO instantiate eNewMajorAbsEqeNewMajorAbsCast? with eNewMajor'
+    let eEqeNewMajorCast'? ← meth.appHEqTrans? e' eNewMajor' eNewMajorCast' eEqeNewMajor'? eNewMajorEqeNewMajorCast'?
 
-  -- get parameters from recursor application (recursor rules don't need the indices,
-  -- as these are determined by the constructor and its parameters/fields)
-  rhs := mkAppRange rhs 0 info.getFirstIndexIdx newRecArgs
-  -- get fields from constructor application
-  rhs := mkAppRange rhs (majorArgs.size - rule.nfields) majorArgs.size majorArgs
+    -- get parameters from recursor application (recursor rules don't need the indices,
+    -- as these are determined by the constructor and its parameters/fields)
+    let mut rhs := mkAppRange rhs 0 info.getFirstIndexIdx newRecArgs
+    -- get fields from constructor application
+    rhs := mkAppRange rhs (majorArgs.size - rule.nfields) majorArgs.size majorArgs
 
-  let rhsCast := sorry -- TODO instantiate eNewMajorAbsCast with rhs
+    let rhsCast := eNewMajorAbsCast.toExpr.replaceFVar eNewMajorAbs rhs
 
-  let newe :=
-    if majorIdx + 1 < newRecArgs.size then
-      mkAppRange rhsCast (majorIdx + 1) newRecArgs.size newRecArgs
-    else rhsCast
+    let remArgs := recArgs[(majorIdx + 1):recArgs.size].toArray.map (·.toPExpr)
+    let newe := Lean.mkAppN rhsCast (remArgs.map (·.toExpr))
 
-  return .some (newe.toPExpr, eEqeNewMajorCast?)
+    let (eEqnewe?) ←
+      if recArgs.size > majorIdx + 1 then
+        if eEqeNewMajorCast'?.isSome then
+          meth.mkAppEqProof (← meth.inferTypePure 128 e') (← meth.inferTypePure 129 eNewMajorCast') e' eNewMajorCast' remArgs remArgs (List.replicate remArgs.size none).toArray eEqeNewMajorCast'?
+        else
+          pure none
+      else
+        pure eEqeNewMajorCast'? -- TODO use isDefEqApp'' with eEqeNewMajorCast'? as function equality proof
+
+    return .some (newe.toPExpr, eEqnewe?)
 
 end

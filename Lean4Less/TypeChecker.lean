@@ -683,7 +683,7 @@ def _root_.Lean4Less.PExpr.getWhnfAt (l : List WhnfIndex) (e : PExpr) : RecM PEx
 instance : OfNat WhnfIndex n where
 ofNat := .arg n
 
-def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((Bool × Option EExpr) × PExpr) := do
+def smartCast' (n : Nat) (tl tr e : PExpr) (p? : Option EExpr := none) : RecM ((Bool × Option EExpr) × PExpr) := do
   let getLvl tl tr := do
     let sort ← inferTypePure 13 tr
     let sort' ← ensureSortCorePure sort tl
@@ -759,7 +759,7 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
 
 def smartCast (n : Nat) (tl tr e : PExpr) (p? : Option EExpr := none) : RecM (Bool × PExpr) := do
   let ret ← try
-    smartCast' tl tr e n p?
+    smartCast' n tl tr e p?
   catch ex =>
     dbg_trace s!"smartCast error: {n}"
     throw ex
@@ -788,8 +788,13 @@ def isDefEqProofIrrel' (t s tType sType : PExpr) (pt? : Option EExpr) (n : Nat) 
 def methsR : ExtMethodsR RecM := {
     meths with
     smartCast := smartCast
+    whnfK := whnf
+    appHEqSymm := appHEqSymm
+    smartCast' := smartCast'
     isDefEqApp := fun t s m => isDefEqApp t s (targsEqsargs? := m)
     isDefEqApp' := fun t s m => isDefEqApp' t s (targsEqsargs? := m)
+    isDefEqApp'' := fun f g as bs m => isDefEqApp'' f g as bs (tfEqsf? := .some m)
+    mkAppEqProof := fun T S f g as bs m fEqg? => App.mkAppEqProof methsA T S f g as bs m fEqg?
     isDefEqProofIrrel' := isDefEqProofIrrel' (n := 2) (useRfl := true) -- need to pass `useRfl := true` because of failure of transitivity (with K-like reduction)
   }
 
@@ -902,7 +907,7 @@ def inferLet (e : Expr) : RecPE := loop #[] #[] false e where
     let val := val.instantiateRev fvars
     let (valType, val'?) ← inferType 21 val 
     let val' := val'?.getD val.toPExpr
-    let ((true, pVal?), valC') ← smartCast' valType type' val' 17 |
+    let ((true, pVal?), valC') ← smartCast' 17 valType type' val' |
       throw <| .letTypeMismatch (← getEnv) (← getLCtx) name valType type'
     let id := ⟨← mkId 10⟩
     withLCtx ((← getLCtx).mkLetDecl id name type' valC') do
@@ -1026,7 +1031,7 @@ def inferType' (e : Expr) (_dbg := false) : RecPE := do
       let dType := Expr.bindingDomain! fType' |>.toPExpr
       -- it can be shown that if `e` is typeable as `T`, then `T` is typeable as `Sort l`
       -- for some universe level `l`, so this use of `isDefEq` is valid
-      let ((true, pa'?), a') ← smartCast' aType dType (a'?.getD a.toPExpr) 19 |
+      let ((true, pa'?), a') ← smartCast' 19 aType dType (a'?.getD a.toPExpr) |
         -- if e'.isApp then if let .const `Bool.casesOn _ := e'.withApp fun f _ => f then
         dbg_trace s!"dbg: {e}"
         throw <| .appTypeMismatch (← getEnv) (← getLCtx) e fType' aType
