@@ -103,7 +103,7 @@ constructor application). The reduction is done by applying the
 `RecursorRule.rhs` associated with the constructor to the parameters from the
 recursor application and the fields of the constructor application.
 -/
-def inductiveReduceRec [Monad m] [MonadWithReaderOf LocalContext m] [MonadLCtx m] [MonadExcept KernelException m] (env : Environment) (e : PExpr) (cheapK : Bool := false)
+def inductiveReduceRec [Monad m] [MonadWithReaderOf LocalContext m] [MonadLCtx m] [MonadExcept KernelException m] [MonadWithReaderOf (Std.HashMap (FVarId × FVarId) FVarDataE) m] (env : Environment) (e : PExpr) (cheapK : Bool := false)
     : m (Option (PExpr × Option EExpr)) := do
   let recFn := e.toExpr.getAppFn
   let .const recFnName ls := recFn | return none
@@ -184,6 +184,7 @@ def inductiveReduceRec [Monad m] [MonadWithReaderOf LocalContext m] [MonadLCtx m
     if let some (_, e, _) := indEq? then
       newRecArgs := newRecArgs.set! idx e
 
+
   let motivesStartIdx := info.numParams
   for idx in [:motivesMinorsEqs?.size] do
     let indEq? := motivesMinorsEqs?[idx]!
@@ -191,6 +192,7 @@ def inductiveReduceRec [Monad m] [MonadWithReaderOf LocalContext m] [MonadLCtx m
     map := map.insert recIdx (indEq?.map (fun (_, _, p) => p))
     if let some (_, e, _) := indEq? then
       newRecArgs := newRecArgs.set! recIdx e
+
 
   let indicesStartIdx := info.numParams + info.numMotives + info.numMinors
   for idx in [:indEqs?.size] do
@@ -200,6 +202,7 @@ def inductiveReduceRec [Monad m] [MonadWithReaderOf LocalContext m] [MonadLCtx m
     if let some (_, e, _) := indEq? then
       newRecArgs := newRecArgs.set! recIdx e
 
+
   let e' := (mkAppN recFn recArgs[:majorIdx + 1]) |>.toPExpr
   let eNewMajor' := (mkAppN recFn newRecArgs[:majorIdx + 1]) |>.toPExpr
   let (.true, eEqeNewMajor'?) ← meth.isDefEqApp e' eNewMajor' map | unreachable!
@@ -207,44 +210,87 @@ def inductiveReduceRec [Monad m] [MonadWithReaderOf LocalContext m] [MonadLCtx m
   let eType' ← meth.inferTypePure 125 e'
   let eNewMajorType' ← meth.inferTypePure 121 eNewMajor'
 
-  let id := .mk (← meth.mkId 127)
-  withLCtx ((← getLCtx).mkLocalDecl id default eNewMajorType' default) do
-    let eNewMajorAbs := Expr.fvar id |>.toPExpr
-    -- in new fvar context
-    let ((true, p?), eNewMajorAbsCast) ← meth.smartCast' 126 eNewMajorType' eType' eNewMajorAbs | unreachable!
+  let sort ← meth.inferTypePure 125 eType'
+  let .sort lvl := sort.toExpr | unreachable!
 
-    let p? ←
-      if p?.isSome then
-        pure (← meth.whnfK 127 eNewMajorAbsCast).2
-      else
-        pure none
-    let eNewMajorAbsEqeNewMajorAbsCast? ← p?.mapM (meth.appHEqSymm ·)
-    --
+  let (true, eTypeEqeNewMajorType'?) ← meth.isDefEq 134 eType' eNewMajorType' | panic! ""
 
-    let eNewMajorCast' := eNewMajorAbsCast.toExpr.replaceFVar eNewMajorAbs eNewMajor' |>.toPExpr -- TODO instantiate eNewMajorAbsCast with eNewMajor'
-    let eNewMajorEqeNewMajorCast'? := eNewMajorAbsEqeNewMajorAbsCast?.map (·.replaceFVar eNewMajorAbs eNewMajor') -- TODO instantiate eNewMajorAbsEqeNewMajorAbsCast? with eNewMajor'
-    let eEqeNewMajorCast'? ← meth.appHEqTrans? e' eNewMajor' eNewMajorCast' eEqeNewMajor'? eNewMajorEqeNewMajorCast'?
 
-    -- get parameters from recursor application (recursor rules don't need the indices,
-    -- as these are determined by the constructor and its parameters/fields)
-    let mut rhs := mkAppRange rhs 0 info.getFirstIndexIdx newRecArgs
-    -- get fields from constructor application
-    rhs := mkAppRange rhs (majorArgs.size - rule.nfields) majorArgs.size majorArgs
+  -- get parameters from recursor application (recursor rules don't need the indices,
+  -- as these are determined by the constructor and its parameters/fields)
+  rhs := mkAppRange rhs 0 info.getFirstIndexIdx newRecArgs
+  -- get fields from constructor application
+  rhs := mkAppRange rhs (majorArgs.size - rule.nfields) majorArgs.size majorArgs
+  let remArgs := recArgs[(majorIdx + 1):recArgs.size].toArray.map (·.toPExpr)
 
-    let rhsCast := eNewMajorAbsCast.toExpr.replaceFVar eNewMajorAbs rhs
-
-    let remArgs := recArgs[(majorIdx + 1):recArgs.size].toArray.map (·.toPExpr)
-    let newe := Lean.mkAppN rhsCast (remArgs.map (·.toExpr))
-
+  let elseCase := do
+    let newe := Lean.mkAppN rhs (remArgs.map (·.toExpr))
     let (eEqnewe?) ←
       if recArgs.size > majorIdx + 1 then
-        if eEqeNewMajorCast'?.isSome then
-          meth.mkAppEqProof (← meth.inferTypePure 128 e') (← meth.inferTypePure 129 eNewMajorCast') e' eNewMajorCast' remArgs remArgs (List.replicate remArgs.size none).toArray eEqeNewMajorCast'?
+        if eEqeNewMajor'?.isSome then
+          meth.mkAppEqProof eType' eNewMajorType' e' eNewMajor' remArgs remArgs (List.replicate remArgs.size none).toArray eEqeNewMajor'?
         else
           pure none
       else
-        pure eEqeNewMajorCast'? -- TODO use isDefEqApp'' with eEqeNewMajorCast'? as function equality proof
-
+        pure eEqeNewMajor'? -- TODO use isDefEqApp'' with eEqeNewMajorCast'? as function equality proof
     return .some (newe.toPExpr, eEqnewe?)
 
+  if remArgs.size > 0 then
+    if let some eTypeEqeNewMajorType' := eTypeEqeNewMajorType'? then
+      let idT := .mk (← meth.mkId 130)
+      let idS := .mk (← meth.mkId 131)
+      withLCtx ((← getLCtx).mkLocalDecl idT default sort default) do
+        withLCtx ((← getLCtx).mkLocalDecl idS default sort default) do
+          let TVar := .fvar idT
+          let SVar := .fvar idS
+          let TeqSType := mkAppN (.const `HEq [lvl.succ]) #[sort, TVar, sort, SVar]
+          let SeqTType := mkAppN (.const `HEq [lvl.succ]) #[sort, SVar, sort, TVar]
+          let idTEqS := ⟨← meth.mkId 132⟩
+          let idSEqT := ⟨← meth.mkId 133⟩
+          withLCtx ((← getLCtx).mkLocalDecl idTEqS default TeqSType default) do
+            withLCtx ((← getLCtx).mkLocalDecl idSEqT default SeqTType default) do
+              let some TEqSVar := (← getLCtx).find? idTEqS | unreachable!
+              let some SEqTVar := (← getLCtx).find? idSEqT | unreachable!
+              withEqFVar idT idS { aEqb := TEqSVar, bEqa := SEqTVar, a := TVar.toPExpr, b := SVar.toPExpr, A := sort, B := sort, u := (lvl.succ) } do
+                let id := .mk (← meth.mkId 127)
+                withLCtx ((← getLCtx).mkLocalDecl id default SVar default) do
+                  let sVar := Expr.fvar id |>.toPExpr
+                  -- in new fvar context
+                  let (true, sVarCast) ← meth.smartCast 126 SVar.toPExpr TVar.toPExpr sVar | unreachable!
+                  _ ← meth.inferTypePure 0 sVarCast -- TODO remove
+
+                  let p? := (← meth.whnfK 127 sVarCast).2
+                  let sVarEqsVarCast? := p?.map (EExpr.rev ·)
+                  let eTypeEqeNewMajorTypeE' := eTypeEqeNewMajorType'.toExpr
+                  let eNewMajorTypeEqeTypeE' := EExpr.rev eTypeEqeNewMajorType'
+
+                  let eNewMajorCast' := sVarCast.toExpr.replaceFVars #[TVar, SVar, TEqSVar.toExpr, SEqTVar.toExpr, sVar] #[eType', eNewMajorType', eTypeEqeNewMajorTypeE', eNewMajorTypeEqeTypeE', eNewMajor'] |>.toPExpr -- TODO instantiate eNewMajorAbsCast with eNewMajor'
+                  let eNewMajorEqeNewMajorCast'? := sVarEqsVarCast?.map (fun p => Id.run $ do
+                    let mut p := p
+                    p := p.replaceFVars #[TVar.toPExpr, SVar.toPExpr, sVar] #[eType', eNewMajorType', eNewMajor']
+                    -- p := p.replaceFVarE
+                    p := (p.replaceFVarE TEqSVar.toExpr.toPExpr (.mk eTypeEqeNewMajorType')).run
+                    p
+                    ) -- TODO instantiate eNewMajorAbsEqeNewMajorAbsCast? with eNewMajor'
+                  let eEqeNewMajorCast'? ← meth.appHEqTrans? e' eNewMajor' eNewMajorCast' eEqeNewMajor'? eNewMajorEqeNewMajorCast'?
+
+
+                  let rhsCast := sVarCast.toExpr.replaceFVars #[TVar, SVar, TEqSVar.toExpr, SEqTVar.toExpr, sVar] #[eType', eNewMajorType', eTypeEqeNewMajorTypeE', eNewMajorTypeEqeTypeE', rhs]
+
+                  let newe := Lean.mkAppN rhsCast (remArgs.map (·.toExpr))
+
+                  let (eEqnewe?) ←
+                    if recArgs.size > majorIdx + 1 then
+                      if eEqeNewMajorCast'?.isSome then
+                        meth.mkAppEqProof eType' eType' e' eNewMajorCast' remArgs remArgs (List.replicate remArgs.size none).toArray eEqeNewMajorCast'?
+                      else
+                        pure none
+                    else
+                      pure eEqeNewMajorCast'? -- TODO use isDefEqApp'' with eEqeNewMajorCast'? as function equality proof
+
+                  return .some (newe.toPExpr, eEqnewe?)
+    else
+      elseCase
+  else
+    elseCase
 end
