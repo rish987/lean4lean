@@ -424,6 +424,8 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
       --   let iT ← meth.inferTypePure 1111 (Lean.mkAppN tBodFun (tBodArgs'.map (·.toExpr))).toPExpr -- sanity check
       --   let T := tLCtx.mkForall (tVars[sBodArgs.size - sEtaVars:].toArray.map (.fvar ·.1)) tBodT
       --   if not (← meth.isDefEqPure 209 T.toPExpr iT) then
+      if tfEqsf?.isSome then -- FIXME need to handle this case?
+        assert! (← meth.isDefEqPure 0 tf'.toPExpr sf'.toPExpr)
 
       let p? ← mkAppEqProof meth tfType.toPExpr sfType.toPExpr none tArgs' sArgs' taEqsas' tf'.toPExpr sf'.toPExpr
       pure p?
