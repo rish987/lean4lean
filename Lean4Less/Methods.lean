@@ -39,7 +39,7 @@ match fuel with
 
     let mut printedTrace := false
     let methPrint := false
-    -- let methPrint := true
+    let methPrint := true
     if methPrint && s.numCalls >= 1000 /- && not s.printedDbg -/ then -- TODO static variables?
       if s.numCalls % 1 == 0 then
         printedTrace := true

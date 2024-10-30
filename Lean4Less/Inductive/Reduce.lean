@@ -5,6 +5,7 @@ import Lean4Less.Ext
 
 namespace Lean4Less
 open Lean
+open Lean4Less.TypeChecker
 
 section
 
@@ -12,6 +13,7 @@ structure ExtMethodsR (m : Type → Type u) extends ExtMethods m where
   isDefEqApp' : PExpr → PExpr → Std.HashMap Nat (Option EExpr) → m (Bool × Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))
   isDefEqApp : PExpr → PExpr → Std.HashMap Nat (Option EExpr) → m (Bool × Option EExpr)
   smartCast : Nat → PExpr → PExpr → PExpr → m (Bool × PExpr)
+  maybeCast (n : Nat) (p? : Option EExpr) (typLhs typRhs e : PExpr) : m PExpr
   isDefEqProofIrrel' : PExpr → PExpr → PExpr → PExpr → Option EExpr → m (Option EExpr)
 
 variable [Monad m] [MonadExcept KernelException M] (env : Environment)
@@ -97,7 +99,7 @@ constructor application). The reduction is done by applying the
 `RecursorRule.rhs` associated with the constructor to the parameters from the
 recursor application and the fields of the constructor application.
 -/
-def inductiveReduceRec [Monad m] [MonadExcept KernelException m] (env : Environment) (e : PExpr) (cheapK : Bool := false)
+def inductiveReduceRec [Monad m] [MonadWithReaderOf LocalContext m] [MonadLCtx m] [MonadExcept KernelException m] [MonadWithReaderOf (Std.HashMap (FVarId × FVarId) FVarDataE) m] (env : Environment) (e : PExpr) (cheapK : Bool := false)
     : m (Option (PExpr × Option EExpr)) := do
   let recFn := e.toExpr.getAppFn
   let .const recFnName ls := recFn | return none
@@ -194,39 +196,96 @@ def inductiveReduceRec [Monad m] [MonadExcept KernelException m] (env : Environm
     if let some (_, e, _) := indEq? then
       newRecArgs := newRecArgs.set! recIdx e
 
-  let eNewMajor' := (mkAppN recFn newRecArgs[:majorIdx + 1]) |>.toPExpr
+  let e' := (mkAppN recFn recArgs[:majorIdx + 1]) |>.toPExpr
+  let eNewMajor' := mkAppN recFn newRecArgs[:majorIdx + 1] |>.toPExpr
   -- let (_, eNewMajor?) := (← meth.inferType 121 eNewMajor') -- cast remaining args as necessary
   -- let eNewMajor := eNewMajor?.getD eNewMajor'
-
-  if majorIdx + 1 < newRecArgs.size then
-    let mut fType ← meth.inferTypePure 121 eNewMajor'
-    for idx in [majorIdx + 1:newRecArgs.size] do
-      let (domType, fType') ← match (← meth.whnfPure 122 fType).toExpr with
-        | .forallE _ d  b _=> pure (d, b)
-        | _ =>
-          let test ← meth.whnf 0 fType
-          throw $ .other s!"unreachable (Reduce.lean) {test.1.toExpr.ctorName}"
-      let newArg' := newRecArgs[idx]!.toPExpr
-      let argType ← meth.inferTypePure 123 newArg'
-      let (true, newArg) ← meth.smartCast 124 argType domType.toPExpr newArg' | unreachable!
-
-      fType := (fType'.instantiate1 newArg).toPExpr
-      
-      newRecArgs := newRecArgs.set! idx newArg
-
-  let eNewMajor := mkAppN recFn newRecArgs |>.toPExpr
-
-  _ ← meth.inferTypePure 5000 eNewMajor -- sanity check TODO remove
+  let (.true, eEqeNewMajor'?) ← meth.isDefEqApp e' eNewMajor' map | unreachable!
 
   -- get parameters from recursor application (recursor rules don't need the indices,
   -- as these are determined by the constructor and its parameters/fields)
   rhs := mkAppRange rhs 0 info.getFirstIndexIdx newRecArgs
   -- get fields from constructor application
   rhs := mkAppRange rhs (majorArgs.size - rule.nfields) majorArgs.size majorArgs
-  if majorIdx + 1 < newRecArgs.size then
-    rhs := mkAppRange rhs (majorIdx + 1) newRecArgs.size newRecArgs
-  _ ← meth.inferTypePure 6000 rhs.toPExpr -- sanity check TODO remove
-  let (.true, eEqeNewMajor?) ← meth.isDefEqApp e eNewMajor map | unreachable!
-  return .some (rhs.toPExpr, eEqeNewMajor?)
+
+  if let some eEqeNewMajor' := eEqeNewMajor'? then
+    let eNewMajorType' ← meth.inferTypePure 121 eNewMajor'
+    let eType' ← meth.inferTypePure 129 e'
+    let sort ← meth.whnfPure 135 (← meth.inferTypePure 134 eType')
+    let .sort lvl := sort.toExpr | unreachable!
+    let idrV := .mk (← meth.mkId 130)
+    let idfV := .mk (← meth.mkId 131)
+    withLCtx ((← getLCtx).mkLocalDecl idrV default eType' default) do
+      let some rVl := (← getLCtx).find? idrV | unreachable!
+      let rV := rVl.toExpr
+      withLCtx ((← getLCtx).mkLocalDecl idfV default eNewMajorType' default) do
+        let some fVl := (← getLCtx).find? idfV | unreachable!
+        let fV := fVl.toExpr
+
+        let rVEqfVType := mkAppN (.const `HEq [lvl]) #[eType', eNewMajorType', rV, fV]
+        let fVEqrVType := mkAppN (.const `HEq [lvl]) #[eNewMajorType', eType', fV, rV]
+        let idrVEqfV := ⟨← meth.mkId 132⟩
+        let idfVEqrV := ⟨← meth.mkId 133⟩
+        withLCtx ((← getLCtx).mkLocalDecl idrVEqfV default rVEqfVType default) do
+          withLCtx ((← getLCtx).mkLocalDecl idfVEqrV default fVEqrVType default) do
+            let some rVEqfV := (← getLCtx).find? idrVEqfV | unreachable!
+            let some fVEqrV := (← getLCtx).find? idfVEqrV | unreachable!
+            withEqFVar idrV idfV { aEqb := rVEqfV, bEqa := fVEqrV, a := rV.toPExpr, b := fV.toPExpr, A := eType', B := eNewMajorType', u := lvl } do
+              let some rVEqfVl := (← getLCtx).find? idrVEqfV | unreachable!
+              let rVEqfV := rVEqfVl.toExpr -- TODO create fvar with type HEq fV rV
+
+              let mut fType := eNewMajorType'
+
+              let mut r := rV
+              let mut f := fV
+
+              if majorIdx + 1 < recArgs.size then
+                for idx in [majorIdx + 1:recArgs.size] do
+                  let (domType, nfType', fType', fTypeEqfType'?) ← match (← meth.whnfPure 122 fType).toExpr with
+                    | .forallE _ d  b _=> pure (d, b, fType, none)
+                    | T =>
+                      let ret ← meth.whnf 126 T.toPExpr 
+                      match ret with
+                      | (.mk (.forallE _ d  b _), fTypeEqfType'?) =>
+                        pure (d, b, ret.1, fTypeEqfType'?)
+                      | _ =>
+                        let test ← meth.whnf 0 fType
+                        throw $ .other s!"unreachable (Reduce.lean) {test.1.toExpr.ctorName}"
+                  let arg := recArgs[idx]!.toPExpr
+                  let argType ← meth.inferTypePure 123 arg
+                  let (true, argTypeEqDomType?) ← meth.isDefEq 127 argType domType.toPExpr | unreachable!
+
+                  let f' ← meth.maybeCast 125 fTypeEqfType'? fType fType' f.toPExpr
+                  let arg' ← meth.maybeCast 124 argTypeEqDomType? argType domType.toPExpr arg
+
+                  fType := (nfType'.instantiate1 arg').toPExpr
+                  
+                  r := r.app arg
+                  f := f'.app arg'
+
+              _ ← meth.inferTypePure 5000 r.toPExpr -- sanity check TODO remove
+              _ ← meth.inferTypePure 6000 f.toPExpr -- sanity check TODO remove
+
+              let (.true, rEqf?) ← meth.isDefEq 128 r.toPExpr f.toPExpr | unreachable!
+
+              let newe := f.replaceFVar fV rhs -- TODO substitute in f: fV for rhs
+
+              let eEqeNewMajor? ← rEqf?.mapM (fun rEqf => do
+                let rEqf := rEqf.replaceFVars #[rV.toPExpr, fV.toPExpr] #[e', eNewMajor']
+                let rEqf := rEqf.replaceFVarE rVEqfV.toPExpr (.mk eEqeNewMajor') |>.run
+                assert! not (rEqf.toExpr.containsFVar' idrV)
+                assert! not (rEqf.toExpr.containsFVar' idfV)
+                _ ← meth.inferTypePure 8000 rEqf.toExpr.toPExpr -- sanity check TODO remove
+                pure rEqf
+                ) -- TODO substitute in rEqf?: fV for eNewMajor', rV for e', rVEqfV for eEqeNewMajor'
+
+              _ ← meth.inferTypePure 7000 newe.toPExpr -- sanity check TODO remove
+
+              assert! not (newe.containsFVar' idrV)
+              assert! not (newe.containsFVar' idfV)
+              return .some (newe.toPExpr, eEqeNewMajor?)
+  else
+    let newe := mkAppRange rhs (majorIdx + 1) recArgs.size recArgs |>.toPExpr
+    return .some (newe, none)
 
 end

@@ -788,6 +788,7 @@ def isDefEqProofIrrel' (t s tType sType : PExpr) (pt? : Option EExpr) (n : Nat) 
 def methsR : ExtMethodsR RecM := {
     meths with
     smartCast := smartCast
+    maybeCast := maybeCast
     isDefEqApp := fun t s m => isDefEqApp t s (targsEqsargs? := m)
     isDefEqApp' := fun t s m => isDefEqApp' t s (targsEqsargs? := m)
     isDefEqProofIrrel' := isDefEqProofIrrel' (n := 2) (useRfl := true) -- need to pass `useRfl := true` because of failure of transitivity (with K-like reduction)
