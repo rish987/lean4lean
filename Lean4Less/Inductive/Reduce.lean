@@ -244,13 +244,13 @@ def inductiveReduceRec [Monad m] [MonadWithReaderOf LocalContext m] [MonadLCtx m
                   let (domType, nfType', fType', fTypeEqfType'?) ← match (← meth.whnfPure 122 fType).toExpr with
                     | .forallE _ d  b _=> pure (d, b, fType, none)
                     | T =>
-                      let ret ← meth.whnf 126 T.toPExpr 
-                      match ret with
-                      | (.mk (.forallE _ d  b _), fTypeEqfType'?) =>
-                        pure (d, b, ret.1, fTypeEqfType'?)
-                      | _ =>
-                        let test ← meth.whnf 0 fType
-                        throw $ .other s!"unreachable (Reduce.lean) {test.1.toExpr.ctorName}"
+                      -- let ret ← meth.whnf 126 T.toPExpr 
+                      -- match ret with
+                      -- | (.mk (.forallE _ d  b _), fTypeEqfType'?) =>
+                      --   pure (d, b, ret.1, fTypeEqfType'?)
+                      -- | _ =>
+                        -- let test ← meth.whnf 0 fType
+                        throw $ .other s!"unreachable (Reduce.lean)\n{T}\n\n{eNewMajor'}\n\n{e'}"
                   let arg := recArgs[idx]!.toPExpr
                   let argType ← meth.inferTypePure 123 arg
                   let (true, argTypeEqDomType?) ← meth.isDefEq 127 argType domType.toPExpr | unreachable!
@@ -263,8 +263,8 @@ def inductiveReduceRec [Monad m] [MonadWithReaderOf LocalContext m] [MonadLCtx m
                   r := r.app arg
                   f := f'.app arg'
 
-              _ ← meth.inferTypePure 5000 r.toPExpr -- sanity check TODO remove
-              _ ← meth.inferTypePure 6000 f.toPExpr -- sanity check TODO remove
+              -- _ ← meth.inferTypePure 5000 r.toPExpr -- sanity check TODO remove
+              -- _ ← meth.inferTypePure 6000 f.toPExpr -- sanity check TODO remove
 
               let (.true, rEqf?) ← meth.isDefEq 128 r.toPExpr f.toPExpr | unreachable!
 
@@ -273,13 +273,13 @@ def inductiveReduceRec [Monad m] [MonadWithReaderOf LocalContext m] [MonadLCtx m
               let eEqeNewMajor? ← rEqf?.mapM (fun rEqf => do
                 let rEqf := rEqf.replaceFVars #[rV.toPExpr, fV.toPExpr] #[e', eNewMajor']
                 let rEqf := rEqf.replaceFVarE rVEqfV.toPExpr (.mk eEqeNewMajor') |>.run
-                assert! not (rEqf.toExpr.containsFVar' idrV)
-                assert! not (rEqf.toExpr.containsFVar' idfV)
-                _ ← meth.inferTypePure 8000 rEqf.toExpr.toPExpr -- sanity check TODO remove
+                -- assert! not (rEqf.toExpr.containsFVar' idrV)
+                -- assert! not (rEqf.toExpr.containsFVar' idfV)
+                -- _ ← meth.inferTypePure 8000 rEqf.toExpr.toPExpr -- sanity check TODO remove
                 pure rEqf
                 ) -- TODO substitute in rEqf?: fV for eNewMajor', rV for e', rVEqfV for eEqeNewMajor'
 
-              _ ← meth.inferTypePure 7000 newe.toPExpr -- sanity check TODO remove
+              -- _ ← meth.inferTypePure 7000 newe.toPExpr -- sanity check TODO remove
 
               assert! not (newe.containsFVar' idrV)
               assert! not (newe.containsFVar' idfV)

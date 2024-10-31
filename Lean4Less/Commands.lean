@@ -42,6 +42,7 @@ dependencies in the patched versions of their types/values.
 def patchConsts : Array Name := #[
 `L4L.eq_of_heq,
 `cast,
+`L4L.HEqRefl,
 `L4L.castHEq,
 `HEq,
 `HEq.symm,

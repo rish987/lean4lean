@@ -40,7 +40,7 @@ match fuel with
     let mut printedTrace := false
     let methPrint := false
     let methPrint := true
-    if methPrint && s.numCalls >= 1000 /- && not s.printedDbg -/ then -- TODO static variables?
+    if methPrint && ctx.callId == 532 /- && not s.printedDbg -/ then -- TODO static variables?
       if s.numCalls % 1 == 0 then
         printedTrace := true
         dbg_trace s!"calltrace {s.numCalls}: {ctx.callStack.map (·.1)}, {idx}, {ctx.callId}"
@@ -93,7 +93,7 @@ match fuel with
       -- dbg_trace s!"{s.numCalls}: {stack[9]!.2}, {stack.map (·.1)}"
 
     let traceId : Option Nat := none
-    -- let traceId := Option.some 5053
+    -- let traceId := Option.some 532
     try
       let ret ← withCallId s.numCalls traceId do
         withCallData idx s.numCalls d do 

@@ -455,8 +455,8 @@ def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : P
   termination_by (binDatas.size - 1) - idx
   loop 0 #[] #[] #[]
 
-def mkHRefl (lvl : Level) (T : PExpr) (t : PExpr) : RecM EExpr := do
-  pure $ .refl {u := lvl, A := T, a := t}
+def mkHRefl (n : Nat) (lvl : Level) (T : PExpr) (t : PExpr) : RecM EExpr := do
+  pure $ .refl {u := lvl, A := T, a := t, n}
 
 def isDefEqPure (n : Nat) (t s : PExpr) (fuel := 1000) : RecM Bool := do
   try
@@ -542,21 +542,22 @@ def isDefEqForall' (t s : PExpr) (numBinds : Nat) (f : Option EExpr → RecM (Op
         let u := ALvl
         let v := UaLvl
 
-        let UaEqVx := UaEqVx?.getD $ ← mkHRefl UaTypeLvl UaType Ua -- FIXME use special forall lemma variant here
+        let UaEqVx := UaEqVx?.getD $ ← mkHRefl 1 UaTypeLvl UaType Ua -- FIXME use special forall lemma variant here
         let (U, V) := ((Ua, a), (Vx, x))
 
         let extra ← if let .some (b, aEqb, bEqa, hAB?) := d? then
           let B := b.type.toPExpr
           if let some hAB := hAB? then
-            pure $ .AB {B, b, vaEqb := {aEqb, bEqa}, hAB}
+            pure $ .ABUV {B, b, vaEqb := {aEqb, bEqa}, hAB, V, UaEqVx}
           else -- (if explicit == true)
-            pure $ .ABApp {b, vaEqb := {aEqb, bEqa}}
+            unreachable!
+            -- pure $ .ABApp {b, vaEqb := {aEqb, bEqa}}
         else
           -- sanity check
           assert! explicit == false
-          pure .none
+          pure $ .UV {V, UaEqVx}
 
-        UaEqVx? := .some $ .forallE {u, v, A, a, U, V, UaEqVx, extra}
+        UaEqVx? := .some $ .forallE {u, v, A, a, U, extra}
 
       Ua := (← getLCtx).mkForall #[a.toExpr] Ua |>.toPExpr
       Vx := (← getLCtx).mkForall #[x.toExpr] Vx |>.toPExpr
@@ -698,18 +699,22 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
     let lvl ← getLvl tl.toPExpr tr.toPExpr
     mkCast'' nm tl tr p e prfVars prfVals lvl
 
-  let rec loop e tl tr (lamVars prfVars prfVals : Array Expr) p : RecM Expr := do
-    pure ()
-    match e, tl, tr, p with
-    | .lam n _ b bi, .forallE _ _ tbl .., .forallE _ tdr tbr .., .forallE forallData =>
-      let {A, a, UaEqVx, extra, u, ..} := forallData
+  let rec loop remLams e tl tr (lamVars prfVars prfVals : Array Expr) p : RecM Expr := do
+    match remLams, e, tl, tr, p with
+    | remLams' + 1, .lam n _ b bi, .forallE _ _ tbl .., .forallE _ tdr tbr .., .forallE forallData =>
+      let {A, a, extra, u, ..} := forallData
       let id := ⟨← mkId 5⟩
       withLCtx ((← getLCtx).mkLocalDecl id n tdr bi) do
+        let UaEqVx := 
+          match extra with
+          | .ABUV {UaEqVx, ..}
+          | .UV {UaEqVx, ..} => UaEqVx
+
         let v := .fvar id
 
         let (newPrfVars, newPrfVals, vCast) ←
           match extra with
-          | .AB {B, b, vaEqb, hAB} =>
+          | .ABUV {B, b, vaEqb, hAB, ..} =>
             let hBA ← appHEqSymm hAB
             let vCast ← mkCast'' `L4L.castHEq B.toExpr A.toExpr hBA v prfVars prfVals u
             let vCastEqv ← mkCast'' `L4L.castOrigHEq B.toExpr A.toExpr hBA v prfVars prfVals u
@@ -723,10 +728,11 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
         let b := b.instantiate1 vCast
         let tbl := tbl.instantiate1 vCast
         let tbr := tbr.instantiate1 v
-        loop b tbl tbr lamVars prfVars prfVals UaEqVx
-    | _, _, _, _ =>
+        loop remLams' b tbl tbr lamVars prfVars prfVals UaEqVx
+    | _, _, _, _, _ =>
       let cast ← mkCast' `L4L.castHEq tl tr p e prfVars prfVals
       pure $ (← getLCtx).mkLambda lamVars cast
+  termination_by remLams
 
   let tlEqtr? ← do
     pure ()
@@ -755,7 +761,9 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
   --   if not (← isDefEqPure 0 pT heq) then
   --     let (true, some tlEqtr) ← isDefEq (1000 + n) tl tr | unreachable!
   --     throw $ .other s!"cast equality does not have expected type"
-  pure $ (tlEqtr?, (← tlEqtr?.2.mapM (fun (p : EExpr) => do pure (← loop e.toExpr tl.toExpr tr.toExpr #[] #[] #[] p).toPExpr)).getD e)
+  pure $ (tlEqtr?, (← tlEqtr?.2.mapM (fun (p : EExpr) => do
+    let nLams := lamCount e
+    pure (← loop nLams e.toExpr tl.toExpr tr.toExpr #[] #[] #[] p).toPExpr)).getD e)
 
 def smartCast (n : Nat) (tl tr e : PExpr) (p? : Option EExpr := none) : RecM (Bool × PExpr) := do
   let ret ← try
@@ -775,7 +783,7 @@ def maybeCast (n : Nat) (p? : Option EExpr) (typLhs typRhs e : PExpr) : RecM PEx
 def isDefEqProofIrrel' (t s tType sType : PExpr) (pt? : Option EExpr) (n : Nat) (useRfl := false) : RecM (Option EExpr) := do
   if ← isDefEqPure (2000 + n) t s 15 then
     if useRfl then
-      return .some $ .refl {u := 0, A := tType, a := t}
+      return .some $ .refl {u := 0, A := tType, a := t, n := 50}
     else
       return none
   else
@@ -1198,8 +1206,8 @@ def reduceBinNatOp (op : Name) (f : Nat → Nat → Nat) (a b : PExpr) : RecM (O
   let some v2 := natLitExt? b' | return none
   let nat := (Expr.const `Nat []).toPExpr
   let mut appEqapp'? ← if pa?.isSome || pb?.isSome then
-      let pa ← pa?.getDM (mkHRefl (.succ .zero) nat a')
-      let pb ← pb?.getDM (mkHRefl (.succ .zero) nat b')
+      let pa ← pa?.getDM (mkHRefl 2 (.succ .zero) nat a')
+      let pb ← pb?.getDM (mkHRefl 3 (.succ .zero) nat b')
       let fab := Lean.mkAppN (.const op []) #[a, b] |>.toPExpr
       let fab' := Lean.mkAppN (.const op []) #[a', b'] |>.toPExpr
       pure $ .some $ Lean.mkAppN (← getConst `L4L.appHEqBinNatFn []) #[nat, nat, .const op [], a, a', b, b', pa, pb] |>.toEExpr (.succ .zero) nat nat fab fab'
@@ -1230,8 +1238,8 @@ def reduceBinNatPred (op : Name) (f : Nat → Nat → Bool) (a b : PExpr) : RecM
   let some v2 := natLitExt? b' | return none
   let bool := (Expr.const `Bool []).toPExpr
   let ret? ← if pa?.isSome || pb?.isSome then
-      let pa ← pa?.getDM (mkHRefl (.succ .zero) (Expr.const `Bool []).toPExpr a')
-      let pb ← pb?.getDM (mkHRefl (.succ .zero) (Expr.const `Bool []).toPExpr b')
+      let pa ← pa?.getDM (mkHRefl 4 (.succ .zero) (Expr.const `Bool []).toPExpr a')
+      let pb ← pb?.getDM (mkHRefl 5 (.succ .zero) (Expr.const `Bool []).toPExpr b')
       let fab := Lean.mkAppN (.const op []) #[a, b] |>.toPExpr
       let fab' := Lean.mkAppN (.const op []) #[a', b'] |>.toPExpr
       pure $ .some $ Lean.mkAppN (← getConst `L4L.appHEqBinNatFn []) #[.const `Nat [], .const `Bool [], .const op [], a, a', b, b', pa, pb] |>.toEExpr (.succ .zero) bool bool fab fab'
@@ -1309,7 +1317,7 @@ def isDefEqLambda (t s : PExpr) : RecB := do
         let (UaLvl, Ua) ← getTypeLevel fa
         let v := UaLvl
         let Vx ← inferTypePure 41 gx
-        let faEqgx ← faEqgx?.getDM $ mkHRefl UaLvl Ua fa
+        let faEqgx ← faEqgx?.getDM $ mkHRefl 6 UaLvl Ua fa
         let (U, V) := ((Ua, a), (Vx, x))
         let extra ← if let some (b, aEqb, bEqa, hAB?) := d? then
           let hAB := hAB?.get!
@@ -1432,7 +1440,6 @@ def reduceRecursor (e : PExpr) (cheapK : Bool) : RecM (Option (PExpr × Option E
 
 @[inherit_doc whnfCore]
 private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecEE := do
-  ttrace s!"DBG[4]: TypeChecker.lean:1791 (after def isDefEqCore (t s : PExpr) : RecB := …)"
   -- TODO whnfPure optimization
   let e := e'.toPExpr
   match e' with
@@ -1440,22 +1447,19 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
   | .mdata _ e => return ← _whnfCore' e cheapK cheapProj
   | .fvar id => if !isLetFVar (← getLCtx) id then return (e, none)
   | .app .. | .letE .. | .proj .. => pure ()
-  -- if let some r := (← get).whnfCoreCache.get? e then -- FIXME important to optimize this -- FIXME should this depend on cheapK?
-  --   ttrace s!"DBG[5]: TypeChecker.lean:1426 (after if let some r := (← get).whnfCoreCache…)"
-  --   return r
+  if let some r := (← get).whnfCoreCache.get? e then -- FIXME important to optimize this -- FIXME should this depend on cheapK?
+    return r
   let rec save r := do
     if !cheapK && !cheapProj then
       modify fun s => { s with whnfCoreCache := s.whnfCoreCache.insert e r }
       if cheapK && r.2.isNone then
         modify fun s => { s with whnfCoreCache := s.whnfCoreCache.insert e r }
     pure r
-  ttrace s!"DBG[6]: TypeChecker.lean:1434 (after pure r)"
   let ret ← match e' with
   | .bvar .. | .sort .. | .mvar .. | .forallE .. | .const .. | .lam .. | .lit ..
   | .mdata .. => throw $ .other "unreachable 9"
   | .fvar _ => return ← whnfFVar e cheapK cheapProj
   | .app .. => -- beta-reduce at the head as much as possible, apply any remaining `rargs` to the resulting expression, and re-run `whnfCore`
-    ttrace s!"DBG[7]: TypeChecker.lean:1440"
     e'.withAppRev fun f0 rargs => do
     let f0 := f0.toPExpr
     -- the head may still be a let variable/binding, projection, or mdata-wrapped expression
@@ -1486,7 +1490,6 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
           pure (frargs, rargs, eEqfrargs'?)
       else
         pure (frargs, rargs, none)
-    ttrace s!"DBG[8]: TypeChecker.lean:1471 (after pure (frargs, rargs, none))"
 
 
     if let (.lam _ _ body _) := f.toExpr then
@@ -1518,14 +1521,11 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
   | .letE _ _ val body _ =>
     save <|← whnfCore 57 (body.instantiate1 val).toPExpr cheapK cheapProj
   | .proj typeName idx s =>
-    ttrace s!"DBG[9]: TypeChecker.lean:1503 (after | .proj typeName idx s =>)"
     if let some (m, eEqm?) ← reduceProj typeName idx s.toPExpr cheapK cheapProj then
-      ttrace s!"DBG[2]: TypeChecker.lean:1501 (after if let some (m, eEqm?) ← reduceProj ty…)"
       let (r', mEqr'?) ← whnfCore 58 m cheapK cheapProj
       let eEqr'? ← appHEqTrans? e m r' eEqm? mEqr'?
       save (r', eEqr'?)
     else
-      ttrace s!"DBG[3]: TypeChecker.lean:1506 (after else)"
       save (e, none)
   -- let (eNew, p?) := ret
   -- if p?.isNone then
@@ -1558,6 +1558,7 @@ private def _whnf' (e' : Expr) (cheapK := false) : RecEE := do
   | 0 => throw .deterministicTimeout
   | fuel+1 => do
     let env ← getEnv
+    ttrace s!"DBG[2]: TypeChecker.lean:1552 {fuel}"
     let (ler, leEqler?) ← whnfCore' le (cheapK := cheapK)
     let eEqler? ← appHEqTrans? e le ler eEqle? leEqler?
     if let some (ler', lerEqler'?) ← reduceNative env ler then return (ler', ← appHEqTrans? e ler ler' eEqler? lerEqler'?)
@@ -1819,7 +1820,6 @@ def isDefEqCore' (t s : PExpr) : RecB := do
     let (t, p?) ← whnf 75 t
     if t.toExpr.isConstOf ``true then return (true, p?)
 
-  ttrace s!"DBG[11]: TypeChecker.lean:1800 {← numCalls}"
   let (tn, tEqtn?) ← whnfCore 76 t (cheapK := true) (cheapProj := true)
   let (sn, sEqsn?) ← whnfCore 77 s (cheapK := true) (cheapProj := true)
 
@@ -1830,9 +1830,9 @@ def isDefEqCore' (t s : PExpr) : RecB := do
 
   if (tn == t && sn == s) then
     if !(unsafe ptrEq tn t) then
-      dbg_trace s!"DBG[7]: {← callId}, {tn}"
+      dbg_trace s!"ptrEq mismatch 3"
     if !(unsafe ptrEq sn s) then
-      dbg_trace s!"DBG[8]: {sn}"
+      dbg_trace s!"ptrEq mismatch 4"
     pure ()
   else
     let (r, tnEqsn?) ← quickIsDefEq 89 tn sn
@@ -1867,7 +1867,7 @@ def isDefEqCore' (t s : PExpr) : RecB := do
   | .proj tTypeName ti te, .proj _ si se =>
     if ti == si then
       if !(unsafe ptrEq ti si) then
-        dbg_trace s!"DBG[5]: TypeChecker.lean:1837 (after if !(unsafe ptrEq ti si) then)"
+        dbg_trace s!"ptrEq mismatch 5"
       -- optimized by above functions using `cheapProj = true`
       let (r, teEqse?) ← isDefEq 78 te.toPExpr se.toPExpr
 
@@ -1895,9 +1895,9 @@ def isDefEqCore' (t s : PExpr) : RecB := do
   let (sn'', sn'Eqsn''?) ← whnfCore 80 sn'
   if (tn'' == tn' && sn'' == sn') then
     if !(unsafe ptrEq tn'' tn') then
-      dbg_trace s!"DBG[9]: TypeChecker.lean:1875 (after dbg_trace s!DBG[7]: TypeChecker.lean:180…)"
+      dbg_trace s!"ptrEq mismatch 1"
     if !(unsafe ptrEq sn'' sn') then
-      dbg_trace s!"DBG[10]: TypeChecker.lean:1877 (after dbg_trace s!DBG[8]: TypeChecker.lean:180…)"
+      dbg_trace s!"ptrEq mismatch 2"
     pure ()
   else
     -- if projection reduced, need to re-run (as we may not have a WHNF)

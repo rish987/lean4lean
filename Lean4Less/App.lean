@@ -89,7 +89,7 @@ def mkAppEqProof? (aVars bVars : Array LocalDecl) (us vs : Array Level) (Uas Vbs
           let dep := Ua.containsFVar' aVar || Vb.containsFVar' bVar
 
           if UaEqVb?.isSome || dep then
-            let UaEqVb ← UaEqVb?.getDM $ meth.mkHRefl v.succ (Expr.sort v).toPExpr Ua
+            let UaEqVb ← UaEqVb?.getDM $ meth.mkHRefl 200 v.succ (Expr.sort v).toPExpr Ua
             let hUV := {a := aVar, UaEqVb, extra := .some {b := bVar, vaEqb := {aEqb := vaEqb, bEqa := vbEqa}}}
             pure $ .ABUV {B, hAB, V, hUV, g, fEqg, b, aEqb}
           else

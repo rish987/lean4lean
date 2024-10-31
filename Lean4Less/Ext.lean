@@ -71,7 +71,7 @@ structure ExtMethods (m : Type → Type u) where
   inferTypePure : Nat → PExpr → m PExpr
   inferType : Nat → Expr → m (PExpr × Option PExpr)
   withPure : {T : Type} → m T → m T
-  mkHRefl : Level → PExpr → PExpr → m EExpr
+  mkHRefl : Nat → Level → PExpr → PExpr → m EExpr
   getTypeLevel : PExpr → m (Level × PExpr)
   ensureSortCorePure : PExpr → Expr → m PExpr
   appPrfIrrelHEq : PExpr → PExpr → EExpr → PExpr → PExpr → m EExpr
