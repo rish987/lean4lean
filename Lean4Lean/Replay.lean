@@ -221,7 +221,10 @@ partial def replayConstant (name : Name) (addDeclFn' : Declaration → M Unit) (
     -- dbg_trace s!"Processing deps: {name}"
 
     let some ci := (← read).newConstants[name]? | unreachable!
-    replayConstants ci.getUsedConstants addDeclFn' printProgress? (op := op)
+    let mut deps := ci.getUsedConstants
+    if let .quotInfo _ := ci then
+      deps := deps.insert `Eq
+    replayConstants deps addDeclFn' printProgress? (op := op)
     -- Check that this name is still pending: a mutual block may have taken care of it.
     if (← get).pending.contains name then
       match ci with

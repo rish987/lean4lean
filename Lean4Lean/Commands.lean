@@ -71,7 +71,6 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn :
       let errConsts := errConsts.insert const
       pure (modEnv, skipConsts, errConsts, onlyConstsToTrans)
 
-
   for const in initConsts do 
     (modEnv, skipConsts, errConsts, onlyConstsToTrans) ← loop const modEnv skipConsts errConsts onlyConstsToTrans false
   for const in consts.toList do 
