@@ -56,10 +56,11 @@ def patchConsts : Array Name := #[
 
 `L4L.castOrigHEq,
 
-`L4L.forallHEq,
-`L4L.forallHEq',
+`L4L.forallHEqUV,
+`L4L.forallHEqUV',
 `L4L.forallHEqAB,
-`L4L.forallHEqAB',
+`L4L.forallHEqABUV,
+`L4L.forallHEqABUV',
 `L4L.appArgHEq,
 `L4L.appArgHEq',
 `L4L.appFunHEq,

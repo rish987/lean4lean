@@ -159,6 +159,7 @@ def inductiveReduceRec [Monad m] [MonadWithReaderOf LocalContext m] [MonadLCtx m
           let idx := (info.numMotives + info.numMinors) - n + info.numParams
           let origMotiveMinor := recArgs[idx]!.toPExpr
           let (true, newMotiveMinor) ← meth.smartCast 101 origDom.toPExpr dom.toPExpr origMotiveMinor | unreachable!
+          _ ← meth.inferTypePure 5000 newMotiveMinor -- sanity check TODO remove
           let (true, origMotiveMinorEqnewMotiveMinor?) ← meth.isDefEq 120 origMotiveMinor newMotiveMinor | unreachable!
           let ret := ret.push (origMotiveMinorEqnewMotiveMinor?.map fun p => (origMotiveMinor, newMotiveMinor, p))
           loop2 (body.instantiate1 newMotiveMinor) (origBody.instantiate1 origMotiveMinor) m ret
