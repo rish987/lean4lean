@@ -17,10 +17,9 @@ usedProofIrrelevance : Bool := false
 usedKLikeReduction : Bool := false
 maxRecursionDepth : Nat := 0
 
-def defngen : NameGenerator := { namePrefix := `_kernel_fresh, idx := 0 }
-
 structure TypeChecker.State where
-  ngen : NameGenerator := defngen
+  nid : Nat := 0
+  fvarTypeToReusedNamePrefix : Std.HashMap Expr Name := {}
   inferTypeI : InferCache := {}
   inferTypeC : InferCache := {}
   data : Data := {}
@@ -78,12 +77,12 @@ namespace TypeChecker
 abbrev M := ReaderT Context <| StateT State <| Except KernelException
 
 def M.run (env : Environment) (x : M α)
-   (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) (ngen : NameGenerator := defngen) (trace := false) (state : State := {}): Except KernelException (α × State) := do
-  x {env, safety, lctx, opts, lparams, trace} |>.run {state with ngen}
+   (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) (nid : Nat := 0) (fvarTypeToReusedNamePrefix : Std.HashMap Expr Name := {}) (trace := false) (state : State := {}) : Except KernelException (α × State) := do
+  x {env, safety, lctx, opts, lparams, trace} |>.run {state with nid, fvarTypeToReusedNamePrefix}
 
 def M.run' (env : Environment) (x : M α)
-   (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) (ngen : NameGenerator := defngen) (trace := false) : Except KernelException α := do
-  x { env, safety, lctx, opts, lparams, trace} |>.run' {ngen}
+   (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) (nid : Nat := 0) (fvarTypeToReusedNamePrefix : Std.HashMap Expr Name := {}) (trace := false) : Except KernelException α := do
+  x { env, safety, lctx, opts, lparams, trace} |>.run' {nid, fvarTypeToReusedNamePrefix}
 
 instance : MonadEnv M where
   getEnv := return (← read).env
@@ -92,12 +91,24 @@ instance : MonadEnv M where
 instance : MonadLCtx M where
   getLCtx := return (← read).lctx
 
-instance [Monad m] : MonadNameGenerator (StateT State m) where
-  getNGen := return (← get).ngen
-  setNGen ngen := modify fun s => { s with ngen }
-
 instance (priority := low) : MonadWithReaderOf LocalContext M where
   withReader f := withReader fun s => { s with lctx := f s.lctx }
+
+def mkNewId : M Name := do
+  let nid := (← get).nid
+  modify fun st => { st with nid := st.nid + 1 }
+  pure $ .mkNum `_kernel_fresh nid
+
+def mkId (dom : Expr) : M Name := do
+  if let some np := (← get).fvarTypeToReusedNamePrefix[dom]? then
+    let mut count := 0
+    while (← getLCtx).findFVar? (Expr.fvar $ .mk (Name.mkNum np count)) |>.isSome do
+      count := count + 1
+    pure $ Name.mkNum np count
+  else
+    let np ← mkNewId
+    modify fun st => { st with fvarTypeToReusedNamePrefix := st.fvarTypeToReusedNamePrefix.insert dom np }
+    pure $ Name.mkNum np 0
 
 structure Methods where
   isDefEqCore : Nat → Expr → Expr → M Bool
@@ -195,7 +206,7 @@ def inferLambda (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] e where
   loop fvars : Expr → RecM Expr
   | .lam name dom body bi => do
     let d := dom.instantiateRev fvars
-    let id := ⟨← mkFreshId⟩
+    let id := ⟨← mkId d⟩
     withLCtx ((← getLCtx).mkLocalDecl id name d bi) do
       let fvars := fvars.push (.fvar id)
       if !inferOnly then
@@ -212,7 +223,7 @@ def inferForall (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] #[] e wher
     let d := dom.instantiateRev fvars
     let t1 ← ensureSortCore (← inferType 5 d inferOnly) d
     let us := us.push t1.sortLevel!
-    let id := ⟨← mkFreshId⟩
+    let id := ⟨← mkId d⟩
     withLCtx ((← getLCtx).mkLocalDecl id name d bi) do
       let fvars := fvars.push (.fvar id)
       loop fvars us body
@@ -260,7 +271,7 @@ def inferLet (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] #[] e where
   | .letE name type val body _ => do
     let type := type.instantiateRev fvars
     let val := val.instantiateRev fvars
-    let id := ⟨← mkFreshId⟩
+    let id := ⟨← mkNewId⟩
     withLCtx ((← getLCtx).mkLetDecl id name type val) do
       let fvars := fvars.push (.fvar id)
       let vals := vals.push val
@@ -488,10 +499,7 @@ def whnfCore' (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr :=
         pure e
     else
       let r := f.mkAppRevRange 0 rargs.size rargs
-      if let some r ← reduceRecursor r cheapRec cheapProj then
-        whnfCore r cheapRec cheapProj
-      else
-        pure r
+      save <| ← whnfCore r cheapRec cheapProj
   | .letE _ _ val body _ =>
     save <|← whnfCore (body.instantiate1 val) cheapRec cheapProj
   | .proj _ idx s =>
@@ -559,6 +567,7 @@ def reduceNat (e : Expr) : RecM (Option Expr) := do
     if f == ``Nat.mul then return ← reduceBinNatOp Nat.mul a b
     if f == ``Nat.pow then return ← reduceBinNatOp Nat.pow a b
     -- if f == ``Nat.gcd then
+    --   dbg_trace s!"DBG[1]: TypeChecker.lean:558 {rawNatLitExt? (← whnf 25 a)} {rawNatLitExt? (← whnf 25 b)}"
     --   return ← reduceBinNatOp Nat.gcd a b
     if f == ``Nat.mod then return ← reduceBinNatOp Nat.mod a b
     if f == ``Nat.div then return ← reduceBinNatOp Nat.div a b
@@ -603,7 +612,7 @@ def isDefEqLambda (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
     else pure none
     if tBody.hasLooseBVars || sBody.hasLooseBVars then
       let sType := sType.getD (sDom.instantiateRev subst)
-      let id := ⟨← mkFreshId⟩
+      let id := ⟨← mkId sType⟩
       withLCtx ((← getLCtx).mkLocalDecl id name sType bi) do
         isDefEqLambda tBody sBody (subst.push (.fvar id))
     else
@@ -621,7 +630,7 @@ def isDefEqForall (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
     else pure none
     if tBody.hasLooseBVars || sBody.hasLooseBVars then
       let sType := sType.getD (sDom.instantiateRev subst)
-      let id := ⟨← mkFreshId⟩
+      let id := ⟨← mkId sType⟩
       withLCtx ((← getLCtx).mkLocalDecl id name sType bi) do
         isDefEqForall tBody sBody (subst.push (.fvar id))
     else
@@ -629,9 +638,9 @@ def isDefEqForall (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
   | t, s => isDefEq 59 (t.instantiateRev subst) (s.instantiateRev subst)
 
 def quickIsDefEq (t s : Expr) (useHash := false) : RecM LBool := do
-  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 (eqvManager := m)) =>
+  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 a9 (eqvManager := m)) =>
     let (b, m) := m.isEquiv useHash t s
-    (b, .mk a1 a2 a3 a4 a5 a6 a7 a8 (eqvManager := m))
+    (b, .mk a1 a2 a3 a4 a5 a6 a7 a8 a9 (eqvManager := m))
   then return .true
   match t, s with
   | .lam .., .lam .. => toLBoolM <| isDefEqLambda t s
@@ -667,11 +676,12 @@ def tryEtaStructCore (t s : Expr) : RecM Bool := do
   unless isStructureLike env fInfo.induct do return false
   unless ← isDefEq 63 (← inferType 32 t) (← inferType 33 s) do return false
   let args := s.getAppArgs
-  let tType ← inferType 73 t
   for h : i in [fInfo.numParams:args.size] do
     let idx := (i - fInfo.numParams)
     if not (← readThe Context).opts.proofIrrelevance then
-      if !(← isValidProj fInfo.induct idx t tType) then return false -- TODO would combining these conditions break the short-circuiting of the evaluation of `isValidProj`?
+      let tType ← inferType 73 t
+      if !(← isValidProj fInfo.induct idx t tType) then
+        return false -- TODO would combining these conditions break the short-circuiting of the evaluation of `isValidProj`?
     unless ← isDefEq 64 (.proj fInfo.induct idx t) (args[i]'h.2) do return false
   return true
 
