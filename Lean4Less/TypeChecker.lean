@@ -22,7 +22,8 @@ abbrev InferCache := Std.HashMap Expr (PExpr × Option PExpr)
 abbrev InferCacheP := Std.HashMap Expr (PExpr)
 
 structure TypeChecker.State where
-  ngen : NameGenerator := { namePrefix := `_kernel_fresh, idx := 0 }
+  nid : Nat := 0
+  fvarTypeToReusedNamePrefix : Std.HashMap Expr Name := {}
   inferTypeI : InferCacheP := {}
   inferTypeC : InferCache := {}
   whnfCoreCache : Std.HashMap PExpr (PExpr × Option EExpr) := {}
@@ -117,10 +118,6 @@ instance : MonadEnv M where
 instance : MonadLCtx M where
   getLCtx := return (← get).lctx
 
-instance [Monad m] : MonadNameGenerator (StateT State m) where
-  getNGen := return (← get).ngen
-  setNGen ngen := modify fun s => { s with ngen }
-
 instance (priority := low) : MonadWithReaderOf LocalContext M where
   withReader f := fun x => do
     let sOrig ← get
@@ -180,37 +177,52 @@ def callId : RecM Nat := do
 def numCalls : RecM Nat := do
   pure (← get).numCalls
 
-def mkId (n : Nat) : RecM Name := do
-  let id ← mkFreshId
-  -- if id == "_kernel_fresh.39".toName then
-  -- if id == "_kernel_fresh.40".toName then
-  -- if id == "_kernel_fresh.41".toName then
-  -- if id == "_kernel_fresh.42".toName then
-  -- else if id == "_kernel_fresh.877".toName then
+def mkIdNew (n : Nat) : RecM Name := do
+  let nid := (← get).nid
+  let fid := .mkNum `_kernel_fresh nid
+  modify fun st => { st with nid := st.nid + 1, fvarRegistry := st.fvarRegistry.insert fid n}
+  pure fid
+
+def mkId' (n : Nat) (lctx : LocalContext) (dom : Expr) : RecM Name := do
+  let id ← if let some np := (← get).fvarTypeToReusedNamePrefix[dom]? then
+    let mut count := 0
+    while lctx.findFVar? (Expr.fvar $ .mk (Name.mkNum np count)) |>.isSome do
+      count := count + 1
+    pure $ Name.mkNum np count
+  else
+    let np ← mkIdNew n
+    modify fun st => { st with fvarTypeToReusedNamePrefix := st.fvarTypeToReusedNamePrefix.insert dom np }
+    pure $ Name.mkNum np 0
   modify fun st => { st with fvarRegistry := st.fvarRegistry.insert id n }
   pure id
+  -- mkIdNew n
+
+def mkId (n : Nat) (dom : Expr) : RecM Name := do
+  mkId' n (← getLCtx) dom
 
 def runLeanMinus (M : Lean.TypeChecker.M T) : RecM T := do
   let trace := (← readThe Context).L4LTrace && (← shouldTrace)
-  let (ret, newState) ← Lean.TypeChecker.M.run (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := false, proofIrrelevance := false}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams) (ngen := (← get).ngen) (state := (← get).leanMinusState) (trace := trace) M
-  modify fun s => {s with leanMinusState := newState, ngen := newState.ngen}
+  let (ret, newState) ← Lean.TypeChecker.M.run (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := false, proofIrrelevance := false}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams)
+    (nid := (← get).nid) (fvarTypeToReusedNamePrefix := (← get).fvarTypeToReusedNamePrefix) (state := (← get).leanMinusState) (trace := trace) M
+  modify fun s => {s with leanMinusState := newState, nid := newState.nid, fvarTypeToReusedNamePrefix := newState.fvarTypeToReusedNamePrefix}
   pure ret
 
 def runLeanMinusRecM (M : Lean.TypeChecker.RecM T) : RecM T := do
   let trace := (← readThe Context).L4LTrace && (← shouldTrace)
-  let (ret, newState) ← Lean.TypeChecker.M.run (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := false, proofIrrelevance := false}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams) (ngen := (← get).ngen) (state := (← get).leanMinusState) (trace := trace)
+  let (ret, newState) ← Lean.TypeChecker.M.run (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := false, proofIrrelevance := false}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams)
+    (nid := (← get).nid) (fvarTypeToReusedNamePrefix := (← get).fvarTypeToReusedNamePrefix) (state := (← get).leanMinusState) (trace := trace)
     M.run
-  modify fun s => {s with leanMinusState := newState, ngen := newState.ngen}
+  modify fun s => {s with leanMinusState := newState, nid := newState.nid, fvarTypeToReusedNamePrefix := newState.fvarTypeToReusedNamePrefix}
   pure ret
 
 def runLeanRecM (M : Lean.TypeChecker.RecM T) : RecM T := do
   let trace := (← readThe Context).L4LTrace && (← shouldTrace)
-  let (ret, _) ← Lean.TypeChecker.M.run (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := true, proofIrrelevance := true}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams) (ngen := (← get).ngen) (trace := trace)
+  let (ret, _) ← Lean.TypeChecker.M.run (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := true, proofIrrelevance := true}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams) (nid := (← get).nid) (trace := trace)
     M.run
   pure ret
 
 -- def runLean (M : Lean.TypeChecker.M T) : RecM T := do
---   Lean.TypeChecker.M.run' (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := true, proofIrrelevance := true}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams) (ngen := (← get).ngen) M
+--   Lean.TypeChecker.M.run' (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := true, proofIrrelevance := true}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams) (nid := (← get).nid) M
 
 inductive ReductionStatus where
   | continue (nltn nlsn : PExpr) (pltnEqnltn? plsnEqnlsn? : Option EExpr)
@@ -415,7 +427,7 @@ def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : P
     else pure none
     let sort ← inferTypePure 5 tDom
     let .sort lvl := (← ensureSortCorePure sort tDom).toExpr | throw $ .other "unreachable 5"
-    let idt := ⟨← mkId 1⟩
+    let idt := ⟨← mkId 1 tDom⟩
     withLCtx ((← getLCtx).mkLocalDecl idt tName tDom tBi) do
       let some tvar := (← getLCtx).find? idt | unreachable!
       let tvars := tvars.push tvar
@@ -436,14 +448,14 @@ def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : P
           pure (true, ret) -- FIXME can iterate backwards instead of reversing lists?
 
       if p?.isSome then
-        let ids := ⟨← mkId 2⟩
+        let ids := ⟨← mkId 2 sDom⟩
         withLCtx ((← getLCtx).mkLocalDecl ids sName sDom sBi) do
           let some svar := (← getLCtx).find? ids | unreachable!
           let teqsType := mkAppN (.const `HEq [lvl]) #[tDom, tvar.toExpr, sDom, svar.toExpr]
           let seqtType := mkAppN (.const `HEq [lvl]) #[sDom, svar.toExpr, tDom, tvar.toExpr]
-          let idtEqs := ⟨← mkId 3⟩
-          let idsEqt := ⟨← mkId 4⟩
+          let idtEqs := ⟨← mkId 3 teqsType⟩
           withLCtx ((← getLCtx).mkLocalDecl idtEqs default teqsType default) do
+            let idsEqt := ⟨← mkId 4 seqtType⟩
             withLCtx ((← getLCtx).mkLocalDecl idsEqt default seqtType default) do
               let some vtEqs := (← getLCtx).find? idtEqs | unreachable!
               let some vsEqt := (← getLCtx).find? idsEqt | unreachable!
@@ -494,7 +506,9 @@ def meths : ExtMethods RecM := {
     isDefEqPure := isDefEqPure
     isDefEqLean := isDefEqLean
     whnf  := whnf
-    mkId  := mkId
+    mkIdNew  := mkIdNew
+    mkId  := fun n d => mkIdNew n
+    mkId'  := mkId'
     whnfPure := whnfPure
     mkHRefl := mkHRefl
     getTypeLevel := getTypeLevel
@@ -587,9 +601,9 @@ def alignForAll (numBinds : Nat) (ltl ltr : Expr) : RecM (Expr × Expr × Nat) :
   | numBinds' + 1 => do
     match (← whnfPure 11 ltl.toPExpr).toExpr, (← whnfPure 12 ltr.toPExpr).toExpr with
     | .forallE nl tdl tbl bil, .forallE nr tdr tbr bir => do
-      let idl := ⟨← mkId 6⟩
-      let idr := ⟨← mkId 7⟩
+      let idl := ⟨← mkId 6 tdl⟩
       withLCtx ((← getLCtx).mkLocalDecl idl nl tdl bil) do
+        let idr := ⟨← mkId 7 tdr⟩
         withLCtx ((← getLCtx).mkLocalDecl idr nr tdr bir) do
           let ntbl := tbl.instantiate1 (.fvar idl)
           let ntbr := tbr.instantiate1 (.fvar idr)
@@ -714,7 +728,7 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
     match remLams, e, tl, tr, p with
     | remLams' + 1, .lam n _ b bi, .forallE _ _ tbl .., .forallE _ tdr tbr .., .forallE forallData =>
       let {A, a, extra, u, ..} := forallData
-      let id := ⟨← mkId 5⟩
+      let id := ⟨← mkId 5 tdr⟩
       withLCtx ((← getLCtx).mkLocalDecl id n tdr bi) do
         let (UaEqVx? : Option EExpr) := 
           match extra with
@@ -829,7 +843,7 @@ def inferLambda (e : Expr) (dbg := false) : RecPE := loop #[] false e where
     let (sort', p?) ← ensureSortCore sort d
     let d' ← maybeCast 20 p? sort sort' (d'?.getD d.toPExpr)
 
-    let id := ⟨← mkId 8⟩
+    let id := ⟨← mkId 8 d'⟩
     withLCtx ((← getLCtx).mkLocalDecl id name d' bi) do
       let fvars := fvars.push (.fvar id)
       loop fvars (domPatched || d'?.isSome || p?.isSome) body
@@ -864,7 +878,7 @@ def inferForall (e : Expr) : RecPE := loop #[] #[] false e where
     let d' ← maybeCast 22 p? sort sort' (d'?.getD d.toPExpr)
 
     let us := us.push lvl
-    let id := ⟨← mkId 9⟩
+    let id := ⟨← mkId 9 d'⟩
     withLCtx ((← getLCtx).mkLocalDecl id name d' bi) do
       let fvars := fvars.push (.fvar id)
       loop fvars us (domPatched || d'?.isSome || p?.isSome) body
@@ -929,7 +943,7 @@ def inferLet (e : Expr) : RecPE := loop #[] #[] false e where
     let val' := val'?.getD val.toPExpr
     let ((true, pVal?), valC') ← smartCast' valType type' val' 17 |
       throw <| .letTypeMismatch (← getEnv) (← getLCtx) name valType type'
-    let id := ⟨← mkId 10⟩
+    let id := ⟨← mkIdNew 10⟩
     withLCtx ((← getLCtx).mkLetDecl id name type' valC') do
       let fvars := fvars.push (.fvar id)
       let vals := vals.push valC'
@@ -1107,7 +1121,7 @@ def appProjThm? (structName : Name) (projIdx : Nat) (struct structN : PExpr) (st
     let rec loop remType (paramVars : Array Expr) n := do
       match (← whnfPure 34 remType.toPExpr).toExpr, n with
       | .forallE n d b i, m + 1 =>
-        let idr := ⟨← mkId 11⟩
+        let idr := ⟨← mkId 11 d⟩
         withLCtx ((← getLCtx).mkLocalDecl idr n d i) do
           let rVar := (.fvar idr)
           let remCtorType := b.instantiate1 rVar
@@ -1115,7 +1129,7 @@ def appProjThm? (structName : Name) (projIdx : Nat) (struct structN : PExpr) (st
           loop remCtorType paramVars m
       | _, 0 =>
         let structType := Lean.mkAppN structTypeC paramVars
-        let ids := ⟨← mkId 12⟩
+        let ids := ⟨← mkId 12 structType⟩
         withLCtx ((← getLCtx).mkLocalDecl ids default structType default) do
           let s := Expr.fvar ids
 
@@ -1365,9 +1379,9 @@ Otherwise, defers to the calling function.
 -/
 def quickIsDefEq' (t s : PExpr) (useHash := false) : RecLB := do
   -- optimization for terms that are already α-equivalent
-  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 (eqvManager := m)) => -- TODO why do I have to list these?
+  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 (eqvManager := m)) => -- TODO why do I have to list these?
     let (b, m) := m.isEquiv useHash t s
-    (b, .mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 (eqvManager := m))
+    (b, .mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 (eqvManager := m))
   then
     return (.true, none)
   let res : Option (Bool × PExpr) ← match t.toExpr, s.toExpr with
@@ -1846,9 +1860,11 @@ def isDefEqCore' (t s : PExpr) : RecM (Bool × (Option EExpr)) := do
 
   if (tn == t && sn == s) then
     if !(unsafe ptrEq tn t) then
-      dbg_trace s!"ptrEq mismatch 3"
+      -- dbg_trace s!"ptrEq mismatch 3"
+      pure ()
     if !(unsafe ptrEq sn s) then
-      dbg_trace s!"ptrEq mismatch 4"
+      -- dbg_trace s!"ptrEq mismatch 4"
+      pure ()
     pure ()
   else
     let (r, tnEqsn?) ← quickIsDefEq 89 tn sn
@@ -1883,7 +1899,8 @@ def isDefEqCore' (t s : PExpr) : RecM (Bool × (Option EExpr)) := do
   | .proj tTypeName ti te, .proj _ si se =>
     if ti == si then
       if !(unsafe ptrEq ti si) then
-        dbg_trace s!"ptrEq mismatch 5"
+        -- dbg_trace s!"ptrEq mismatch 5"
+        pure ()
       -- optimized by above functions using `cheapProj = true`
       let (r, teEqse?) ← isDefEq 78 te.toPExpr se.toPExpr
 
@@ -1911,9 +1928,11 @@ def isDefEqCore' (t s : PExpr) : RecM (Bool × (Option EExpr)) := do
   let (sn'', sn'Eqsn''?) ← whnfCore 80 sn'
   if (tn'' == tn' && sn'' == sn') then
     if !(unsafe ptrEq tn'' tn') then
-      dbg_trace s!"ptrEq mismatch 1"
+      -- dbg_trace s!"ptrEq mismatch 1"
+      pure ()
     if !(unsafe ptrEq sn'' sn') then
-      dbg_trace s!"ptrEq mismatch 2"
+      -- dbg_trace s!"ptrEq mismatch 2"
+      pure ()
     pure ()
   else
     -- if projection reduced, need to re-run (as we may not have a WHNF)

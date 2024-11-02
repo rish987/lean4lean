@@ -214,20 +214,20 @@ def inductiveReduceRec [Monad m] [MonadWithReaderOf LocalContext m] [MonadLCtx m
     let eType' ← meth.inferTypePure 129 e'
     let sort ← meth.whnfPure 135 (← meth.inferTypePure 134 eType')
     let .sort lvl := sort.toExpr | unreachable!
-    let idrV := .mk (← meth.mkId 130)
-    let idfV := .mk (← meth.mkId 131)
+    let idrV := .mk (← meth.mkId 130 eType')
     withLCtx ((← getLCtx).mkLocalDecl idrV default eType' default) do
       let some rVl := (← getLCtx).find? idrV | unreachable!
       let rV := rVl.toExpr
+      let idfV := .mk (← meth.mkId 131 eNewMajorType')
       withLCtx ((← getLCtx).mkLocalDecl idfV default eNewMajorType' default) do
         let some fVl := (← getLCtx).find? idfV | unreachable!
         let fV := fVl.toExpr
 
         let rVEqfVType := mkAppN (.const `HEq [lvl]) #[eType', eNewMajorType', rV, fV]
         let fVEqrVType := mkAppN (.const `HEq [lvl]) #[eNewMajorType', eType', fV, rV]
-        let idrVEqfV := ⟨← meth.mkId 132⟩
-        let idfVEqrV := ⟨← meth.mkId 133⟩
+        let idrVEqfV := ⟨← meth.mkId 132 rVEqfVType⟩
         withLCtx ((← getLCtx).mkLocalDecl idrVEqfV default rVEqfVType default) do
+          let idfVEqrV := ⟨← meth.mkId 133 fVEqrVType⟩
           withLCtx ((← getLCtx).mkLocalDecl idfVEqrV default fVEqrVType default) do
             let some rVEqfV := (← getLCtx).find? idrVEqfV | unreachable!
             let some fVEqrV := (← getLCtx).find? idfVEqrV | unreachable!
