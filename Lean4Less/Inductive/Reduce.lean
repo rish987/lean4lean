@@ -9,13 +9,6 @@ open Lean4Less.TypeChecker
 
 section
 
-structure ExtMethodsR (m : Type → Type u) extends ExtMethods m where
-  isDefEqApp' : PExpr → PExpr → Std.HashMap Nat (Option EExpr) → m (Bool × Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))
-  isDefEqApp : PExpr → PExpr → Std.HashMap Nat (Option EExpr) → m (Bool × Option EExpr)
-  smartCast : Nat → PExpr → PExpr → PExpr → m (Bool × PExpr)
-  maybeCast (n : Nat) (p? : Option EExpr) (typLhs typRhs e : PExpr) : m PExpr
-  isDefEqProofIrrel' : PExpr → PExpr → PExpr → PExpr → Option EExpr → m (Option EExpr)
-
 variable [Monad m] [MonadExcept KernelException M] (env : Environment)
   (meth : ExtMethodsR m)
 
@@ -125,77 +118,55 @@ def inductiveReduceRec [Monad m] [MonadWithReaderOf LocalContext m] [MonadLCtx m
 
   let type ← meth.whnfPure 111 (← meth.inferTypePure 112 major)
   let newType ← meth.whnfPure 112 (← meth.inferTypePure 113 majorMaybeCtor)
-  let (defEq, d?) ←
-    if type.toExpr.isApp then
-      meth.isDefEqApp' type newType default
-    else
-      pure (← meth.isDefEqPure 114 type newType, none)
-
-  assert! defEq == true
+  let typeArgs := type.toExpr.getAppArgs
+  let newTypeArgs := newType.toExpr.getAppArgs
+  let mut argEqs? : Array (Option EExpr) := #[]
+  for (arg, newArg) in typeArgs.zip newTypeArgs do
+    let (arg, newArg) := (arg.toPExpr, newArg.toPExpr)
+    let (true, p?) ← meth.isDefEq 136 arg newArg | panic! ""
+    argEqs? := argEqs?.push p?
 
   let (paramEqs?, indEqs?) ←
-    if let some (_, argEqs?) := d? then
       pure (argEqs?[:info.numParams].toArray, argEqs?[info.numParams:].toArray)
-    else
-      pure ((List.replicate (info.numParams) none).toArray, (List.replicate (info.numIndices) none).toArray)
 
-  let motivesMinorsEqs? : Array (Option (PExpr × PExpr × EExpr)) ← do
+  let (params, _indices) ←
+      pure (typeArgs[:info.numParams].toArray, typeArgs[info.numParams:].toArray)
+  let (newParams, newIndices) ←
+      pure (newTypeArgs[:info.numParams].toArray, newTypeArgs[info.numParams:].toArray)
+
+  let numMotivesMinors := info.numMotives + info.numMinors
+  let motivesMinors? ← do
     if paramEqs?.any (·.isSome) then
-      let rec loop1 (type origType : Expr) (n : Nat) := do
-        match (← meth.whnfPure 116 type.toPExpr).toExpr, (← meth.whnfPure 117 origType.toPExpr).toExpr, n with
-      | .forallE _ _ body _, .forallE _ _ origBody _, m + 1 => 
-        let idx := info.numParams - n
-        let origParam := recArgs[idx]!
-        let param := paramEqs?[idx]!.map (fun (_, s, _) => s.toExpr) |>.getD origParam
-        loop1 (body.instantiate1 param) (origBody.instantiate1 origParam) m
-      | body, origBody, m =>
-        assert! m == 0
-        pure (body, origBody)
-      let (type', origType') ← loop1 recType recType info.numParams
-
-      let rec loop2 (type origType : Expr) (n : Nat) (ret : (Array (Option (PExpr × PExpr × EExpr)))) := do
-        match (← meth.whnfPure 118 type.toPExpr).toExpr, (← meth.whnfPure 119 origType.toPExpr).toExpr, n with
-        | .forallE _ dom body _, .forallE _ origDom origBody _, m + 1 => 
-          let idx := (info.numMotives + info.numMinors) - n + info.numParams
-          let origMotiveMinor := recArgs[idx]!.toPExpr
-          let (true, newMotiveMinor) ← meth.smartCast 101 origDom.toPExpr dom.toPExpr origMotiveMinor | unreachable!
-          _ ← meth.inferTypePure 5000 newMotiveMinor -- sanity check TODO remove
-          let (true, origMotiveMinorEqnewMotiveMinor?) ← meth.isDefEq 120 origMotiveMinor newMotiveMinor | unreachable!
-          let ret := ret.push (origMotiveMinorEqnewMotiveMinor?.map fun p => (origMotiveMinor, newMotiveMinor, p))
-          loop2 (body.instantiate1 newMotiveMinor) (origBody.instantiate1 origMotiveMinor) m ret
-        | _, _, m =>
-          assert! m == 0
-          pure ret
-
-      let ret ← loop2 type' origType' (info.numMotives + info.numMinors) #[]
-      pure ret
+      pure $ some (← replaceParams meth recType params newParams recArgs[info.numParams:info.numParams + numMotivesMinors])
     else
-      pure (List.replicate (info.numMotives + info.numMinors) (none : Option (PExpr × PExpr × EExpr))).toArray
+      pure none
 
   let mut newRecArgs := recArgs.set! majorIdx majorMaybeCtor
   let mut map := .insert default majorIdx majorEqMajorMaybeCtor?
 
   for idx in [:paramEqs?.size] do
-    let indEq? := paramEqs?[idx]!
-    map := map.insert idx (indEq?.map (fun (_, _, p) => p))
-    if let some (_, e, _) := indEq? then
-      newRecArgs := newRecArgs.set! idx e
+    let paramEq? := paramEqs?[idx]!
+    map := map.insert idx paramEq?
+    newRecArgs := newRecArgs.set! idx newParams[idx]!
 
   let motivesStartIdx := info.numParams
-  for idx in [:motivesMinorsEqs?.size] do
-    let indEq? := motivesMinorsEqs?[idx]!
-    let recIdx := motivesStartIdx + idx
-    map := map.insert recIdx (indEq?.map (fun (_, _, p) => p))
-    if let some (_, e, _) := indEq? then
-      newRecArgs := newRecArgs.set! recIdx e
+  if let some motivesMinors := motivesMinors? then
+    for idx in [:info.numMotives + info.numMinors] do
+      let (newMotiveMinor, p?) := motivesMinors[idx]!
+      let recIdx := motivesStartIdx + idx
+      map := map.insert recIdx p?
+      newRecArgs := newRecArgs.set! recIdx newMotiveMinor
+  else
+    for idx in [:info.numMotives + info.numMinors] do
+      let recIdx := motivesStartIdx + idx
+      map := map.insert recIdx .none
 
   let indicesStartIdx := info.numParams + info.numMotives + info.numMinors
   for idx in [:indEqs?.size] do
     let indEq? := indEqs?[idx]!
     let recIdx := indicesStartIdx + idx
-    map := map.insert recIdx (indEq?.map (fun (_, _, p) => p))
-    if let some (_, e, _) := indEq? then
-      newRecArgs := newRecArgs.set! recIdx e
+    map := map.insert recIdx indEq?
+    newRecArgs := newRecArgs.set! recIdx newIndices[idx]!
 
   let e' := (mkAppN recFn recArgs[:majorIdx + 1]) |>.toPExpr
   let eNewMajor' := mkAppN recFn newRecArgs[:majorIdx + 1] |>.toPExpr

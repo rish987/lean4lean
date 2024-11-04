@@ -501,31 +501,6 @@ def appHEqTrans? (t s r : PExpr) (theqs? sheqr? : Option EExpr) : RecM (Option E
   | .some theqs, none => return theqs
 
 
-def meths : ExtMethods RecM := {
-    isDefEq := isDefEq
-    isDefEqPure := isDefEqPure
-    isDefEqLean := isDefEqLean
-    whnf  := whnf
-    mkIdNew  := mkIdNew
-    mkId  := fun n d => mkIdNew n
-    mkId'  := mkId'
-    whnfPure := whnfPure
-    mkHRefl := mkHRefl
-    getTypeLevel := getTypeLevel
-    ensureSortCorePure := ensureSortCorePure
-    inferTypePure := inferTypePure
-    inferType := inferType
-    appPrfIrrelHEq := appPrfIrrelHEq
-    appPrfIrrel := appPrfIrrel
-    appHEqTrans? := appHEqTrans?
-    withPure := withPure
-    trace := trace
-    ttrace := ttrace
-    shouldTTrace := shouldTTrace
-    callId := do pure (← readThe Context).callId
-    numCalls := do pure (← get).numCalls
-  }
-
 def isDefEqForall' (t s : PExpr) (numBinds : Nat) (f : Option EExpr → RecM (Option T)) : RecM (Bool × Option T) := do
   -- assert! numBinds > 0
   let rec getData t s n := do
@@ -613,6 +588,31 @@ def alignForAll (numBinds : Nat) (ltl ltr : Expr) : RecM (Expr × Expr × Nat) :
           pure (nltl, nltr, n + 1)
     | _, _ => pure (ltl, ltr, 0)
   | _ => pure (ltl, ltr, 0)
+
+def meths : ExtMethods RecM := {
+    isDefEq := isDefEq
+    isDefEqPure := isDefEqPure
+    isDefEqLean := isDefEqLean
+    whnf  := whnf
+    mkIdNew  := mkIdNew
+    mkId  := fun n d => mkIdNew n
+    mkId'  := mkId'
+    whnfPure := whnfPure
+    mkHRefl := mkHRefl
+    getTypeLevel := getTypeLevel
+    ensureSortCorePure := ensureSortCorePure
+    inferTypePure := inferTypePure
+    inferType := inferType
+    appPrfIrrelHEq := appPrfIrrelHEq
+    appPrfIrrel := appPrfIrrel
+    appHEqTrans? := appHEqTrans?
+    withPure := withPure
+    trace := trace
+    ttrace := ttrace
+    shouldTTrace := shouldTTrace
+    callId := do pure (← readThe Context).callId
+    numCalls := do pure (← get).numCalls
+  }
 
 def methsA : ExtMethodsA RecM := {
     meths with
@@ -1457,9 +1457,11 @@ def tryEtaStruct (t s : PExpr) : RecB := do
     return (true, ← appHEqSymm? sEqt?)
 
 def reduceRecursor (e : PExpr) (cheapK : Bool) : RecM (Option (PExpr × Option EExpr)) := do
+  _ ← inferTypePure 6000 e -- sanity check TODO remove
   let env ← getEnv
   if env.header.quotInit then
-    if let some r ← quotReduceRec e (whnf 51) (fun x y tup => isDefEqApp x y (targsEqsargs? := Std.HashMap.insert default tup.1 tup.2)) then
+    if let some r ← quotReduceRec methsR e then
+      _ ← inferTypePure 6001 r.1 -- sanity check TODO remove
       return r
   let whnf' := whnf (cheapK := cheapK)
   let meths := {methsR with whnf := whnf'}
@@ -1565,9 +1567,9 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
 
 @[inherit_doc whnfCore]
 def whnfCore' (e : PExpr) (cheapK := false) (cheapProj := false) : RecEE := do
-  -- _ ← inferTypePure 5000 e -- sanity check TODO remove
+  _ ← inferTypePure 5000 e -- sanity check TODO remove
   let ret ← _whnfCore' e cheapK cheapProj
-  -- _ ← inferTypePure 5001 ret.1 -- sanity check TODO remove
+  _ ← inferTypePure 5001 ret.1 -- sanity check TODO remove
   pure ret
 
 @[inherit_doc whnf]

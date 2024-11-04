@@ -85,10 +85,49 @@ structure ExtMethods (m : Type → Type u) where
   numCalls : m Nat
   shouldTTrace : m Bool
 
+structure ExtMethodsR (m : Type → Type u) extends ExtMethods m where
+  isDefEqApp' : PExpr → PExpr → Std.HashMap Nat (Option EExpr) → m (Bool × Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))
+  isDefEqApp : PExpr → PExpr → Std.HashMap Nat (Option EExpr) → m (Bool × Option EExpr)
+  smartCast : Nat → PExpr → PExpr → PExpr → m (Bool × PExpr)
+  maybeCast (n : Nat) (p? : Option EExpr) (typLhs typRhs e : PExpr) : m PExpr
+  isDefEqProofIrrel' : PExpr → PExpr → PExpr → PExpr → Option EExpr → m (Option EExpr)
+
 namespace TypeChecker
 
 variable [Monad m] [MonadLCtx m] [MonadExcept KernelException m] [MonadNameGenerator m] [MonadWithReaderOf LocalContext m] [MonadWithReaderOf (Std.HashMap (FVarId × FVarId) (FVarId × FVarId)) m] (env : Environment)
   (meth : ExtMethods m)
+
+def replaceParams (meth : ExtMethodsR m) (fType : Expr) (params : Array Expr) (newParams : Array Expr) (args : Array Expr) : m (Array (PExpr × Option EExpr)) := do
+  let numParams := params.size
+  let rec loop1 (type origType : Expr) (n : Nat) := do
+    match (← meth.whnfPure 116 type.toPExpr).toExpr, (← meth.whnfPure 117 origType.toPExpr).toExpr, n with
+  | .forallE _ _ newBody _, .forallE _ _ body _, m + 1 => 
+    let idx := numParams - n
+    let param := params[idx]!
+    let newParam := newParams[idx]!
+    loop1 (newBody.instantiate1 newParam) (body.instantiate1 param) m
+  | newBody, body, m =>
+    assert! m == 0
+    pure (newBody, body)
+  let (newType', type') ← loop1 fType fType numParams
+
+  let rec loop2 (newType type : Expr) (n : Nat) ret := do
+    match (← meth.whnfPure 118 newType.toPExpr).toExpr, (← meth.whnfPure 119 type.toPExpr).toExpr, n with
+    | .forallE _ newDom newBody _, .forallE _ dom body _, m + 1 => 
+      let idx := args.size - n
+      let arg := args[idx]!.toPExpr
+      let (true, newArg) ← meth.smartCast 101 dom.toPExpr newDom.toPExpr arg | unreachable!
+      -- _ ← meth.inferTypePure 5000 newArg -- sanity check TODO remove
+      let (true, argEqnewArg?) ← meth.isDefEq 120 arg newArg | unreachable!
+      let ret := ret.push (newArg, argEqnewArg?)
+      loop2 (newBody.instantiate1 newArg) (body.instantiate1 arg) m ret
+    | _, _, m =>
+      assert! m == 0
+      pure ret
+
+  let ret ← loop2 newType' type' args.size #[]
+  pure ret
+
 
 @[inline] def withLCtx [MonadWithReaderOf LocalContext m] (lctx : LocalContext) (x : m α) : m α :=
   withReader (fun _ => lctx) x
