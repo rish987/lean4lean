@@ -785,6 +785,8 @@ let name := match d with
 | .none => `L4L.lambdaHEq
 if dep then name.toString ++ "'" |>.toName else name
 
+def dbgFIds := #["_kernel_fresh.3032".toName, "_kernel_fresh.3036".toName, "_kernel_fresh.910".toName, "_kernel_fresh.914".toName]
+
 def LamData.toExpr (e : LamData EExpr) : EM Expr := match e with
 | {u, v, A, U, f, a, g, faEqgx, extra} => do
   if (← rev) then
@@ -813,16 +815,19 @@ def LamData.toExpr (e : LamData EExpr) : EM Expr := match e with
     | .UV ..
     | .none => pure $ mkLambda #[a] (← faEqgx.toExpr')
 
-    let (args, dep) ← match extra with
-    | .ABUV {B, hAB, ..} {V} =>
+    let (args, dep, U) ← match extra with
+    | .ABUV {B, hAB, b, ..} {V} =>
         let (U, V, dep) := getMaybeDepLemmaApp2 U V
-        pure $ (#[A.toExpr, B, U, V, f, g, (← hAB.toExpr'), hfg], dep)
+        -- if dbgFIds.any (· == a.fvarId.name) then
+        --   dbg_trace s!"DBG[0]: {a.fvarId.name}, {b.fvarId.name}, {dep}, {Lean.collectFVars default V |>.fvarIds.map (·.name)}"
+        pure $ (#[A.toExpr, B, U, V, f, g, (← hAB.toExpr'), hfg], dep, V)
     | .UV {V} => 
         let (U, V, dep) := getMaybeDepLemmaApp2 U V
-        pure (#[A.toExpr, U, V, f, g, hfg], dep)
+        pure (#[A.toExpr, U, V, f, g, hfg], dep, U)
     | .none => 
         let (U, dep) := getMaybeDepLemmaApp1 U
-        pure (#[A.toExpr, U, f, g, hfg], dep)
+        pure (#[A.toExpr, U, f, g, hfg], dep, U)
+
     let n := extra.lemmaName dep
     pure $ Lean.mkAppN (.const n [u, v]) args
 
