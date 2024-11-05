@@ -7,6 +7,9 @@ open Lean
 
 def defFuel := 1300
 
+-- def tr := true
+def tr := false
+
 mutual
 def fuelWrap (idx : Nat) (fuel : Nat) (d : CallData) : M (CallDataT d) := do
 let ctx := (← readThe Context)
@@ -39,8 +42,8 @@ match fuel with
 
     let mut printedTrace := false
     let methPrint := false
-    -- let methPrint := true
-    if methPrint && ctx.callId == 532 /- && not s.printedDbg -/ then -- TODO static variables?
+    let methPrint := true
+    if tr && methPrint /- && ctx.callId == 532 -/ /- && not s.printedDbg -/ then -- TODO static variables?
       if s.numCalls % 1 == 0 then
         printedTrace := true
         dbg_trace s!"calltrace {s.numCalls}: {ctx.callStack.map (·.1)}, {idx}, {ctx.callId}"
@@ -96,14 +99,17 @@ match fuel with
     -- let traceId := Option.some 532
     try
       let ret ← withCallId s.numCalls traceId do
-        withCallData idx s.numCalls d do 
-          -- if let some id := traceId then
-          --   if s.numCalls == id then
-          --     let stack := (← readThe Context).callStack
-          --     if idx == 110 then
-          --       dbg_trace s!"\n{stack[stack.size - 4]!}"
-          --       dbg_trace s!"{s.numCalls}: {stack.map (·.1)}"
+        if tr then
+          withCallData idx s.numCalls d do 
+            -- if let some id := traceId then
+            --   if s.numCalls == id then
+            --     let stack := (← readThe Context).callStack
+            --     if idx == 110 then
+            --       dbg_trace s!"\n{stack[stack.size - 4]!}"
+            --       dbg_trace s!"{s.numCalls}: {stack.map (·.1)}"
 
+            m (Methods.withFuel fuel')
+        else
           m (Methods.withFuel fuel')
       if printedTrace then
         dbg_trace s!"end of    {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}, {(← readThe Context).callId}"

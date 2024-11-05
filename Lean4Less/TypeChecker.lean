@@ -186,18 +186,18 @@ def mkIdNew (n : Nat) : RecM Name := do
   pure fid
 
 def mkId' (n : Nat) (lctx : LocalContext) (dom : Expr) : RecM Name := do
-  -- let id ← if let some np := (← get).fvarTypeToReusedNamePrefix[dom]? then
-  --   let mut count := 0
-  --   while lctx.findFVar? (Expr.fvar $ .mk (Name.mkNum np count)) |>.isSome do
-  --     count := count + 1
-  --   pure $ Name.mkNum np count
-  -- else
-  --   let np ← mkIdNew n
-  --   modify fun st => { st with fvarTypeToReusedNamePrefix := st.fvarTypeToReusedNamePrefix.insert dom np }
-  --   pure $ Name.mkNum np 0
-  -- modify fun st => { st with fvarRegistry := st.fvarRegistry.insert id n }
-  -- pure id
-  mkIdNew n
+  let id ← if let some np := (← get).fvarTypeToReusedNamePrefix[dom]? then
+    let mut count := 0
+    while lctx.findFVar? (Expr.fvar $ .mk (Name.mkNum np count)) |>.isSome do
+      count := count + 1
+    pure $ Name.mkNum np count
+  else
+    let np ← mkIdNew n
+    modify fun st => { st with fvarTypeToReusedNamePrefix := st.fvarTypeToReusedNamePrefix.insert dom np }
+    pure $ Name.mkNum np 0
+  modify fun st => { st with fvarRegistry := st.fvarRegistry.insert id n }
+  pure id
+  -- mkIdNew n
 
 def mkId (n : Nat) (dom : Expr) : RecM Name := do
   mkId' n (← getLCtx) dom
@@ -1468,11 +1468,10 @@ def tryEtaStruct (t s : PExpr) : RecB := do
     return (true, ← appHEqSymm? sEqt?)
 
 def reduceRecursor (e : PExpr) (cheapK : Bool) : RecM (Option (PExpr × Option EExpr)) := do
-  _ ← inferTypePure 6000 e -- sanity check TODO remove
   let env ← getEnv
   if env.header.quotInit then
     if let some r ← quotReduceRec methsR e then
-      _ ← inferTypePure 6001 r.1 -- sanity check TODO remove
+      -- _ ← inferTypePure 6001 r.1 -- sanity check TODO remove
       return r
   let whnf' := whnf (cheapK := cheapK)
   let meths := {methsR with whnf := whnf'}
@@ -1578,9 +1577,7 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
 
 @[inherit_doc whnfCore]
 def whnfCore' (e : PExpr) (cheapK := false) (cheapProj := false) : RecEE := do
-  _ ← inferTypePure 5000 e -- sanity check TODO remove
   let ret ← _whnfCore' e cheapK cheapProj
-  _ ← inferTypePure 5001 ret.1 -- sanity check TODO remove
   pure ret
 
 @[inherit_doc whnf]
