@@ -24,6 +24,7 @@ structure TypeChecker.State where
   inferTypeC : InferCache := {}
   data : Data := {}
   whnfCoreCache : ExprMap Expr := {}
+  fvarNormCache : Std.HashMap (Expr × Expr) (Expr × Expr) := {}
   whnfCache : ExprMap Expr := {}
   eqvManager : EquivManager := {}
   numCalls : Nat := 0
@@ -234,10 +235,51 @@ def inferForall (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] #[] e wher
 
 def isDefEqCore (n : Nat) (t s : Expr) : RecM Bool := fun m => m.isDefEqCore n t s
 
+/--
+  Optimized version of Lean.Expr.containsFVar, assuming no bound vars in `e`.
+-/
+def _root_.Lean.Expr.containsFVar' (e : Expr) (fv : FVarId) : Bool :=
+  (e.replaceFVar (.fvar fv) (Expr.bvar 0)).hasLooseBVars
+
+def fvarNormalize (t s : Expr) : RecM (Expr × Expr) := do
+  if ! (t.hasFVar || s.hasFVar) then return (t, s)
+  -- if let some (t', s') := (← get).fvarNormCache.get? (t, s) then 
+  --   return (t', s')
+
+  let mut zeroFVarClasses : Std.HashMap Name (Option Nat) := default
+  let mut tNorm := t
+  let mut sNorm := s
+
+  for fvar in (← getLCtx).getFVars do
+    let fid := fvar.fvarId!
+    let pref := fvar.fvarId!.name.getPrefix
+
+    let n? := zeroFVarClasses.get? pref
+    if let .some .none := n? then continue
+
+    if t.containsFVar' fid || s.containsFVar' fid then
+      let suff :=  match fid.name with
+      | .num _ s   => s
+      | _   => unreachable!
+      if suff == 0 then
+        zeroFVarClasses := zeroFVarClasses.insert pref none
+        continue
+      let n ← if let .some n := n? then
+        pure n.get!
+      else
+        zeroFVarClasses := zeroFVarClasses.insert pref (.some suff)
+        pure suff
+
+      tNorm := tNorm.replaceFVar (.fvar $ .mk (.mkNum pref suff)) (.fvar $ .mk (.mkNum pref (suff - n)))
+      sNorm := sNorm.replaceFVar (.fvar $ .mk (.mkNum pref suff)) (.fvar $ .mk (.mkNum pref (suff - n)))
+
+  pure (tNorm, sNorm)
+
 def isDefEq (n : Nat) (t s : Expr) : RecM Bool := do
   let r ← isDefEqCore n t s
   if r then
-    modify fun st => { st with eqvManager := st.eqvManager.addEquiv t s }
+    let (tCache, sCache) ← fvarNormalize t s
+    modify fun st => { st with eqvManager := st.eqvManager.addEquiv tCache sCache }
   pure r
 
 def inferApp (e : Expr) : RecM Expr := do
@@ -416,8 +458,8 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
 
         -- trace s!"{(← rctx).callId}, {← callStackToStr}, {e.getAppArgs.size}, {e.getAppFn} \n\n{dType}\n\n{aType}"
         if !(← isDefEq 54 dType aType) then
-          -- dbg_trace s!"DBG2: {f}\n"
-          -- dbg_trace s!"DBG3: {a}\n\n{aType}"
+          dbg_trace s!"DBG2: {f}\n"
+          dbg_trace s!"DBG3: {a}"
           -- dbg_trace s!"DBG[2]: TypeChecker.lean:292 {(← aType.getWhnfAt [1, .fn])}\n"
           -- dbg_trace s!"DBG[3]: TypeChecker.lean:292 {(← dType.getWhnfAt [1, .fn, .proj 1])}\n"
           throw <| .appTypeMismatch (← getEnv) (← getLCtx) e fType aType
@@ -638,9 +680,10 @@ def isDefEqForall (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
   | t, s => isDefEq 59 (t.instantiateRev subst) (s.instantiateRev subst)
 
 def quickIsDefEq (t s : Expr) (useHash := false) : RecM LBool := do
-  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 a9 (eqvManager := m)) =>
-    let (b, m) := m.isEquiv useHash t s
-    (b, .mk a1 a2 a3 a4 a5 a6 a7 a8 a9 (eqvManager := m))
+  let (tCache, sCache) ← pure (t, s)
+  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 (eqvManager := m)) =>
+    let (b, m) := m.isEquiv useHash tCache sCache
+    (b, .mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 (eqvManager := m))
   then return .true
   match t, s with
   | .lam .., .lam .. => toLBoolM <| isDefEqLambda t s
