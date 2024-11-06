@@ -26,7 +26,7 @@ match fuel with
     let s ← get
     let mut printedTrace := false
     let print := false
-    let print := true
+    -- let print := true
     if print && trace then
       if s.numCalls % 1 == 0 then
         printedTrace := true

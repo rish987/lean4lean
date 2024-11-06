@@ -84,6 +84,8 @@ def M.run' (env : Environment) (x : M α)
    (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) (nid : Nat := 0) (fvarTypeToReusedNamePrefix : Std.HashMap Expr Name := {}) (trace := false) : Except KernelException α := do
   x { env, safety, lctx, opts, lparams, trace} |>.run' {nid, fvarTypeToReusedNamePrefix}
 
+def getCallStack : M (Array Nat) := do pure $ (← readThe Context).callStack.map (·.1)
+
 instance : MonadEnv M where
   getEnv := return (← read).env
   modifyEnv _ := pure ()
@@ -385,7 +387,6 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
   assert! !e.hasLooseBVars
   let state ← get
   if let some r := (cond inferOnly state.inferTypeI state.inferTypeC)[e]? then
-    -- dbg_trace s!"DBG[2]: TypeChecker.lean:267: r={r}, {e}"
     return r
   let r ← match e with
     | .lit l => pure l.type
@@ -411,15 +412,11 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
         let aType ← try
           inferType' a inferOnly
         catch e =>
-          -- dbg_trace s!"DBG4: {dType}\n"
           throw e
 
         -- trace s!"{(← rctx).callId}, {← callStackToStr}, {e.getAppArgs.size}, {e.getAppFn} \n\n{dType}\n\n{aType}"
         if !(← isDefEq 54 dType aType) then
-          -- dbg_trace s!"DBG2: {f}\n"
-          -- dbg_trace s!"DBG3: {a}\n\n{aType}"
-          -- dbg_trace s!"DBG[2]: TypeChecker.lean:292 {(← aType.getWhnfAt [1, .fn])}\n"
-          -- dbg_trace s!"DBG[3]: TypeChecker.lean:292 {(← dType.getWhnfAt [1, .fn, .proj 1])}\n"
+          dbg_trace s!"DBG[1]: TypeChecker.lean:418 \n{dType}\n\n{aType}"
           throw <| .appTypeMismatch (← getEnv) (← getLCtx) e fType aType
         -- trace s!"{(← rctx).callId}"
         pure <| fType.bindingBody!.instantiate1 a
@@ -567,7 +564,6 @@ def reduceNat (e : Expr) : RecM (Option Expr) := do
     if f == ``Nat.mul then return ← reduceBinNatOp Nat.mul a b
     if f == ``Nat.pow then return ← reduceBinNatOp Nat.pow a b
     -- if f == ``Nat.gcd then
-    --   dbg_trace s!"DBG[1]: TypeChecker.lean:558 {rawNatLitExt? (← whnf 25 a)} {rawNatLitExt? (← whnf 25 b)}"
     --   return ← reduceBinNatOp Nat.gcd a b
     if f == ``Nat.mod then return ← reduceBinNatOp Nat.mod a b
     if f == ``Nat.div then return ← reduceBinNatOp Nat.div a b

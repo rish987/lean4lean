@@ -21,7 +21,7 @@ def toCtorWhenK (rval : RecursorVal) (e : Expr) : m (Expr × Bool) := do
   assert! rval.k
   let appType ← whnf (← inferType e)
   let .const appTypeI _ := appType.getAppFn | return (e, false)
-  if appTypeI != rval.getInduct then return (e, false)
+  if appTypeI != rval.getMajorInduct then return (e, false)
   if appType.hasExprMVar then
     let appTypeArgs := appType.getAppArgs
     for h : i in [rval.numParams:appTypeArgs.size] do
@@ -63,15 +63,15 @@ def inductiveReduceRec [Monad m] (env : Environment) (e : Expr)
   let some (.recInfo info) := env.find? recFn | return none
   let recArgs := e.getAppArgs
   let majorIdx := info.getMajorIdx
-  let some major := recArgs[majorIdx]? | return none
-  let mut major := major
+  let some major' := recArgs[majorIdx]? | return none
+  let mut major := major'
   let mut usedK := false
   if kLikeReduction then
     if info.k then
       (major, usedK) ← toCtorWhenK env whnf inferType isDefEq info major
   match ← whnf major with
   | .lit l => major := l.toConstructor
-  | e => major ← toCtorWhenStruct env whnf inferType info.getInduct e
+  | e => major ← toCtorWhenStruct env whnf inferType info.getMajorInduct e
   let some rule := getRecRuleFor info major | return none
   let majorArgs := major.getAppArgs
   if rule.nfields > majorArgs.size then return none
