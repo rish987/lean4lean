@@ -13,7 +13,7 @@ import Lean4Lean.TypeChecker
 import Lean4Less.App
 
 -- 98
--- mkId 13
+-- mkId 14
 
 namespace Lean4Less
 open Lean
@@ -70,17 +70,6 @@ def CallData.name : CallData → String
 | .inferType ..       => "inferType"
 | .inferTypePure ..   => "inferTypePure"
 
-@[reducible]
-def CallDataT : CallData → Type
-| .isDefEqCore ..     => Bool × Option EExpr
-| .isDefEqCorePure .. => Bool
-| .quickIsDefEq ..    => LBool × Option EExpr
-| .whnfCore ..        => PExpr × Option EExpr
-| .whnf ..            => PExpr × Option EExpr
-| .whnfPure ..        => PExpr
-| .inferType ..       => PExpr × Option PExpr
-| .inferTypePure ..   => PExpr
-
 structure TypeChecker.Context where
   env : Environment
   pure : Bool := false -- (for debugging purposes)
@@ -96,7 +85,7 @@ structure TypeChecker.Context where
   callId : Nat := 0
   L4LTrace : Bool := false
   dbgCallId : Option Nat := none
-  callStack : Array (Nat × Nat × CallData) := #[]
+  callStack : Array (Nat × Nat × (Option CallData)) := #[]
   lparams : List Name := []
 
 namespace TypeChecker
@@ -139,6 +128,7 @@ structure Methods where
   inferType (n : Nat) (e : Expr) (dbg : Bool) : MPE
   inferTypePure (n : Nat) (e : PExpr) : M PExpr
 
+  -- dbg_wrap (n : Nat) (α : Type) (m : M Nat) : M Nat
 abbrev RecM := ReaderT Methods M
 abbrev RecPE := RecM (PExpr × (Option PExpr))
 abbrev RecEE := RecM (PExpr × (Option EExpr))
@@ -247,9 +237,6 @@ def whnfPure (n : Nat) (e : PExpr) : RecM PExpr := fun m => m.whnfPure n e
 
 @[inline] def withCheapK [MonadWithReaderOf Context m] (x : m α) : m α :=
   withReader (fun l => {l with cheapK := true}) x
-
-@[inline] def withCallData [MonadWithReaderOf Context m] (i : Nat) (n : Nat) (d : CallData) (x : m α) : m α :=
-  withReader (fun c => {c with callStack := c.callStack.push (i, n, d)}) x
 
 @[inline] def withCallId [MonadWithReaderOf Context m] (id : Nat) (dbgCallId : Option Nat := none) (x : m α) : m α :=
   withReader (fun c => {c with callId := id, dbgCallId}) x
@@ -606,7 +593,7 @@ def meths : ExtMethods RecM := {
     isDefEqLean := isDefEqLean
     whnf  := whnf
     mkIdNew  := mkIdNew
-    mkId  := fun n d => mkIdNew n
+    mkId  := fun n _ => mkIdNew n
     mkId'  := mkId'
     whnfPure := whnfPure
     mkHRefl := mkHRefl
@@ -1524,18 +1511,28 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
           let frargs' := frargs'?.getD frargs
           let rargs' := frargs'.toExpr.getAppArgs[f.toExpr.getAppArgs.size:].toArray.reverse
           assert 10 $ rargs'.size == rargs.size
-          let (.true, data?) ← isDefEqApp'' f0 f (rargs.map (·.toPExpr)).reverse (rargs'.map (·.toPExpr)).reverse (tfEqsf? := pf0Eqf?) |
+          -- let (.true, data?) ← isDefEqApp'' f0 f (rargs.map (·.toPExpr)).reverse (rargs'.map (·.toPExpr)).reverse (tfEqsf? := pf0Eqf?) |
+          --   throw $ .other "unreachable 10"
+          -- let eEqfrargs'? := data?.map (·.1)
+          let (.true, eEqfrargs'?) ← isDefEq 99 (Lean.mkAppN f0 rargs.reverse).toPExpr (Lean.mkAppN f rargs'.reverse).toPExpr |
             throw $ .other "unreachable 10"
-          let eEqfrargs'? := data?.map (·.1)
           pure (frargs', rargs', eEqfrargs'?)
         else
-          let mut m := default
-          for i in [:rargs.size] do
-            m := m.insert i none
-          let (.true, data?) ← isDefEqApp'' f0 f (rargs.map (·.toPExpr)).reverse (rargs.map (·.toPExpr)).reverse (tfEqsf? := pf0Eqf?) (targsEqsargs? := m)|
-            throw $ .other "unreachable 10"
-          let eEqfrargs'? := data?.map (·.1)
-          pure (frargs, rargs, eEqfrargs'?)
+          -- let mut m := default
+          -- for i in [:rargs.size] do
+          --   m := m.insert i none
+          let args := (rargs.map (·.toPExpr)).reverse
+          let idfv := ⟨← mkId 14 f0T⟩
+          withLCtx ((← getLCtx).mkLocalDecl idfv default f0T default) do
+            let some fvl := (← getLCtx).find? idfv | unreachable!
+            let fv := fvl.toExpr
+            let fn := (← getLCtx).mkLambda #[fv] (Lean.mkAppN fv args) |>.toPExpr
+            let fnType ← inferTypePure 5502 fn
+            let eEqfrargs'? ← App.mkAppEqProof methsA fnType fnType none #[f0] #[f] #[pf0Eqf?] fn fn none
+            -- let (.true, data?) ← isDefEqApp'' f0 f (rargs.map (·.toPExpr)).reverse (rargs.map (·.toPExpr)).reverse (tfEqsf? := pf0Eqf?) (targsEqsargs? := m)|
+              -- throw $ .other "unreachable 10"
+            -- let eEqfrargs'? := data?.map (·.1)
+            pure (frargs, rargs, eEqfrargs'?)
       else
         pure (frargs, rargs, none)
 
