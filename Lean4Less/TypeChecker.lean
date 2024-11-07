@@ -411,8 +411,14 @@ def isDefEq (n : Nat) (t s : PExpr) : RecB := do
   -- else if result && p?.isSome then
   pure r
 
-def isDefEqLean (t s : PExpr) (fuel := 1000) : RecM Bool := do
+def isDefEqLean (t s : Expr) (fuel := 1000) : RecM Bool := do
   runLeanRecM $ Lean.TypeChecker.isDefEq t s fuel
+
+def inferTypeLean (t : Expr) : RecM Expr := do
+  runLeanRecM $ Lean.TypeChecker.Inner.inferType 0 t (inferOnly := false)
+
+def whnfLean (t : Expr) : RecM Expr := do
+  runLeanRecM $ Lean.TypeChecker.whnf t
 
 def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : PExpr)
 (f : PExpr → PExpr → Option EExpr → Array LocalDecl → Array (Option (LocalDecl × LocalDecl × LocalDecl × (Option EExpr))) → RecM (Option T))

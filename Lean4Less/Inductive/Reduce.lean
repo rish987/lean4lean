@@ -35,7 +35,7 @@ def toCtorWhenK (rval : RecursorVal) (e : PExpr) : m (PExpr × Option (EExpr)) :
   assert! rval.k
   let type ← meth.whnfPure 101 (← meth.inferTypePure 102 e)
   let .const typeI _ := type.toExpr.getAppFn | return (e, none)
-  if typeI != rval.name.getPrefix then return (e, none)
+  if typeI != rval.getMajorInduct then return (e, none)
   if type.toExpr.hasExprMVar then
     let typeArgs := type.toExpr.getAppArgs
     for h : i in [rval.numParams:typeArgs.size] do
@@ -107,7 +107,7 @@ def inductiveReduceRec [Monad m] [MonadWithReaderOf LocalContext m] [MonadLCtx m
   let majorEqmajorKWhnf? ← meth.appHEqTrans? major majorWhnf majorKWhnf majorEqmajorWhnf? majorWhnfEqmajorKWhnf?
   let (majorMaybeCtor, majorKWhnfEqMajorMaybeCtor?) ← match majorKWhnf.toExpr with
     | .lit l => pure (l.toConstructor.toPExpr, none)
-    | _ => toCtorWhenStruct env meth info.name.getPrefix  majorKWhnf
+    | _ => toCtorWhenStruct env meth info.getMajorInduct majorKWhnf
   let majorEqMajorMaybeCtor? ← meth.appHEqTrans? major majorKWhnf majorMaybeCtor majorEqmajorKWhnf? majorKWhnfEqMajorMaybeCtor?
   -- (majorIdx, majorEqMajorMaybeCtor?)
   let some rule := getRecRuleFor info majorMaybeCtor | return none
@@ -120,10 +120,10 @@ def inductiveReduceRec [Monad m] [MonadWithReaderOf LocalContext m] [MonadLCtx m
         | e@(.app ..) => 
           let fn := e.getAppFn
           if let .const n .. := fn then
-             n == info.name.getPrefix
+             info.all.any (· == n)
           else
             false
-        | .const n .. => n == info.name.getPrefix
+        | .const n .. => info.all.any (· == n)
         | _ => false
     pure t?.get!
 
