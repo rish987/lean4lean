@@ -9,32 +9,9 @@ def defFuel := 1300
 
 def tr := true
 -- def tr := false
---
-inductive CallDataWrap where
-|  data : CallData → CallDataWrap
-|  wrap : {α : Type} → RecM α → CallDataWrap
-
-@[reducible]
-def CallDataT : CallDataWrap → Type
-| .data d => match d with
-  | .isDefEqCore ..     => Bool × Option EExpr
-  | .isDefEqCorePure .. => Bool
-  | .quickIsDefEq ..    => LBool × Option EExpr
-  | .whnfCore ..        => PExpr × Option EExpr
-  | .whnf ..            => PExpr × Option EExpr
-  | .whnfPure ..        => PExpr
-  | .inferType ..       => PExpr × Option PExpr
-  | .inferTypePure ..   => PExpr
-| .wrap (α := α) _ => α
-
-@[inline] def withCallData [MonadWithReaderOf Context m] (i : Nat) (n : Nat) (d : CallDataWrap) (x : m α) : m α :=
-  let d? := match d with
-    | .data d => .some d
-    | _ => none
-  withReader (fun c => {c with callStack := c.callStack.push (i, n, d?)}) x
 
 mutual
-def fuelWrap (idx : Nat) (fuel : Nat) (d : CallDataWrap) : M (CallDataT d) := do
+def fuelWrap (idx : Nat) (fuel : Nat) (d : CallData) : M (CallDataT d) := do
 let ctx := (← readThe Context)
 match fuel with
 
@@ -45,16 +22,14 @@ match fuel with
     -- let recDepth := (defFuel - fuel)
     let m : RecM (CallDataT d):=
       match d with
-      | .data d => match d with
-        | .isDefEqCore t s => isDefEqCore' t s
-        | .isDefEqCorePure t s => isDefEqCorePure' t s
-        | .quickIsDefEq t s b => quickIsDefEq' t s b
-        | .whnfCore e k p => whnfCore' e k p
-        | .whnf e k => whnf' e k
-        | .whnfPure e => whnfPure' e
-        | .inferType e d => inferType' e d
-        | .inferTypePure e => inferTypePure' e
-      | .wrap m => m
+      | .isDefEqCore t s => isDefEqCore' t s
+      | .isDefEqCorePure t s => isDefEqCorePure' t s
+      | .quickIsDefEq t s b => quickIsDefEq' t s b
+      | .whnfCore e k p => whnfCore' e k p
+      | .whnf e k => whnf' e k
+      | .whnfPure e => whnfPure' e
+      | .inferType e d => inferType' e d
+      | .inferTypePure e => inferTypePure' e
     -- if recDepth > 500 then
     --   dbg_trace s!"DBG[3]: {d.name}, {fuel}, {idx}"
     modify fun s => {s with numCalls := s.numCalls + 1} 
@@ -67,11 +42,28 @@ match fuel with
 
     let mut printedTrace := false
     let methPrint := false
-    let methPrint := true
+    -- let methPrint := true
+    let mut t := .none
+    -- t := .some 672114
     if tr && methPrint /- && ctx.callId == 532 -/ /- && not s.printedDbg -/ then -- TODO static variables?
+      let cond :=
       if s.numCalls % 1 == 0 then
+        if let some n := t then
+          s.numCalls == n
+        else
+          true
+      else
+        false
+      if cond then
         printedTrace := true
-        dbg_trace s!"calltrace {s.numCalls}: {ctx.callStack.map (·.1)}, {idx}, {ctx.callId}"
+        let stackStr := ctx.callStack.map (fun d =>
+          if d.1 == 9901 then
+            s!"{d.1}/{d.2.1}"
+          else
+            s!"{d.1}"
+        )
+        -- let stackStr := ctx.callStack.map (fun d => s!"{d.1}")
+        dbg_trace s!"calltrace {s.numCalls}: {stackStr}, {idx}, {ctx.callId}"
 
     -- if s.numCalls == 39363 then
     --   dbg_trace s!"DBG[21]: Methods.lean:46 (after if s.numCalls == 39363 then)"
@@ -121,7 +113,7 @@ match fuel with
       -- dbg_trace s!"{s.numCalls}: {stack[9]!.2}, {stack.map (·.1)}"
 
     let traceId : Option Nat := none
-    -- let traceId := Option.some 532
+    let traceId := Option.some 672114
     try
       let ret ← withCallId s.numCalls traceId do
         if tr then
@@ -157,21 +149,21 @@ match fuel with
 
 def Methods.withFuel (n : Nat) : Methods := 
   { isDefEqCore := fun i t s => do
-      fuelWrap i n $ .data $ .isDefEqCore t s
+      fuelWrap i n $ .isDefEqCore t s
     isDefEqCorePure := fun i t s => do
-      fuelWrap i n $ .data $ .isDefEqCorePure t s
+      fuelWrap i n $ .isDefEqCorePure t s
     quickIsDefEq := fun i t s b => do
-      fuelWrap i n $ .data $ .quickIsDefEq t s b
+      fuelWrap i n $ .quickIsDefEq t s b
     whnfCore := fun i e k p => do
-      fuelWrap i n $ .data $ .whnfCore e k p
+      fuelWrap i n $ .whnfCore e k p
     whnf := fun i e k => do
-      fuelWrap i n $ .data $ .whnf e k
+      fuelWrap i n $ .whnf e k
     whnfPure := fun i e => do
-      fuelWrap i n $ .data $ .whnfPure e
+      fuelWrap i n $ .whnfPure e
     inferType := fun i e d => do
-      fuelWrap i n $ .data $ .inferType e d
+      fuelWrap i n $ .inferType e d
     inferTypePure := fun i e => do
-      fuelWrap i n $ .data $ .inferTypePure e
+      fuelWrap i n $ .inferTypePure e
   }
 end
 
