@@ -23,6 +23,7 @@ match fuel with
     let m : RecM (CallDataT d):=
       match d with
       | .isDefEqCore t s => isDefEqCore' t s
+      | .isDefEqApp t s m p => _isDefEqApp t s m p
       | .isDefEqCorePure t s => isDefEqCorePure' t s
       | .quickIsDefEq t s b => quickIsDefEq' t s b
       | .whnfCore e k p => whnfCore' e k p
@@ -150,6 +151,8 @@ match fuel with
 def Methods.withFuel (n : Nat) : Methods := 
   { isDefEqCore := fun i t s => do
       fuelWrap i n $ .isDefEqCore t s
+    isDefEqApp := fun t s m p => do
+      fuelWrap 999 n $ .isDefEqApp t s m p
     isDefEqCorePure := fun i t s => do
       fuelWrap i n $ .isDefEqCorePure t s
     quickIsDefEq := fun i t s b => do

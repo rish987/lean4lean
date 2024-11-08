@@ -63,6 +63,7 @@ section
 
 structure ExtMethods (m : Type → Type u) where
   isDefEq : Nat → PExpr → PExpr → m (Bool × Option EExpr)
+  isDefEqApp : PExpr → PExpr → Std.HashMap Nat (Option EExpr) → m (Bool × Option EExpr)
   isDefEqPure : Nat → PExpr → PExpr → m Bool
   isDefEqLean : Expr → Expr → m Bool
   whnf  : Nat → PExpr → m (PExpr × Option EExpr)
@@ -87,7 +88,6 @@ structure ExtMethods (m : Type → Type u) where
 
 structure ExtMethodsR (m : Type → Type u) extends ExtMethods m where
   isDefEqApp' : PExpr → PExpr → Std.HashMap Nat (Option EExpr) → m (Bool × Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))
-  isDefEqApp : PExpr → PExpr → Std.HashMap Nat (Option EExpr) → m (Bool × Option EExpr)
   smartCast : Nat → PExpr → PExpr → PExpr → m (Bool × PExpr)
   maybeCast (n : Nat) (p? : Option EExpr) (typLhs typRhs e : PExpr) : m PExpr
   isDefEqProofIrrel' : PExpr → PExpr → PExpr → PExpr → Option EExpr → m (Option EExpr)

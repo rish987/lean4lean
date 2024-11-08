@@ -39,6 +39,7 @@ structure TypeChecker.State where
 
 inductive CallData where
 |  isDefEqCore : PExpr → PExpr → CallData
+|  isDefEqApp (t s : PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr)) (tfEqsf? : Option (Option EExpr)) : CallData
 |  isDefEqCorePure : PExpr → PExpr → CallData
 |  quickIsDefEq : PExpr → PExpr → Bool → CallData
 |  whnfCore (e : PExpr) (cheapK : Bool) (cheapProj : Bool) : CallData
@@ -58,10 +59,12 @@ toString
 | .whnfPure e          => s!"whnfPure ({e})"
 | .inferType e d       => s!"inferType ({e}) ({d})"
 | .inferTypePure e     => s!"inferTypePure ({e})"
+| _  => s!"TODO"
 
 
 def CallData.name : CallData → String
 | .isDefEqCore ..     => "isDefEqCore"
+| .isDefEqApp ..      => "isDefEqApp"
 | .isDefEqCorePure .. => "isDefEqCorePure"
 | .quickIsDefEq ..    => "quickIsDefEq"
 | .whnfCore ..        => "whnfCore"
@@ -73,6 +76,7 @@ def CallData.name : CallData → String
 @[reducible]
 def CallDataT : CallData → Type
 | .isDefEqCore ..     => Bool × Option EExpr
+| .isDefEqApp ..      => Bool × Option EExpr
 | .isDefEqCorePure .. => Bool
 | .quickIsDefEq ..    => LBool × Option EExpr
 | .whnfCore ..        => PExpr × Option EExpr
@@ -138,6 +142,7 @@ structure Methods where
   whnfPure (n : Nat) (e : PExpr) : M PExpr
   inferType (n : Nat) (e : Expr) (dbg : Bool) : MPE
   inferTypePure (n : Nat) (e : PExpr) : M PExpr
+  isDefEqApp (t s : PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr)) (tfEqsf? : Option (Option EExpr)) : M (Bool × Option EExpr)
 
 abbrev RecM := ReaderT Methods M
 abbrev RecPE := RecM (PExpr × (Option PExpr))
@@ -608,8 +613,12 @@ def alignForAll (numBinds : Nat) (ltl ltr : Expr) : RecM (Expr × Expr × Nat) :
     | _, _ => pure (ltl, ltr, 0)
   | _ => pure (ltl, ltr, 0)
 
+def isDefEqApp (t s : PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default)
+  (tfEqsf? : Option (Option EExpr) := none) : RecM (Bool × Option EExpr) := fun m => m.isDefEqApp t s targsEqsargs? tfEqsf?
+
 def meths : ExtMethods RecM := {
     isDefEq := isDefEq
+    isDefEqApp := fun t s m => isDefEqApp t s (targsEqsargs? := m)
     isDefEqPure := isDefEqPure
     isDefEqLean := isDefEqLean
     whnf  := whnf
@@ -664,7 +673,7 @@ def isDefEqApp' (t s : PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr) :=
 Checks if applications `t` and `s` (should be WHNF) are defeq on account of
 their function heads and arguments being defeq.
 -/
-def isDefEqApp (t s : PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default)
+def _isDefEqApp (t s : PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default)
   (tfEqsf? : Option (Option EExpr) := none) : RecM (Bool × Option EExpr) := do
   ttrace s!"DBG[1]: TypeChecker.lean:668 {t.toExpr.getAppArgs.size}"
   if let some p := (← get).isDefEqCache.get? (t, s) then
@@ -848,7 +857,7 @@ def methsR : ExtMethodsR RecM := {
     meths with
     smartCast := smartCast
     maybeCast := maybeCast
-    isDefEqApp := fun t s m => isDefEqApp t s (targsEqsargs? := m)
+    -- isDefEqApp := fun t s m => isDefEqApp t s (targsEqsargs? := m)
     isDefEqApp' := fun t s m => isDefEqApp' t s (targsEqsargs? := m)
     isDefEqProofIrrel' := isDefEqProofIrrel' (n := 2) (useRfl := true) -- need to pass `useRfl := true` because of failure of transitivity (with K-like reduction)
   }
@@ -1535,11 +1544,11 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
           let frargs' := frargs'?.getD frargs
           let rargs' := frargs'.toExpr.getAppArgs[f.toExpr.getAppArgs.size:].toArray.reverse
           assert 10 $ rargs'.size == rargs.size
-          -- let (.true, data?) ← isDefEqApp'' f0 f (rargs.map (·.toPExpr)).reverse (rargs'.map (·.toPExpr)).reverse (tfEqsf? := pf0Eqf?) |
-          --   throw $ .other "unreachable 10"
-          -- let eEqfrargs'? := data?.map (·.1)
-          let (.true, eEqfrargs'?) ← isDefEq 99 (Lean.mkAppN f0 rargs.reverse).toPExpr (Lean.mkAppN f rargs'.reverse).toPExpr |
+          let (.true, data?) ← dbg_wrap 9907 $ isDefEqApp'' f0 f (rargs.map (·.toPExpr)).reverse (rargs'.map (·.toPExpr)).reverse (tfEqsf? := pf0Eqf?) |
             throw $ .other "unreachable 10"
+          let eEqfrargs'? := data?.map (·.1)
+          -- let (.true, eEqfrargs'?) ← isDefEq 99 (Lean.mkAppN f0 rargs.reverse).toPExpr (Lean.mkAppN f rargs'.reverse).toPExpr |
+          --   throw $ .other "unreachable 10"
           pure (frargs', rargs', eEqfrargs'?)
         else
           -- let mut m := default
