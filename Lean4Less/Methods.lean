@@ -43,7 +43,7 @@ match fuel with
 
     let mut printedTrace := false
     let methPrint := false
-    -- let methPrint := true
+    let methPrint := true
     let mut t := .none
     -- t := .some 672114
     if tr && methPrint /- && ctx.callId == 532 -/ /- && not s.printedDbg -/ then -- TODO static variables?
@@ -151,8 +151,8 @@ match fuel with
 def Methods.withFuel (n : Nat) : Methods := 
   { isDefEqCore := fun i t s => do
       fuelWrap i n $ .isDefEqCore t s
-    isDefEqApp := fun t s m p => do
-      fuelWrap 999 n $ .isDefEqApp t s m p
+    isDefEqApp := fun i t s m p => do
+      fuelWrap (9900 + i) n $ .isDefEqApp t s m p
     isDefEqCorePure := fun i t s => do
       fuelWrap i n $ .isDefEqCorePure t s
     quickIsDefEq := fun i t s b => do

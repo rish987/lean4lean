@@ -185,7 +185,7 @@ def inductiveReduceRec [Monad m] [MonadWithReaderOf LocalContext m] [MonadLCtx m
   --   _ ← meth.inferTypePure 10001 eNewMajor'
   -- let (_, eNewMajor?) := (← meth.inferType 121 eNewMajor') -- cast remaining args as necessary
   -- let eNewMajor := eNewMajor?.getD eNewMajor'
-  let (.true, eEqeNewMajor'?) ← meth.isDefEqApp e' eNewMajor' map | unreachable!
+  let (.true, eEqeNewMajor'?) ← meth.isDefEqApp 7 e' eNewMajor' map | unreachable!
 
   -- get parameters from recursor application (recursor rules don't need the indices,
   -- as these are determined by the constructor and its parameters/fields)

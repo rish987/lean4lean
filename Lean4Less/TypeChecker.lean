@@ -142,7 +142,7 @@ structure Methods where
   whnfPure (n : Nat) (e : PExpr) : M PExpr
   inferType (n : Nat) (e : Expr) (dbg : Bool) : MPE
   inferTypePure (n : Nat) (e : PExpr) : M PExpr
-  isDefEqApp (t s : PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr)) (tfEqsf? : Option (Option EExpr)) : M (Bool × Option EExpr)
+  isDefEqApp (n : Nat) (t s : PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr)) (tfEqsf? : Option (Option EExpr)) : M (Bool × Option EExpr)
 
 abbrev RecM := ReaderT Methods M
 abbrev RecPE := RecM (PExpr × (Option PExpr))
@@ -418,6 +418,7 @@ def isDefEq (n : Nat) (t s : PExpr) : RecB := do
 
   if result then
     if let some p := p? then
+      _ ← inferTypePure (9000 + n) p
       modify fun st => { st with isDefEqCache := st.isDefEqCache.insert (t, s) p }
     else
       modify fun st => { st with eqvManager := st.eqvManager.addEquiv t s }
@@ -613,12 +614,12 @@ def alignForAll (numBinds : Nat) (ltl ltr : Expr) : RecM (Expr × Expr × Nat) :
     | _, _ => pure (ltl, ltr, 0)
   | _ => pure (ltl, ltr, 0)
 
-def isDefEqApp (t s : PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default)
-  (tfEqsf? : Option (Option EExpr) := none) : RecM (Bool × Option EExpr) := fun m => m.isDefEqApp t s targsEqsargs? tfEqsf?
+def isDefEqApp (n : Nat) (t s : PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default)
+  (tfEqsf? : Option (Option EExpr) := none) : RecM (Bool × Option EExpr) := fun m => m.isDefEqApp n t s targsEqsargs? tfEqsf?
 
 def meths : ExtMethods RecM := {
     isDefEq := isDefEq
-    isDefEqApp := fun t s m => isDefEqApp t s (targsEqsargs? := m)
+    isDefEqApp := fun n t s m => isDefEqApp n t s (targsEqsargs? := m)
     isDefEqPure := isDefEqPure
     isDefEqLean := isDefEqLean
     whnf  := whnf
@@ -703,7 +704,7 @@ def isDefEqForallOpt' (t s : PExpr) : RecB := do
   if tAbsDoms.size == 0 then
     pure (true, none)
   else
-    let (ret, dat?) ← dbg_wrap 9906 $ isDefEqApp'' tf'.toPExpr sf'.toPExpr tAbsDoms sAbsDoms tAbsDomsEqsAbsDomsMap
+    let (ret, dat?) ← isDefEqApp'' tf'.toPExpr sf'.toPExpr tAbsDoms sAbsDoms tAbsDomsEqsAbsDomsMap
     pure (ret, dat?.map (·.1))
 
 /--
@@ -1166,8 +1167,8 @@ def appProjThm? (structName : Name) (projIdx : Nat) (struct structN : PExpr) (st
           let f := (← getLCtx).mkLambda (paramVars ++ #[s]) (.proj structName projIdx s) |>.toPExpr
           let mut targsEqsargs? := default
           targsEqsargs? := targsEqsargs?.insert numParams structEqstructN?
-          let (true, ret?) ← dbg_wrap 9901 do
-            isDefEqApp (Lean.mkAppN f (params ++ #[struct.toExpr])).toPExpr (Lean.mkAppN f (paramsN ++ #[structN.toExpr])).toPExpr targsEqsargs? (some none) | unreachable!
+          let (true, ret?) ←
+            isDefEqApp 1 (Lean.mkAppN f (params ++ #[struct.toExpr])).toPExpr (Lean.mkAppN f (paramsN ++ #[structN.toExpr])).toPExpr targsEqsargs? (some none) | unreachable!
 
           pure $ ret?.get!
       | _, _ => unreachable!
@@ -1482,7 +1483,7 @@ def tryEtaStructCore (t s : PExpr) : RecB := do
   let expt := exptE.toPExpr
   
   let tEqexpt? := none -- TODO use proof here to eliminate struct eta
-  let (true, exptEqs?) ← dbg_wrap 9902 $ isDefEqApp expt s | return (false, none) -- TODO eliminate struct eta
+  let (true, exptEqs?) ← isDefEqApp 2 expt s | return (false, none) -- TODO eliminate struct eta
   return (true, ← appHEqTrans? t expt s tEqexpt? exptEqs?)
 
 @[inherit_doc tryEtaStructCore]
@@ -1544,7 +1545,7 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
           let frargs' := frargs'?.getD frargs
           let rargs' := frargs'.toExpr.getAppArgs[f.toExpr.getAppArgs.size:].toArray.reverse
           assert 10 $ rargs'.size == rargs.size
-          let (.true, data?) ← dbg_wrap 9907 $ isDefEqApp'' f0 f (rargs.map (·.toPExpr)).reverse (rargs'.map (·.toPExpr)).reverse (tfEqsf? := pf0Eqf?) |
+          let (.true, data?) ← isDefEqApp'' f0 f (rargs.map (·.toPExpr)).reverse (rargs'.map (·.toPExpr)).reverse (tfEqsf? := pf0Eqf?) |
             throw $ .other "unreachable 10"
           let eEqfrargs'? := data?.map (·.1)
           -- let (.true, eEqfrargs'?) ← isDefEq 99 (Lean.mkAppN f0 rargs.reverse).toPExpr (Lean.mkAppN f rargs'.reverse).toPExpr |
@@ -1763,7 +1764,7 @@ def lazyDeltaReductionStep (ltn lsn : PExpr) : RecM ReductionStatus := do
         && !failedBefore (← get).failure ltn lsn
       then
         if Level.isEquivList ltn.toExpr.getAppFn.constLevels! lsn.toExpr.getAppFn.constLevels! then
-          let (r, proof?) ← dbg_wrap 9903 $ isDefEqApp ltn lsn
+          let (r, proof?) ← isDefEqApp 3 ltn lsn
           if r then
             return .bool true proof?
         cacheFailure ltn lsn
@@ -1961,7 +1962,7 @@ def isDefEqCore' (t s : PExpr) : RecM (Bool × (Option EExpr)) := do
           if let some (.recInfo info) := (← getEnv).find? tn then
             if info.k then
               -- optimized by above functions using `cheapK = true`
-              match ← dbg_wrap 9904 $ isDefEqApp tn' sn' with
+              match ← isDefEqApp 4 tn' sn' with
               | (true, tn'Eqsn'?) =>
                 return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)
               | _ =>
@@ -1988,7 +1989,7 @@ def isDefEqCore' (t s : PExpr) : RecM (Bool × (Option EExpr)) := do
     return (true, r?)
 
   -- optimized by above functions using `cheapK = true`
-  match ← dbg_wrap 9905 $ isDefEqApp tn' sn' with
+  match ← isDefEqApp 5 tn' sn' with
   | (true, tn'Eqsn'?) =>
     return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)
   | _ =>
