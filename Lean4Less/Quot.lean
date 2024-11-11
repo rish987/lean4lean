@@ -54,7 +54,7 @@ def quotReduceRec [Monad m] (e : PExpr)
         map := map.insert i p?
         i := i + 1
       let newe := (mkAppN fn $ newArgs).toPExpr
-      let (.true, eEqnewe?) ← meth.isDefEqApp e newe map | unreachable!
+      let (.true, eEqnewe?) ← meth.isDefEqApp 1 e newe map | unreachable!
       let mut r := Expr.app newArgs[argPos]! mk.toExpr.appArg! |>.toPExpr
       let elimArity := mkPos + 1
       if elimArity < newArgs.size then

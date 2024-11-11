@@ -183,8 +183,11 @@ def mkAppEqProof (T S : PExpr) (TEqS? : Option EExpr) (as bs : Array PExpr) (asE
         let bVars := bVars.push bVar
         let Uas := Uas.push Ua
         let Vbs := Vbs.push Vb
-        let (defEq, UaEqVb?) ← meth.isDefEq 202 Ua Vb
-        assert! defEq
+        -- let (defEq, UaEqVb?) ← meth.isDefEq 202 Ua Vb
+        -- let dep := Ua.containsFVar' aVar || Vb.containsFVar' bVar
+        -- let UaEqVb? := if d?.isSome && dep then .some $ .sry {u := v.succ, A := (Expr.sort v).toPExpr, B := (Expr.sort v).toPExpr, a := Ua, b := Vb} else none
+        let UaEqVb? := .some $ .sry {u := v.succ, A := (Expr.sort v).toPExpr, B := (Expr.sort v).toPExpr, a := Ua, b := Vb}
+        -- assert! defEq
         let UasEqVbs? := UasEqVbs?.push UaEqVb?
         if _h : idx < as.size - 1 then
           loop (idx + 1) T S aVars bVars Uas Vbs UasEqVbs? ds? us vs
@@ -403,7 +406,7 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
   let (.true, tfEqsf?) ← if tfEqsf?.isSome then pure (.true, tfEqsf?.get!)
     else meth.isDefEq 222 tf sf | return (false, none)
 
-  let mkAppEqProof' tVars sVars tArgs' sArgs' taEqsas' tBodFun sBodFun tBodArgs sBodArgs _tArgsVars _sArgsVars tBodT sBodT tEtaVars sEtaVars idx := do -- FIXME why do I have to pass in the mutable variables?
+  let mkAppEqProof' tVars sVars tArgs' sArgs' taEqsas' tBodFun sBodFun tBodFunEqsBodFun? tBodArgs sBodArgs _tArgsVars _sArgsVars tBodT sBodT tEtaVars sEtaVars idx := do -- FIXME why do I have to pass in the mutable variables?
     if tVars.size > 0 then
       let tLCtx := tVars.foldl (init := (← getLCtx)) fun acc (id, n, (type : PExpr)) => LocalContext.mkLocalDecl acc id n type default
       let sLCtx := sVars.foldl (init := (← getLCtx)) fun acc (id, n, (type : PExpr)) => LocalContext.mkLocalDecl acc id n type default
@@ -424,7 +427,7 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
       --   let iT ← meth.inferTypePure 1111 (Lean.mkAppN tBodFun (tBodArgs'.map (·.toExpr))).toPExpr -- sanity check
       --   let T := tLCtx.mkForall (tVars[sBodArgs.size - sEtaVars:].toArray.map (.fvar ·.1)) tBodT
       --   if not (← meth.isDefEqPure 209 T.toPExpr iT) then
-      if tfEqsf?.isSome then -- FIXME need to handle this case?
+      if tBodFunEqsBodFun?.isSome then -- FIXME need to handle this case?
         assert! (← meth.isDefEqPure 0 tf'.toPExpr sf'.toPExpr)
 
       let p? ← mkAppEqProof meth tfType.toPExpr sfType.toPExpr none tArgs' sArgs' taEqsas' tf'.toPExpr sf'.toPExpr
@@ -440,6 +443,7 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
   let mut tBodFun : PExpr := tf
   let mut tBodArgs : Array PExpr := #[]
   let mut sBodFun : PExpr := sf
+  let mut tBodFunEqsBodFun? := tfEqsf?
   let mut sBodArgs : Array PExpr := #[]
   let mut tArgs' := #[]
   let mut sArgs' := #[]
@@ -482,13 +486,21 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
           if idx == 0 && tfEqsf?.isSome then
             pure (tfEqsf?)
           else
-            mkAppEqProof' tVars sVars tArgs' sArgs' taEqsas' tBodFun sBodFun tBodArgs sBodArgs tArgsVars sArgsVars tBodT sBodT tEtaVars sEtaVars idx
+            mkAppEqProof' tVars sVars tArgs' sArgs' taEqsas' tBodFun sBodFun tBodFunEqsBodFun? tBodArgs sBodArgs tArgsVars sArgsVars tBodT sBodT tEtaVars sEtaVars idx
         let tf := (Lean.mkAppN tf (tArgs[:idx].toArray.map (·.toExpr))).toPExpr
         let sf := (Lean.mkAppN sf (sArgs[:idx].toArray.map (·.toExpr))).toPExpr
 
         -- TODO
         let (tfVar, tfTAbsDomsVars, tfTAbsDoms, sfVar, sfTAbsDomsVars, sfTAbsDoms, tfTAbsDomsEqsfTAbsDoms?, absArgs') ← do
+          if (← meth.shouldTTrace) then
+            dbg_trace s!"DBG[A]: App.lean:495 (after if (← meth.shouldTTrace) then)"
+            _ ← meth.isDefEqLean tfT sfT
+            dbg_trace s!"DBG[B]: App.lean:497 (after sorry)"
+            _ ← meth.isDefEq 0 tfT sfT
+            dbg_trace s!"DBG[C]: App.lean:498"
+          meth.ttrace s!"DBG[4]: App.lean:500 (after dbg_trace s!DBG[C]: App.lean:498)"
           let (.some (tfType, tfTAbsDomsVars, tfTAbsDoms, sfType, sfTAbsDomsVars, sfTAbsDoms, tfTAbsDomsEqsfTAbsDoms?, absArgsOffset')) ← forallAbs meth (tArgs.size - idx) tfT.toExpr sfT.toExpr | return (false, none)
+          meth.ttrace s!"DBG[5]: App.lean:502 (after let (.some (tfType, tfTAbsDomsVars, tfTA…)"
           let mut absArgs' := default
           for pos in absArgsOffset' do
             absArgs' := absArgs'.insert (pos + idx)
@@ -599,7 +611,10 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
 
     (tfT, sfT) ← match (← meth.whnfPure 230 tfT).toExpr, (← meth.whnfPure 231 sfT).toExpr with
       | .forallE _ _ tBody _, .forallE _ _ sBody _ =>
-        pure $ (tBody.instantiate1 ta |>.toPExpr, sBody.instantiate1 sa |>.toPExpr)
+        if taEqsa?.isNone then
+          pure $ (tBody.instantiate1 ta |>.toPExpr, sBody.instantiate1 ta |>.toPExpr)
+        else
+          pure $ (tBody.instantiate1 ta |>.toPExpr, sBody.instantiate1 sa |>.toPExpr)
       | _, _ => unreachable!
 
     (tBodT, sBodT) ← match (← meth.whnfPure 232 tBodT).toExpr, (← meth.whnfPure 233 sBodT).toExpr with
@@ -607,7 +622,7 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
         pure $ (tBody.instantiate1 tBoda |>.toPExpr, sBody.instantiate1 sBoda |>.toPExpr)
       | _, _ => unreachable!
 
-  let tEqs? ← mkAppEqProof' tVars sVars tArgs' sArgs' taEqsas' tBodFun sBodFun tBodArgs sBodArgs tArgsVars sArgsVars tBodT sBodT tEtaVars sEtaVars tArgs'.size
+  let tEqs? ← mkAppEqProof' tVars sVars tArgs' sArgs' taEqsas' tBodFun sBodFun tBodFunEqsBodFun? tBodArgs sBodArgs tArgsVars sArgsVars tBodT sBodT tEtaVars sEtaVars tArgs'.size
   -- TODO(perf) restrict data collection to the case of `taEqsa?.isSome || ret?.isSome`
   return (true, (tEqs?.map fun tEqs => (tEqs, taEqsaDatas)))
 

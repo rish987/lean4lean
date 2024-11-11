@@ -1064,7 +1064,9 @@ def EExpr.toExpr' (e : EExpr) : EM Expr := do
 end
 
 def EExpr.toExpr (e : EExpr) (dbg := false) : Expr := Id.run $ do
+  dbg_trace s!"DBG[1]: EExpr.lean:1066 (after def EExpr.toExpr (e : EExpr) (dbg := fal…)"
   let ret ← e.toExpr'.run dbg
+  dbg_trace s!"DBG[2]: EExpr.lean:1068 (after let ret ← e.toExpr.run dbg)"
   pure ret
 
 namespace EExpr

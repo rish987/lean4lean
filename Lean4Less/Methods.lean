@@ -7,14 +7,13 @@ open Lean
 
 def defFuel := 1300
 
--- def tr := true
-def tr := false
+def tr := true
+-- def tr := false
 
 mutual
 def fuelWrap (idx : Nat) (fuel : Nat) (d : CallData) : M (CallDataT d) := do
 let ctx := (← readThe Context)
 match fuel with
-
   | 0 =>
     dbg_trace s!"deep recursion callstack: {ctx.callStack.map (·.1)}"
     throw .deepRecursion
@@ -23,6 +22,7 @@ match fuel with
     let m : RecM (CallDataT d):=
       match d with
       | .isDefEqCore t s => isDefEqCore' t s
+      | .isDefEqApp t s m p => _isDefEqApp t s m p
       | .isDefEqCorePure t s => isDefEqCorePure' t s
       | .quickIsDefEq t s b => quickIsDefEq' t s b
       | .whnfCore e k p => whnfCore' e k p
@@ -41,12 +41,28 @@ match fuel with
     --   
 
     let mut printedTrace := false
+    let mut t := none
+    -- t := .some 1109339
     let methPrint := false
+    -- let methPrint := (← shouldTrace)
     let methPrint := true
-    if tr && methPrint /- && ctx.callId == 532 -/ /- && not s.printedDbg -/ then -- TODO static variables?
-      if s.numCalls % 1 == 0 then
-        printedTrace := true
-        dbg_trace s!"calltrace {s.numCalls}: {ctx.callStack.map (·.1)}, {idx}, {ctx.callId}"
+    let cond :=
+    if s.numCalls % 1 == 0 then
+      if let some n := t then
+        s.numCalls == n
+      else
+        methPrint
+    else
+      false
+    if cond then
+      printedTrace := true
+      let stackStr := ctx.callStack.map (fun d =>
+        if t.isSome then
+          s!"{d.1}/{d.2.1}"
+        else
+          s!"{d.1}"
+      )
+      dbg_trace s!"calltrace {s.numCalls}: {stackStr}, {idx}, {ctx.callId}"
 
     -- if s.numCalls == 39363 then
     --   dbg_trace s!"DBG[21]: Methods.lean:46 (after if s.numCalls == 39363 then)"
@@ -96,7 +112,7 @@ match fuel with
       -- dbg_trace s!"{s.numCalls}: {stack[9]!.2}, {stack.map (·.1)}"
 
     let traceId : Option Nat := none
-    -- let traceId := Option.some 532
+    let traceId := Option.some 984631
     try
       let ret ← withCallId s.numCalls traceId do
         if tr then
@@ -133,6 +149,8 @@ match fuel with
 def Methods.withFuel (n : Nat) : Methods := 
   { isDefEqCore := fun i t s => do
       fuelWrap i n $ .isDefEqCore t s
+    isDefEqApp := fun i t s m p => do
+      fuelWrap (9900 + i) n $ .isDefEqApp t s m p
     isDefEqCorePure := fun i t s => do
       fuelWrap i n $ .isDefEqCorePure t s
     quickIsDefEq := fun i t s b => do

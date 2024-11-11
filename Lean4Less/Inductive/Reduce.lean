@@ -185,7 +185,7 @@ def inductiveReduceRec [Monad m] [MonadWithReaderOf LocalContext m] [MonadLCtx m
   --   _ ← meth.inferTypePure 10001 eNewMajor'
   -- let (_, eNewMajor?) := (← meth.inferType 121 eNewMajor') -- cast remaining args as necessary
   -- let eNewMajor := eNewMajor?.getD eNewMajor'
-  let (.true, eEqeNewMajor'?) ← meth.isDefEqApp e' eNewMajor' map | unreachable!
+  let (.true, eEqeNewMajor'?) ← meth.isDefEqApp 2 e' eNewMajor' map | unreachable!
 
   -- get parameters from recursor application (recursor rules don't need the indices,
   -- as these are determined by the constructor and its parameters/fields)
@@ -194,8 +194,11 @@ def inductiveReduceRec [Monad m] [MonadWithReaderOf LocalContext m] [MonadLCtx m
   rhs := mkAppRange rhs (majorArgs.size - rule.nfields) majorArgs.size majorArgs
 
   if let some eEqeNewMajor' := eEqeNewMajor'? then
-    let eNewMajorType' ← meth.inferTypePure 121 eNewMajor'
+    dbg_trace s!"DBG[1]: Reduce.lean:196 (after if let some eEqeNewMajor := eEqeNewMajor…)"
     let eType' ← meth.inferTypePure 129 e'
+    dbg_trace s!"DBG[3]: Reduce.lean:198 (after let eType := (← meth.inferTypeLean 129…)"
+    let eNewMajorType' ← meth.inferTypePure 121 eNewMajor'
+    dbg_trace s!"DBG[2]: Reduce.lean:198 (after let eNewMajorType := (← meth.inferType…)"
     let sort ← meth.whnfPure 135 (← meth.inferTypePure 134 eType')
     let .sort lvl := sort.toExpr | unreachable!
     let idrV := .mk (← meth.mkId 130 eType')
