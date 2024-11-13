@@ -7,8 +7,8 @@ open Lean
 
 def defFuel := 1300
 
-def tr := true
--- def tr := false
+-- def tr := true
+def tr := false
 
 mutual
 def fuelWrap (idx : Nat) (fuel : Nat) (d : CallData) : M (CallDataT d) := do
@@ -42,18 +42,18 @@ match fuel with
 
     let mut printedTrace := false
     let mut t := none
-    -- t := .some 1109339
+    -- t := .some 33496
     let methPrint := false
     -- let methPrint := (← shouldTrace)
     let methPrint := true
-    let cond :=
-    if s.numCalls % 1 == 0 then
-      if let some n := t then
-        s.numCalls == n
+    let cond := tr &&
+      if s.numCalls % 1 == 0 then
+        if let some n := t then
+          s.numCalls == n
+        else
+          methPrint
       else
-        methPrint
-    else
-      false
+        false
     if cond then
       printedTrace := true
       let stackStr := ctx.callStack.map (fun d =>
@@ -111,8 +111,10 @@ match fuel with
       --   | _ => unreachable!
       -- dbg_trace s!"{s.numCalls}: {stack[9]!.2}, {stack.map (·.1)}"
 
-    let traceId : Option Nat := none
-    let traceId := Option.some 984631
+    let mut traceId := none
+    -- traceId := Option.some 31447
+    -- traceId := Option.some 26425
+    -- traceId := Option.some 33496
     try
       let ret ← withCallId s.numCalls traceId do
         if tr then

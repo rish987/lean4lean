@@ -492,15 +492,15 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
 
         -- TODO
         let (tfVar, tfTAbsDomsVars, tfTAbsDoms, sfVar, sfTAbsDomsVars, sfTAbsDoms, tfTAbsDomsEqsfTAbsDoms?, absArgs') ← do
-          if (← meth.shouldTTrace) then
-            dbg_trace s!"DBG[A]: App.lean:495 (after if (← meth.shouldTTrace) then)"
-            _ ← meth.isDefEqLean tfT sfT
-            dbg_trace s!"DBG[B]: App.lean:497 (after sorry)"
-            _ ← meth.isDefEq 0 tfT sfT
-            dbg_trace s!"DBG[C]: App.lean:498"
-          meth.ttrace s!"DBG[4]: App.lean:500 (after dbg_trace s!DBG[C]: App.lean:498)"
+          -- if (← meth.shouldTTrace) then
+          --   dbg_trace s!"DBG[A]: App.lean:495 (after if (← meth.shouldTTrace) then)"
+          --   _ ← meth.isDefEqLean tfT sfT
+          --   dbg_trace s!"DBG[B]: App.lean:497 (after sorry)"
+          --   _ ← meth.isDefEq 0 tfT sfT
+          --   dbg_trace s!"DBG[C]: App.lean:498"
+          -- meth.ttrace s!"DBG[4]: App.lean:500 (after dbg_trace s!DBG[C]: App.lean:498)"
           let (.some (tfType, tfTAbsDomsVars, tfTAbsDoms, sfType, sfTAbsDomsVars, sfTAbsDoms, tfTAbsDomsEqsfTAbsDoms?, absArgsOffset')) ← forallAbs meth (tArgs.size - idx) tfT.toExpr sfT.toExpr | return (false, none)
-          meth.ttrace s!"DBG[5]: App.lean:502 (after let (.some (tfType, tfTAbsDomsVars, tfTA…)"
+          -- meth.ttrace s!"DBG[5]: App.lean:502 (after let (.some (tfType, tfTAbsDomsVars, tfTA…)"
           let mut absArgs' := default
           for pos in absArgsOffset' do
             absArgs' := absArgs'.insert (pos + idx)

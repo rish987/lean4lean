@@ -98,6 +98,7 @@ structure TypeChecker.Context where
   cheapK := false
   callId : Nat := 0
   L4LTrace : Bool := false
+  L4LTraceOverride : Bool := false
   dbgCallId : Option Nat := none
   callStack : Array (Nat × Nat × (Option CallData)) := #[]
   lparams : List Name := []
@@ -207,14 +208,14 @@ def mkId (n : Nat) (dom : Expr) : RecM Name := do
   mkId' n (← getLCtx) dom
 
 def runLeanMinus (M : Lean.TypeChecker.M T) : RecM T := do
-  let trace := (← readThe Context).L4LTrace && (← shouldTrace)
+  let trace := (← readThe Context).L4LTraceOverride || ((← readThe Context).L4LTrace && (← shouldTrace))
   let (ret, newState) ← Lean.TypeChecker.M.run (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := false, proofIrrelevance := false}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams)
     (nid := (← get).nid) (fvarTypeToReusedNamePrefix := (← get).fvarTypeToReusedNamePrefix) (state := (← get).leanMinusState) (trace := trace) M
   modify fun s => {s with leanMinusState := newState, nid := newState.nid, fvarTypeToReusedNamePrefix := newState.fvarTypeToReusedNamePrefix}
   pure ret
 
 def runLeanMinusRecM (M : Lean.TypeChecker.RecM T) : RecM T := do
-  let trace := (← readThe Context).L4LTrace && (← shouldTrace)
+  let trace := (← readThe Context).L4LTraceOverride || ((← readThe Context).L4LTrace && (← shouldTrace))
   let (ret, newState) ← Lean.TypeChecker.M.run (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := false, proofIrrelevance := false}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams)
     (nid := (← get).nid) (fvarTypeToReusedNamePrefix := (← get).fvarTypeToReusedNamePrefix) (state := (← get).leanMinusState) (trace := trace)
     M.run
@@ -222,14 +223,16 @@ def runLeanMinusRecM (M : Lean.TypeChecker.RecM T) : RecM T := do
   pure ret
 
 def runLeanRecM' (M : Lean.TypeChecker.RecM T) : RecM (T × Lean.TypeChecker.State) := do
-  let trace := (← readThe Context).L4LTrace && (← shouldTrace)
-  let (ret, s) ← Lean.TypeChecker.M.run (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := true, proofIrrelevance := true}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams) (nid := (← get).nid) (trace := trace)
+  let trace := (← readThe Context).L4LTraceOverride || ((← readThe Context).L4LTrace && (← shouldTrace))
+  let eqFVars := (← readThe Context).eqFVars.keys.foldl (init := default) fun acc t => acc.insert t
+  let (ret, s) ← Lean.TypeChecker.M.run (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := true, proofIrrelevance := true}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams) (nid := (← get).nid) (trace := trace) (fvarTypeToReusedNamePrefix := (← get).fvarTypeToReusedNamePrefix) (eqFVars := eqFVars)
     M.run
   pure (ret, s)
 
 def runLeanRecM (M : Lean.TypeChecker.RecM T) : RecM T := do
-  let trace := (← readThe Context).L4LTrace && (← shouldTrace)
-  let (ret, _) ← Lean.TypeChecker.M.run (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := true, proofIrrelevance := true}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams) (nid := (← get).nid) (trace := trace)
+  let trace := (← readThe Context).L4LTraceOverride || ((← readThe Context).L4LTrace && (← shouldTrace))
+  let eqFVars := (← readThe Context).eqFVars.keys.foldl (init := default) fun acc t => acc.insert t
+  let (ret, _) ← Lean.TypeChecker.M.run (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := true, proofIrrelevance := true}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams) (nid := (← get).nid) (trace := trace) (fvarTypeToReusedNamePrefix := (← get).fvarTypeToReusedNamePrefix) (eqFVars := eqFVars)
     M.run
   pure ret
 
@@ -270,6 +273,9 @@ def whnfPure (n : Nat) (e : PExpr) : RecM PExpr := fun m => m.whnfPure n e
 @[inline] def withL4LTrace [MonadWithReaderOf Context m] (x : m α) : m α :=
   withReader (fun c => {c with L4LTrace := true}) x
 
+@[inline] def withL4LTraceO [MonadWithReaderOf Context m] (x : m α) : m α :=
+  withReader (fun c => {c with L4LTraceOverride := true}) x
+
 @[inline] def withForallOpt [MonadWithReaderOf Context m] (x : m α) : m α :=
   withReader (fun l => {l with forallOpt := true}) x
 
@@ -280,6 +286,15 @@ def dbg_wrap (idx : Nat) (m : RecM α) : RecM α := do
     withCallData idx s.numCalls none do 
       m
   pure ret
+
+def getTrace : RecM String := do
+  let callStrs :=  (← readThe Context).callStack.map (fun d =>
+    -- if t.isSome then
+    --   s!"{d.1}/{d.2.1}"
+    -- else
+      s!"{d.1}"
+  )
+  pure s!"{callStrs}"
 
 /--
 Ensures that `e` is defeq to some `e' := .sort ..`, returning `e'`. If not,
@@ -432,15 +447,36 @@ def isDefEq (n : Nat) (t s : PExpr) : RecB := do
 def isDefEqLean (t s : Expr) (fuel := 1000) : RecM Bool := do
   runLeanRecM $ Lean.TypeChecker.isDefEq t s fuel
 
-def usesPrfIrrel (t s : Expr) (fuel := 1000) : RecM Bool := do
-  let (true, s) ← runLeanRecM' $ Lean.TypeChecker.isDefEq t s fuel | throw $ .other "usesPrfIrrel error"
-  pure s.data.usedProofIrrelevance
+def isDefEqArgsLean (t s : Expr) : RecM (Bool × Bool) := do
+  let (ret, s) ← runLeanRecM' $ Lean.TypeChecker.Inner.isDefEqArgs t s
+  pure (ret, s.data.used)
+
+def isDefEqAppLean (t s : Expr) : RecM (Bool × Bool) := do
+  let (ret, s) ← runLeanRecM' $ Lean.TypeChecker.Inner.isDefEqApp t s
+  pure (ret, s.data.used)
+
+def usesPrfIrrel' (t s : Expr) (fuel := 1000) : RecM (Bool × Bool) := do
+  let (ret, s) ← runLeanRecM' $ Lean.TypeChecker.isDefEq t s fuel
+  pure (ret, s.data.used)
+
+def usesPrfIrrel (t s : Expr) (fuel := 1000) : RecM (Bool × Bool) := do
+  let (defEq, s) ← runLeanRecM' $ Lean.TypeChecker.isDefEq t s fuel
+  pure $ (defEq, s.data.used)
 
 def inferTypeLean (n : Nat) (t : Expr) : RecM Expr := do
-  dbg_wrap (55000 + n) $ runLeanMinusRecM $ Lean.TypeChecker.Inner.inferType 0 t (inferOnly := false)
+  dbg_wrap (55000 + n) $ runLeanRecM $ Lean.TypeChecker.Inner.inferType 0 t (inferOnly := false)
+
+def inferTypeOnlyLean (n : Nat) (t : Expr) : RecM Expr := do
+  dbg_wrap (55000 + n) $ runLeanRecM $ Lean.TypeChecker.Inner.inferType 0 t (inferOnly := true)
 
 def whnfLean (t : Expr) : RecM Expr := do
   runLeanRecM $ Lean.TypeChecker.whnf t
+
+def whnfCoreLean (t : Expr) : RecM Expr := do
+  runLeanRecM $ Lean.TypeChecker.Inner.whnfCore 0 t
+
+def reduceRecursorLean (t : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) := do
+  runLeanRecM $ Lean.TypeChecker.Inner.reduceRecursor t cheapRec cheapProj
 
 def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : PExpr)
 (f : PExpr → PExpr → Option EExpr → Array LocalDecl → Array (Option (LocalDecl × LocalDecl × LocalDecl × (Option EExpr))) → RecM (Option T))
@@ -472,10 +508,21 @@ def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : P
         else
           let tBody := tBody.instantiateRev (tvars.map (·.toExpr.toPExpr))
           let sBody := sBody.instantiateRev (svars.map (·.toExpr.toPExpr))
+          let (true, usesPI) ← usesPrfIrrel tBody sBody | return (false, none)
           -- dbg_trace s!"DBG[1]: TypeChecker.lean:445: svars={(svars.map (·.fvarId.name))}"
-
-          let (defEq, ptbodEqsbod?) ← isDefEq 6 tBody sBody -- TODO refactor isDefEq to return normalized terms that were finally compared (to eliminate unused fvar dependencies)
-          if !defEq then return (false, none)
+          -- if !defEq then return (false, none)
+          let ptbodEqsbod? ← if usesPI then
+            let (true, ptbodEqsbod?) ← isDefEq 6 tBody sBody | return (false, none) -- TODO refactor isDefEq to return normalized terms that were finally compared (to eliminate unused fvar dependencies)
+            -- if !defEq then 
+            --   dbg_trace s!"DBG[12]: TypeChecker.lean:510 (after if !defEq then)"
+            --   let (defEq, usesPI) ← withL4LTraceO $ usesPrfIrrel tBody sBody
+            --   dbg_trace s!"DBG[13]: TypeChecker.lean:512 (after let (defEq, usesPI) ← withL4LTrace  us…)"
+            --   dbg_trace s!"{defEq}"
+            -- if ptbodEqsbod?.isNone && usesPI then
+            --   dbg_trace s!"HERE 2"
+            pure ptbodEqsbod?
+          else
+            pure none
           let ret ← f tBody sBody ptbodEqsbod? tvars.reverse ds.reverse
           pure (true, ret) -- FIXME can iterate backwards instead of reversing lists?
 
@@ -1127,7 +1174,7 @@ def inferType' (e : Expr) (_dbg := false) : RecPE := do
   return (r, ep?)
 
 def inferTypePure' (e : PExpr) : RecM PExpr := do -- TODO make more efficient/use inferOnly := true
-  let eT ← runLeanMinus $ Lean.TypeChecker.inferTypeCheck e.toExpr
+  let eT ← runLeanMinus $ Lean.TypeChecker.inferType e.toExpr
   pure eT.toPExpr
 
 /--
@@ -1186,22 +1233,7 @@ def appProjThm? (structName : Name) (projIdx : Nat) (struct structN : PExpr) (st
           let f := (← getLCtx).mkLambda (paramVars ++ #[s]) (.proj structName projIdx s) |>.toPExpr
           let mut targsEqsargs? := default
           targsEqsargs? := targsEqsargs?.insert numParams structEqstructN?
-          ttrace s!"DBG[2]: TypeChecker.lean:1164 (after targsEqsargs? := targsEqsargs?.insert nu…)"
-          if (← shouldTTrace) then
-            let mut i := 0
-            for (param, paramN) in params.zip paramsN do
-              i := i + 1
-              dbg_trace s!"DBG[0]: TypeChecker.lean:1180 {← usesPrfIrrel param.toPExpr paramN.toPExpr}"
-          ttrace s!"DBG[4]: TypeChecker.lean:1165 (after ttrace s!DBG[2]: TypeChecker.lean:116…)"
-          if (← shouldTTrace) then
-            let mut i := 0
-            for (param, paramN) in params.zip paramsN do
-              -- ttrace s!"DBG[1]: TypeChecker.lean:1171 {i}\n{param}"
-              i := i + 1
-              _ ← isDefEq 0 param.toPExpr paramN.toPExpr
-          ttrace s!"DBG[5]: TypeChecker.lean:1168 (after ttrace s!DBG[4]: TypeChecker.lean:116…)"
           let (true, ret?) ← isDefEqApp 3 (Lean.mkAppN f (params ++ #[struct.toExpr])).toPExpr (Lean.mkAppN f (paramsN ++ #[structN.toExpr])).toPExpr targsEqsargs? (some none) | unreachable!
-          ttrace s!"DBG[3]: TypeChecker.lean:1166 (after let (true, ret?) ← isDefEqApp 3 (Lean.…)"
 
           pure $ ret?.get!
       | _, _ => unreachable!
@@ -1405,13 +1437,7 @@ def isDefEqLambda (t s : PExpr) : RecB := do
       let f := (← getLCtx).mkLambda #[a.toExpr] fa |>.toPExpr
       -- gx was abstracted over a if A defeq B (instead of over a fresh (b : B))
       let x : LocalDecl := if let some (b, _, _) := d? then b else a
-      -- if ("_kernel_fresh.914".toName == a.fvarId.name) then
-      --   dbg_trace s!"DBG[6]: TypeChecker.lean:184 {x.fvarId.name}, {gx'.toExpr.containsFVar' a.fvarId}, {gx.toExpr.containsFVar' a.fvarId}"
-      -- if gx.toExpr.containsFVar' (.mk "_kernel_fresh.914".toName) then
-      --   dbg_trace s!"DBG[1]: TypeChecker.lean:1348 (after if gx.toExpr.containsFVar _kernel_fresh.…)"
       let g := (← getLCtx).mkLambda #[x.toExpr] gx |>.toPExpr
-      -- if g.toExpr.containsFVar' (.mk "_kernel_fresh.914".toName) then
-      --   dbg_trace s!"DBG[2]: TypeChecker.lean:1351 {x.fvarId.name}, {x.type.containsFVar' (.mk "_kernel_fresh.914".toName)}"
       if d?.isSome || faEqgx?.isSome then
         let (ALvl, A) ← getTypeLevel a.toExpr.toPExpr
         let u := ALvl
@@ -1544,9 +1570,14 @@ def reduceRecursor (e : PExpr) (cheapK : Bool) : RecM (Option (PExpr × Option E
 private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecEE := do
   -- TODO whnfPure optimization
   let e := e'.toPExpr
+  -- if (← shouldTTrace) then
+  --   dbg_trace s!"\nDBG[1]: TypeChecker.lean:1545 (after if (← shouldTTrace) then)"
+  --   -- _ ← inferTypePure 9999 e
+  --   dbg_trace s!"DBG[2]: TypeChecker.lean:1547 (after _ ← inferTypePure 9999 e)"
   match e' with
   | .bvar .. | .sort .. | .mvar .. | .forallE .. | .const .. | .lam .. | .lit .. => return (e, none)
-  | .mdata _ e => return ← _whnfCore' e cheapK cheapProj
+  | .mdata _ e => 
+    return ← _whnfCore' e cheapK cheapProj
   | .fvar id => if !isLetFVar (← getLCtx) id then return (e, none)
   | .app .. | .letE .. | .proj .. => pure ()
   if let some r := (← get).whnfCoreCache.get? e then -- FIXME important to optimize this -- FIXME should this depend on cheapK?
@@ -1601,14 +1632,19 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
       else
         pure (frargs, rargs, none)
 
-
     if let (.lam _ _ body _) := f.toExpr then
       -- if e'.isApp then if let .const `Bool.casesOn _ := e'.withApp fun f _ => f then
       let rec loop m (f : Expr) : RecEE :=
         let cont := do
           let r := f.instantiateRange (rargs'.size - m) rargs'.size rargs'
           let r := r.mkAppRevRange 0 (rargs'.size - m) rargs' |>.toPExpr
+          if (← shouldTTrace) then
+            dbg_trace s!"DBG[2]: TypeChecker.lean:2011 (after if (← shouldTTrace) then)"
+            _ ← withL4LTrace $ whnfLean e
+            dbg_trace s!"DBG[3]: TypeChecker.lean:2013 (after _ ← isDefEqLean tn sn)"
+          ttrace s!"DBG[11]: TypeChecker.lean:1623 (after ttrace s!DBG[3]: TypeChecker.lean:201…)"
           let (r', rEqr'?) ← whnfCore 54 r cheapK cheapProj
+          ttrace s!"DBG[12]: TypeChecker.lean:1625 (after let (r, rEqr?) ← whnfCore 54 r cheapK …)"
           let eEqr'? ← appHEqTrans? e frargs' r' eEqfrargs'? rEqr'?
           save (r', eEqr'?)
         if let .lam _ _ body _ := f then
@@ -1617,11 +1653,18 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
         else cont
       loop 1 body
     else if f == f0 then
+      if (← shouldTTrace) then
+        dbg_trace s!"DBG[2]: TypeChecker.lean:2011 (after if (← shouldTTrace) then)"
+        _ ← withL4LTrace $ reduceRecursorLean e false cheapProj
+        dbg_trace s!"DBG[3]: TypeChecker.lean:2013 (after _ ← isDefEqLean tn sn)"
+      ttrace s!"DBG[13]: TypeChecker.lean:1634 (after else if f == f0 then)"
       if let some (r, eEqr?) ← reduceRecursor e cheapK then
+        ttrace s!"DBG[15]: TypeChecker.lean:1636 (after if let some (r, eEqr?) ← reduceRecurso…)"
         let (r', rEqr'?) ← whnfCore 55 r cheapK cheapProj
         let eEqr'? ← appHEqTrans? e r r' eEqr? rEqr'?
         pure (r', eEqr'?)
       else
+        ttrace s!"DBG[16]: TypeChecker.lean:1642 (after pure (e, none))"
         pure (e, none)
     else
       -- FIXME replace with reduceRecursor? adding arguments can only result in further normalization if the head reduced to a partial recursor application
@@ -1666,6 +1709,7 @@ private def _whnf' (e' : Expr) (cheapK := false) : RecEE := do
   | 0 => throw .deterministicTimeout
   | fuel+1 => do
     let env ← getEnv
+    ttrace s!"DBG[X]: TypeChecker.lean:1546 (after | .mdata _ e =>)"
     let (ler, leEqler?) ← whnfCore' le (cheapK := cheapK)
     let eEqler? ← appHEqTrans? e le ler eEqle? leEqler?
     if let some (ler', lerEqler'?) ← reduceNative env ler then return (ler', ← appHEqTrans? e ler ler' eEqler? lerEqler'?)
@@ -1795,9 +1839,14 @@ def lazyDeltaReductionStep (ltn lsn : PExpr) : RecM ReductionStatus := do
         && !failedBefore (← get).failure ltn lsn
       then
         if Level.isEquivList ltn.toExpr.getAppFn.constLevels! lsn.toExpr.getAppFn.constLevels! then
-          let (r, proof?) ← isDefEqApp 5 ltn lsn
-          if r then
-            return .bool true proof?
+          let (defeq, usedPI) ← isDefEqArgsLean ltn lsn
+          if defeq then
+            if usedPI then
+              let (r, proof?) ← isDefEqApp 5 ltn lsn (tfEqsf? := none)
+              if r then
+                return .bool true proof?
+            else
+              return .bool true none
         cacheFailure ltn lsn
       deltaCont_both
 
@@ -1918,6 +1967,10 @@ def isDefEqUnitLike (t s : PExpr) : RecB := do
 
 @[inherit_doc isDefEqCore]
 def isDefEqCore' (t s : PExpr) : RecM (Bool × (Option EExpr)) := do
+  -- let (ret, usedPI) ← usesPrfIrrel' t s
+  -- if ret && not usedPI then
+  --   return (true, none)
+
   -- if ← isDefEqPure 74 t s 15 then -- NOTE: this is a tradeoff between runtime and output size -- TODO put back
   --   return (true, none)
   let (r, pteqs?) ← quickIsDefEq 88 t s (useHash := true)
@@ -2000,9 +2053,16 @@ def isDefEqCore' (t s : PExpr) : RecM (Bool × (Option EExpr)) := do
                 pure ()
   | _, _ => pure ()
 
+  if (← shouldTTrace) then
+    dbg_trace s!"DBG[2]: TypeChecker.lean:2011 (after if (← shouldTTrace) then)"
+    _ ← withL4LTrace $ whnfCoreLean sn'
+    dbg_trace s!"DBG[3]: TypeChecker.lean:2013 (after _ ← isDefEqLean tn sn)"
+
   -- above functions used `cheapProj = true`, `cheapK = true`, so we may not have a complete WHNF
   let (tn'', tn'Eqtn''?) ← whnfCore 79 tn'
+  ttrace s!"DBG[4]: TypeChecker.lean:2017 (after let (tn, tnEqtn?) ← whnfCore 79 tn)"
   let (sn'', sn'Eqsn''?) ← whnfCore 80 sn'
+  ttrace s!"DBG[5]: TypeChecker.lean:2019 (after let (sn, snEqsn?) ← whnfCore 80 sn)"
   if (tn'' == tn' && sn'' == sn') then
     if !(unsafe ptrEq tn'' tn') then
       -- dbg_trace s!"ptrEq mismatch 1"
@@ -2020,6 +2080,14 @@ def isDefEqCore' (t s : PExpr) : RecM (Bool × (Option EExpr)) := do
     return (true, r?)
 
   -- optimized by above functions using `cheapK = true`
+  -- let (defeq, usedPI) ← isDefEqAppLean tn' sn'
+  -- if defeq then
+  --   if usedPI then
+  --     let (r, tn'Eqsn'?) ← isDefEqApp 7 tn' sn'
+  --     if r then
+  --       return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)
+  --   else
+  --     return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? none)
   match ← isDefEqApp 7 tn' sn' with
   | (true, tn'Eqsn'?) =>
     return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)

@@ -194,11 +194,10 @@ def inductiveReduceRec [Monad m] [MonadWithReaderOf LocalContext m] [MonadLCtx m
   rhs := mkAppRange rhs (majorArgs.size - rule.nfields) majorArgs.size majorArgs
 
   if let some eEqeNewMajor' := eEqeNewMajor'? then
-    dbg_trace s!"DBG[1]: Reduce.lean:196 (after if let some eEqeNewMajor := eEqeNewMajor…)"
-    let eType' ← meth.inferTypePure 129 e'
-    dbg_trace s!"DBG[3]: Reduce.lean:198 (after let eType := (← meth.inferTypeLean 129…)"
-    let eNewMajorType' ← meth.inferTypePure 121 eNewMajor'
-    dbg_trace s!"DBG[2]: Reduce.lean:198 (after let eNewMajorType := (← meth.inferType…)"
+    let eNewMajorType' := (← meth.inferTypePure 121 eNewMajor')
+    let eType' := (← meth.inferTypePure 129 e')
+    -- dbg_trace s!"DBG[3]: Reduce.lean:198 (after let eType := (← meth.inferTypeLean 129…)"
+    -- dbg_trace s!"DBG[2]: Reduce.lean:198 (after let eNewMajorType := (← meth.inferType…)"
     let sort ← meth.whnfPure 135 (← meth.inferTypePure 134 eType')
     let .sort lvl := sort.toExpr | unreachable!
     let idrV := .mk (← meth.mkId 130 eType')
