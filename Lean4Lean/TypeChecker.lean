@@ -135,9 +135,22 @@ def trace (msg : String) : RecM Unit := do
   if ← shouldTrace then
     dbg_trace msg
 
+def atrace (msg : String) : RecM Unit := do
+  if (← readThe Context).trace then
+    dbg_trace msg
+
 def dotrace (msg : Unit → RecM String) : RecM Unit := do
   if ← shouldTrace then
     trace (← msg ())
+
+def getTrace : RecM String := do
+  let callStrs :=  (← readThe Context).callStack.map (fun d =>
+    -- if t.isSome then
+    --   s!"{d.1}/{d.2.1}"
+    -- else
+      s!"{d.1}"
+  )
+  pure s!"{callStrs}"
 
 inductive ReductionStatus where
   | continue (tn sn : Expr)
@@ -426,16 +439,18 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
     { s with inferTypeC := s.inferTypeC.insert e r }
   return r
 
-def whnfCore (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr :=
-  fun m => m.whnfCore 20 e cheapRec cheapProj
+def whnfCore (n : Nat) (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr :=
+  fun m => m.whnfCore n e cheapRec cheapProj
 
 def reduceRecursor (e : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) := do
+  -- atrace s!"DBG[17]: TypeChecker.lean:445 (after def reduceRecursor (e : Expr) (cheapRec …)"
+  --
   let env ← getEnv
   if env.header.quotInit then
     if let some r ← quotReduceRec e (whnf 21) then
       return r
-  let whnf' e := if cheapRec then whnfCore e cheapRec cheapProj else whnf 22 e
-  if let some (r, usedKLikeReduction) ← inductiveReduceRec env e whnf' (inferType 23) (isDefEq 55) (← readThe Context).opts.kLikeReduction then
+  let whnf' e := if cheapRec then whnfCore 72 e cheapRec cheapProj else whnf 22 e
+  if let some (r, usedKLikeReduction) ← inductiveReduceRec env e whnf' atrace (inferType 23) (inferType 23 (inferOnly := false)) (isDefEq 55) (← readThe Context).opts.kLikeReduction then
     if usedKLikeReduction then
       modify fun s => {s with data := {s.data with usedKLikeReduction := true}}
     return r
@@ -443,11 +458,11 @@ def reduceRecursor (e : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) :
 
 def whnfFVar (e : Expr) (cheapRec cheapProj : Bool) : RecM Expr := do
   if let some (.ldecl (value := v) ..) := (← getLCtx).find? e.fvarId! then
-    return ← whnfCore v cheapRec cheapProj
+    return ← whnfCore 73 v cheapRec cheapProj
   return e
 
 def reduceProj (idx : Nat) (struct : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) := do
-  let mut c ← (if cheapProj then whnfCore struct cheapRec cheapProj else whnf 24 struct)
+  let mut c ← (if cheapProj then whnfCore 74 struct cheapRec cheapProj else whnf 24 struct)
   if let .lit (.strVal s) := c then
     c := .strLitToConstructor s
   c.withApp fun mk args => do
@@ -477,13 +492,13 @@ def whnfCore' (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr :=
   | .fvar _ => return ← whnfFVar e cheapRec cheapProj
   | .app .. =>
     e.withAppRev fun f0 rargs => do
-    let f ← whnfCore f0 cheapRec cheapProj
+    let f ← whnfCore 75 f0 cheapRec cheapProj
     if let .lam _ _ body _ := f then
       let rec loop m (f : Expr) : RecM Expr :=
         let cont2 := do
           let r := f.instantiateRange (rargs.size - m) rargs.size rargs
           let r := r.mkAppRevRange 0 (rargs.size - m) rargs
-          save <|← whnfCore r cheapRec cheapProj
+          save <|← whnfCore 76 r cheapRec cheapProj
         if let .lam _ _ body _ := f then
           if m < rargs.size then loop (m + 1) body
           else cont2
@@ -491,17 +506,17 @@ def whnfCore' (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr :=
       loop 1 body
     else if f == f0 then
       if let some r ← reduceRecursor e cheapRec cheapProj then
-        whnfCore r cheapRec cheapProj
+        whnfCore 77 r cheapRec cheapProj
       else
         pure e
     else
       let r := f.mkAppRevRange 0 rargs.size rargs
-      save <| ← whnfCore r cheapRec cheapProj
+      save <| ← whnfCore 78 r cheapRec cheapProj
   | .letE _ _ val body _ =>
-    save <|← whnfCore (body.instantiate1 val) cheapRec cheapProj
+    save <|← whnfCore 79 (body.instantiate1 val) cheapRec cheapProj
   | .proj _ idx s =>
     if let some m ← reduceProj idx s cheapRec cheapProj then
-      save <|← whnfCore m cheapRec cheapProj
+      save <|← whnfCore 80 m cheapRec cheapProj
     else
       save e
 
@@ -588,10 +603,10 @@ def whnf' (e : Expr) : RecM Expr := do
   | 0 => throw .deterministicTimeout
   | fuel+1 => do
     let env ← getEnv
-    let t ← whnfCore' t
-    if let some t ← reduceNative env t then return t
-    if let some t ← reduceNat t then return t
-    let some t := unfoldDefinition env t | return t
+    let t' ← whnfCore' t
+    if let some t ← reduceNative env t' then return t
+    if let some t ← reduceNat t' then return t
+    let some t := unfoldDefinition env t' | return t'
     loop t fuel
   let r ← loop e 1000
   modify fun s => { s with whnfCache := s.whnfCache.insert e r }
@@ -716,12 +731,12 @@ def cacheFailure (t s : Expr) : M Unit := do
 def tryUnfoldProjApp (e : Expr) : RecM (Option Expr) := do
   let f := e.getAppFn
   if !f.isProj then return none
-  let e' ← whnfCore e
+  let e' ← whnfCore 81 e
   return if e' != e then e' else none
 
 def lazyDeltaReductionStep (tn sn : Expr) : RecM ReductionStatus := do
   let env ← getEnv
-  let delta e := whnfCore (unfoldDefinition env e).get! (cheapProj := true)
+  let delta e := whnfCore 82 (unfoldDefinition env e).get! (cheapProj := true)
   let cont tn sn :=
     return match ← quickIsDefEq tn sn with
     | .undef => .continue tn sn
@@ -818,8 +833,8 @@ def isDefEqCore' (t s : Expr) : RecM Bool := do
   if !t.hasFVar && s.isConstOf ``true then
     if (← whnf 46 t).isConstOf ``true then return true
 
-  let tn ← whnfCore t (cheapProj := true)
-  let sn ← whnfCore s (cheapProj := true)
+  let tn ← whnfCore 83 t (cheapProj := true)
+  let sn ← whnfCore 84 s (cheapProj := true)
 
   if !(tn == t && sn == s) then
     let r ← quickIsDefEq tn sn
@@ -845,8 +860,8 @@ def isDefEqCore' (t s : Expr) : RecM Bool := do
     if ti == si then if ← isDefEq 68 te se then return true
   | _, _ => pure ()
 
-  let tnn ← whnfCore tn
-  let snn ← whnfCore sn
+  let tnn ← whnfCore 85 tn
+  let snn ← whnfCore 86 sn
   if !(tnn == tn && snn == sn) then
     return ← isDefEqCore 47 tnn snn
 

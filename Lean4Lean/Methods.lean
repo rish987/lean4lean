@@ -9,8 +9,8 @@ def defFuel := 1000
 
 mutual
 def fuelWrap (idx : Nat) (fuel : Nat) (d : CallData) : M (CallDataT d) := do
--- let trace := (← readThe Context).trace
-let trace := false
+let trace := (← readThe Context).trace
+-- let trace := false
 match fuel with
   | 0 =>
     -- dbg_trace s!">deep recursion callstack: {(← readThe Context).callStack.map (·.1)}"
@@ -32,8 +32,8 @@ match fuel with
         printedTrace := true
         -- let l := (← readThe Context).callStack.map fun d => s!"{d.1}/{d.2.1}"
         let mut l := (← readThe Context).callStack.map fun d => s!"{d.1}"
-        if l.size > 20 then
-          l := l[l.size - 20:]
+        -- if l.size > 20 then
+        --   l := l[l.size - 20:]
         dbg_trace s!">calltrace {s.numCalls}: {l}, {idx}, {(← readThe Context).callId}"
     try
       let ret ← withCallId s.numCalls (.some 22160) do
