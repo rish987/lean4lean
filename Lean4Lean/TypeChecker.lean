@@ -15,7 +15,11 @@ abbrev InferCache := ExprMap Expr
 structure TypeChecker.Data where
 usedProofIrrelevance : Bool := false
 usedKLikeReduction : Bool := false
+usedFVarEq : Bool := false
 maxRecursionDepth : Nat := 0
+
+def TypeChecker.Data.used : TypeChecker.Data → Bool
+| {usedProofIrrelevance, usedKLikeReduction, usedFVarEq, ..} => usedProofIrrelevance || usedKLikeReduction || usedFVarEq
 
 structure TypeChecker.State where
   nid : Nat := 0
@@ -65,6 +69,11 @@ structure TypeChecker.Context where
   env : Environment
   opts : TypeCheckerOpts := {}
   lctx : LocalContext := {}
+  /--
+  Mapping from free variables to proofs of their equality,
+  introduced by isDefEqLambda.
+  -/
+  eqFVars : Std.HashSet (FVarId × FVarId) := {}
   safety : DefinitionSafety := .safe
   callId : Nat := 0
   trace : Bool := false
@@ -77,12 +86,12 @@ namespace TypeChecker
 abbrev M := ReaderT Context <| StateT State <| Except KernelException
 
 def M.run (env : Environment) (x : M α)
-   (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) (nid : Nat := 0) (fvarTypeToReusedNamePrefix : Std.HashMap Expr Name := {}) (trace := false) (state : State := {}) : Except KernelException (α × State) := do
-  x {env, safety, lctx, opts, lparams, trace} |>.run {state with nid, fvarTypeToReusedNamePrefix}
+   (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) (nid : Nat := 0) (fvarTypeToReusedNamePrefix : Std.HashMap Expr Name := {}) (trace := false) (state : State := {}) (eqFVars : Std.HashSet (FVarId × FVarId) := {}) : Except KernelException (α × State) := do
+  x {env, safety, lctx, opts, lparams, trace, eqFVars} |>.run {state with nid, fvarTypeToReusedNamePrefix}
 
 def M.run' (env : Environment) (x : M α)
-   (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) (nid : Nat := 0) (fvarTypeToReusedNamePrefix : Std.HashMap Expr Name := {}) (trace := false) : Except KernelException α := do
-  x { env, safety, lctx, opts, lparams, trace} |>.run' {nid, fvarTypeToReusedNamePrefix}
+   (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) (nid : Nat := 0) (fvarTypeToReusedNamePrefix : Std.HashMap Expr Name := {}) (trace := false) (eqFVars : Std.HashSet (FVarId × FVarId) := {}) : Except KernelException α := do
+  x {env, safety, lctx, opts, lparams, trace, eqFVars} |>.run' {nid, fvarTypeToReusedNamePrefix}
 
 def getCallStack : M (Array Nat) := do pure $ (← readThe Context).callStack.map (·.1)
 
@@ -612,6 +621,12 @@ def whnf' (e : Expr) : RecM Expr := do
   modify fun s => { s with whnfCache := s.whnfCache.insert e r }
   return r
 
+def isDefEqFVar (idt ids : FVarId) : RecM LBool := do
+  if (← readThe Context).eqFVars.contains (idt, ids) || (← readThe Context).eqFVars.contains (ids, idt) then
+    modify fun s => {s with data := {s.data with usedFVarEq := true}}
+    return .true
+  return .undef
+
 def isDefEqLambda (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
   match t, s with
   | .lam _ tDom tBody _, .lam name sDom sBody bi => do
@@ -655,6 +670,7 @@ def quickIsDefEq (t s : Expr) (useHash := false) : RecM LBool := do
   then return .true
   match t, s with
   | .lam .., .lam .. => toLBoolM <| isDefEqLambda t s
+  | .fvar idt, .fvar ids => isDefEqFVar idt ids
   | .forallE .., .forallE .. => toLBoolM <| isDefEqForall t s
   | .sort a1, .sort a2 => pure (a1.isEquiv a2).toLBool
   | .mdata _ a1, .mdata _ a2 => toLBoolM <| isDefEq 60 a1 a2
@@ -828,7 +844,9 @@ def isDefEqUnitLike (t s : Expr) : RecM Bool := do
 
 def isDefEqCore' (t s : Expr) : RecM Bool := do
   let r ← quickIsDefEq t s (useHash := true)
-  if r != .undef then return r == .true
+  if r != .undef then
+    atrace s!"DBG[8]: TypeChecker.lean:831 {r}"
+    return r == .true
 
   if !t.hasFVar && s.isConstOf ``true then
     if (← whnf 46 t).isConstOf ``true then return true
@@ -838,18 +856,23 @@ def isDefEqCore' (t s : Expr) : RecM Bool := do
 
   if !(tn == t && sn == s) then
     let r ← quickIsDefEq tn sn
-    if r != .undef then return r == .true
+    if r != .undef then
+    atrace s!"DBG[6]: TypeChecker.lean:841 {r}"
+    return r == .true
 
   if (← readThe Context).opts.proofIrrelevance then
     let r ← isDefEqProofIrrel tn sn
     if r != .undef then
       if r == .true then
         modify fun s => {s with data := {s.data with usedProofIrrelevance := true}}
+      atrace s!"DBG[5]: TypeChecker.lean:847 {r}"
       return r == .true
 
   match ← lazyDeltaReduction tn sn with
   | .continue .. => unreachable!
-  | .bool b => return b
+  | .bool b =>
+    atrace s!"DBG[9]: TypeChecker.lean:857 {b}"
+    return b
   | .unknown tn sn =>
 
   match tn, sn with
@@ -869,8 +892,11 @@ def isDefEqCore' (t s : Expr) : RecM Bool := do
   if ← tryEtaExpansion tn sn then return true
   if ← tryEtaStruct tn sn then return true
   let r ← tryStringLitExpansion tn sn
-  if r != .undef then return r == .true
+  if r != .undef then
+    atrace s!"DBG[4]: TypeChecker.lean:872 {r}"
+    return r == .true
   if ← isDefEqUnitLike tn sn then return true
+  atrace s!"DBG[3]: TypeChecker.lean:873 (after if ← isDefEqUnitLike tn sn then return…)"
   return false
 
 end Inner
