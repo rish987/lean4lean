@@ -9,8 +9,8 @@ def defFuel := 1000
 
 mutual
 def fuelWrap (idx : Nat) (fuel : Nat) (d : CallData) : M (CallDataT d) := do
-let trace := (← readThe Context).trace
--- let trace := false
+-- let trace := (← readThe Context).trace
+let trace := false
 match fuel with
   | 0 =>
     -- dbg_trace s!">deep recursion callstack: {(← readThe Context).callStack.map (·.1)}"
@@ -19,7 +19,12 @@ match fuel with
     let m : RecM (CallDataT d):=
       match d with
       | .isDefEqCore t s => isDefEqCore' t s
-      | .whnfCore e r p => whnfCore' e r p
+      | .whnfCore e r p => do
+        let ret ← whnfCore' e r p
+        -- dbg_trace s!"DBG[A]: TypeChecker.lean:440 {← getTrace true}"
+        -- _ ← Inner.inferType 51 ret (inferOnly := false) 
+        -- dbg_trace s!"DBG[B]: TypeChecker.lean:481 (after _ ← inferTypeCheck p)"
+        pure ret
       | .whnf e => whnf' e
       | .inferType e o => inferType' e o
     modify fun s => {s with numCalls := s.numCalls + 1} 

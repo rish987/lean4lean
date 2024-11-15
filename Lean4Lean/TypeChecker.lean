@@ -152,11 +152,11 @@ def dotrace (msg : Unit → RecM String) : RecM Unit := do
   if ← shouldTrace then
     trace (← msg ())
 
-def getTrace : RecM String := do
+def getTrace (callIds := false) : RecM String := do
   let callStrs :=  (← readThe Context).callStack.map (fun d =>
-    -- if t.isSome then
-    --   s!"{d.1}/{d.2.1}"
-    -- else
+    if callIds then
+      s!"{d.1}/{d.2.1}"
+    else
       s!"{d.1}"
   )
   pure s!"{callStrs}"
@@ -438,7 +438,7 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
 
         -- trace s!"{(← rctx).callId}, {← callStackToStr}, {e.getAppArgs.size}, {e.getAppFn} \n\n{dType}\n\n{aType}"
         if !(← isDefEq 54 dType aType) then
-          dbg_trace s!"DBG[1]: TypeChecker.lean:418 \n{dType}\n\n{aType}"
+          -- dbg_trace s!"DBG[1]: TypeChecker.lean:418 \n{dType}\n\n{aType}"
           throw <| .appTypeMismatch (← getEnv) (← getLCtx) e fType aType
         -- trace s!"{(← rctx).callId}"
         pure <| fType.bindingBody!.instantiate1 a
@@ -471,7 +471,7 @@ def whnfFVar (e : Expr) (cheapRec cheapProj : Bool) : RecM Expr := do
   return e
 
 def reduceProj (idx : Nat) (struct : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) := do
-  let mut c ← (if cheapProj then whnfCore 74 struct cheapRec cheapProj else whnf 24 struct)
+  let mut c ← (if cheapProj then whnfCore 1035 struct cheapRec cheapProj else whnf 1305 struct)
   if let .lit (.strVal s) := c then
     c := .strLitToConstructor s
   c.withApp fun mk args => do
@@ -845,7 +845,6 @@ def isDefEqUnitLike (t s : Expr) : RecM Bool := do
 def isDefEqCore' (t s : Expr) : RecM Bool := do
   let r ← quickIsDefEq t s (useHash := true)
   if r != .undef then
-    atrace s!"DBG[8]: TypeChecker.lean:831 {r}"
     return r == .true
 
   if !t.hasFVar && s.isConstOf ``true then
@@ -857,7 +856,6 @@ def isDefEqCore' (t s : Expr) : RecM Bool := do
   if !(tn == t && sn == s) then
     let r ← quickIsDefEq tn sn
     if r != .undef then
-    atrace s!"DBG[6]: TypeChecker.lean:841 {r}"
     return r == .true
 
   if (← readThe Context).opts.proofIrrelevance then
@@ -865,13 +863,11 @@ def isDefEqCore' (t s : Expr) : RecM Bool := do
     if r != .undef then
       if r == .true then
         modify fun s => {s with data := {s.data with usedProofIrrelevance := true}}
-      atrace s!"DBG[5]: TypeChecker.lean:847 {r}"
       return r == .true
 
   match ← lazyDeltaReduction tn sn with
   | .continue .. => unreachable!
   | .bool b =>
-    atrace s!"DBG[9]: TypeChecker.lean:857 {b}"
     return b
   | .unknown tn sn =>
 
@@ -893,10 +889,8 @@ def isDefEqCore' (t s : Expr) : RecM Bool := do
   if ← tryEtaStruct tn sn then return true
   let r ← tryStringLitExpansion tn sn
   if r != .undef then
-    atrace s!"DBG[4]: TypeChecker.lean:872 {r}"
     return r == .true
   if ← isDefEqUnitLike tn sn then return true
-  atrace s!"DBG[3]: TypeChecker.lean:873 (after if ← isDefEqUnitLike tn sn then return…)"
   return false
 
 end Inner
