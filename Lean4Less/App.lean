@@ -91,13 +91,13 @@ def mkAppEqProof? (aVars bVars : Array LocalDecl) (us vs : Array Level) (Uas Vbs
           if UaEqVb?.isSome || dep then
             let UaEqVb ← UaEqVb?.getDM $ meth.mkHRefl 200 v.succ (Expr.sort v).toPExpr Ua
             let hUV := {a := aVar, UaEqVb, extra := .some {b := bVar, vaEqb := {aEqb := vaEqb, bEqa := vbEqa}}}
-            pure $ .ABUV {B, hAB, V, hUV, g, fEqg, b, aEqb}
+            let ret := .ABUV {B, hAB, V, hUV, g, fEqg, b, aEqb}
+            pure ret
           else
             assert! not dep
             pure $ .AB {B, hAB, g, fEqg, b, aEqb}
         else
           elseCase
-
         pure $ .some $ .app {u, v, A, U, f, a, extra}
       else
         pure none
@@ -400,11 +400,14 @@ end
 
 
 def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
-   (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default) (tfEqsf? : Option (Option EExpr) := none) : m (Bool × (Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))) := do
+   (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default) (_tfEqsf? : Option (Option EExpr) := none) : m (Bool × (Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))) := do
   unless tArgs.size == sArgs.size do return (false, none)
 
-  let (.true, tfEqsf?) ← if tfEqsf?.isSome then pure (.true, tfEqsf?.get!)
-    else meth.isDefEq 222 tf sf | return (false, none)
+  let (.true, tfEqsf?) ← if _tfEqsf?.isSome then pure (.true, _tfEqsf?.get!)
+    else
+      let ret ← meth.isDefEq 222 tf sf
+      pure ret
+    | return (false, none)
 
   let mkAppEqProof' tVars sVars tArgs' sArgs' taEqsas' tBodFun sBodFun tBodFunEqsBodFun? tBodArgs sBodArgs _tArgsVars _sArgsVars tBodT sBodT tEtaVars sEtaVars idx := do -- FIXME why do I have to pass in the mutable variables?
     if tVars.size > 0 then
@@ -446,7 +449,9 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
   let mut tBodFunEqsBodFun? := tfEqsf?
   let mut sBodArgs : Array PExpr := #[]
   let mut tArgs' := #[]
+  let mut tArgsIs' : Array Nat := #[]
   let mut sArgs' := #[]
+  let mut sArgsIs' : Array Nat := #[]
   let mut tVars : Array (FVarId × Name × PExpr) := #[]
   let mut sVars : Array (FVarId × Name × PExpr) := #[]
   let mut tArgsVars : Array FVarId := #[]
@@ -514,7 +519,11 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
         sBodT := sfVar.2.2
         taEqsas' := tfTAbsDomsEqsfTAbsDoms? ++ #[tfEqsf'?]
         tArgs' := tfTAbsDoms ++ #[tf]
+        tArgsIs' := List.replicate tfTAbsDoms.size 0 |>.toArray
+        tArgsIs' := tArgsIs' ++ #[1]
         sArgs' := sfTAbsDoms ++ #[sf]
+        sArgsIs' := List.replicate sfTAbsDoms.size 0 |>.toArray
+        sArgsIs' := sArgsIs' ++ #[1]
         tArgsVars := #[]
         sArgsVars := #[]
         tVars := tfTAbsDomsVars ++ #[tfVar]
@@ -588,9 +597,15 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
             getDefVals
         else
           getDefVals
+          -- dbg_trace s!"DBG[A]: TypeChecker.lean:440 {← meth.isDefEqPure 0 aEqbType (← meth.inferTypePure 0 aEqb)}"
+          -- _ ← meth.inferTypeCheck (EExpr.app {u, v, A, U, f, a, extra := ret}).toExpr.toPExpr
+          -- dbg_trace s!"DBG[B]: TypeChecker.lean:481 (after _ ← inferTypeCheck p)"
+          -- sorry
 
       tArgs' := tArgs' ++ tas'
+      tArgsIs' := tArgsIs' ++ List.replicate tas'.size 2
       sArgs' := sArgs' ++ sas'
+      sArgsIs' := sArgsIs' ++ List.replicate sas'.size 2
       taEqsas' := taEqsas' ++ taEqsas'?
 
       tVars := tVars ++ tVars'

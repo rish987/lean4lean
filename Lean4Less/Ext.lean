@@ -72,6 +72,7 @@ structure ExtMethods (m : Type → Type u) where
   mkId'  : Nat → LocalContext → Expr → m Name
   mkIdNew : Nat → m Name
   inferTypePure : Nat → PExpr → m PExpr
+  inferTypeCheck : PExpr → m PExpr
   inferTypeLean : Nat → Expr → m Expr
   inferType : Nat → Expr → m (PExpr × Option PExpr)
   withPure : {T : Type} → m T → m T

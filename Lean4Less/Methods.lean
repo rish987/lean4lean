@@ -7,8 +7,8 @@ open Lean
 
 def defFuel := 1300
 
--- def tr := true
-def tr := false
+def tr := true
+-- def tr := false
 
 mutual
 def fuelWrap (idx : Nat) (fuel : Nat) (d : CallData) : M (CallDataT d) := do
@@ -45,7 +45,7 @@ match fuel with
     -- t := .some 33496
     let methPrint := false
     -- let methPrint := (← shouldTrace)
-    let methPrint := true
+    -- let methPrint := true
     let cond := tr &&
       if s.numCalls % 1 == 0 then
         if let some n := t then

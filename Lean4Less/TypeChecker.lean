@@ -182,11 +182,14 @@ def callId : RecM Nat := do
 def numCalls : RecM Nat := do
   pure (← get).numCalls
 
-def dbgFIds := #["_kernel_fresh.3032".toName, "_kernel_fresh.3036".toName, "_kernel_fresh.910".toName, "_kernel_fresh.914".toName]
+def dbgFIds := #["_kernel_fresh.2100".toName, "_kernel_fresh.2101".toName, "_kernel_fresh.2102".toName]
 
 def mkIdNew (n : Nat) : RecM Name := do
   let nid := (← get).nid
   let fid := .mkNum `_kernel_fresh nid
+  -- for id in dbgFIds do
+  --   if id == fid then
+  --     dbg_trace s!"DBG[2]: TypeChecker.lean:191 {id}, {n}"
   modify fun st => { st with nid := st.nid + 1, fvarRegistry := st.fvarRegistry.insert fid n}
   pure fid
 
@@ -287,11 +290,11 @@ def dbg_wrap (idx : Nat) (m : RecM α) : RecM α := do
       m
   pure ret
 
-def getTrace : RecM String := do
+def getTrace (callIds : Bool := false) : RecM String := do
   let callStrs :=  (← readThe Context).callStack.map (fun d =>
-    -- if t.isSome then
-    --   s!"{d.1}/{d.2.1}"
-    -- else
+    if callIds then
+      s!"{d.1}/{d.2.1}"
+    else
       s!"{d.1}"
   )
   pure s!"{callStrs}"
@@ -421,29 +424,6 @@ def isDefEqCorePure (n : Nat) (t s : PExpr) : RecM Bool := fun m => m.isDefEqCor
 
 def quickIsDefEq (n : Nat) (t s : PExpr) (useHash : Bool := false) : RecLB := fun m => m.quickIsDefEq n t s useHash
 
-@[inherit_doc isDefEqCore]
-def isDefEq (n : Nat) (t s : PExpr) : RecB := do
-  -- if let some p := (← get).isDefEqCache.get? (t, s) then
-  if ((← get).isDefEqCache.get? (t, s)).isSome || ((← get).isDefEqCache.get? (s, t)).isSome then
-    -- return (true, .some p)
-    let (u, A) ← getTypeLevel t
-    return (true, .some $ .sry {u, A, B := (← inferTypePure 0 s), a := t, b := s}) -- TODO use let variables
-  -- else if let some p := (← get).isDefEqCache.get? (s, t) then
-  --   let (lvl, sType) ← getTypeLevel s
-  --   let tType ← inferTypePure 99 t
-  --   return (true, .some $ p.reverse s t sType tType lvl)
-
-  let r ← isDefEqCore n t s
-  let (result, p?) := r
-
-  if result then
-    if let some p := p? then
-      modify fun st => { st with isDefEqCache := st.isDefEqCache.insert (t, s) p }
-    else
-      modify fun st => { st with eqvManager := st.eqvManager.addEquiv t s }
-  -- else if result && p?.isSome then
-  pure r
-
 def isDefEqLean (t s : Expr) (fuel := 1000) : RecM Bool := do
   runLeanRecM $ Lean.TypeChecker.isDefEq t s fuel
 
@@ -474,6 +454,41 @@ def whnfLean (t : Expr) : RecM Expr := do
 
 def whnfCoreLean (t : Expr) : RecM Expr := do
   runLeanRecM $ Lean.TypeChecker.Inner.whnfCore 0 t
+
+def inferTypePure' (e : PExpr) : RecM PExpr := do -- TODO make more efficient/use inferOnly := true
+  let eT ← runLeanMinus $ Lean.TypeChecker.inferType e.toExpr
+  pure eT.toPExpr
+
+def inferTypeCheck (e : PExpr) : RecM PExpr := do -- TODO make more efficient/use inferOnly := true
+  let eT ← runLeanMinus $ Lean.TypeChecker.inferTypeCheck e.toExpr
+  pure eT.toPExpr
+
+@[inherit_doc isDefEqCore]
+def isDefEq (n : Nat) (t s : PExpr) : RecB := do
+  -- if let some p := (← get).isDefEqCache.get? (t, s) then
+  if ((← get).isDefEqCache.get? (t, s)).isSome || ((← get).isDefEqCache.get? (s, t)).isSome then
+    -- return (true, .some p)
+    let (u, A) ← getTypeLevel t
+    return (true, .some $ .sry {u, A, B := (← inferTypePure 0 s), a := t, b := s}) -- TODO use let variables
+  -- else if let some p := (← get).isDefEqCache.get? (s, t) then
+  --   let (lvl, sType) ← getTypeLevel s
+  --   let tType ← inferTypePure 99 t
+  --   return (true, .some $ p.reverse s t sType tType lvl)
+
+  let r ← isDefEqCore n t s
+  let (result, p?) := r
+
+  if result then
+    if let some p := p? then
+      dbg_trace s!"DBG[4]: TypeChecker.lean:440 {← getTrace true}"
+      _ ← inferTypeCheck p
+      dbg_trace s!"DBG[6]: TypeChecker.lean:481 (after _ ← inferTypeCheck p)"
+      modify fun st => { st with isDefEqCache := st.isDefEqCache.insert (t, s) p }
+    else
+      modify fun st => { st with eqvManager := st.eqvManager.addEquiv t s }
+  -- else if result && p?.isSome then
+  pure r
+
 
 def reduceRecursorLean (t : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) := do
   runLeanRecM $ Lean.TypeChecker.Inner.reduceRecursor t cheapRec cheapProj
@@ -509,15 +524,8 @@ def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : P
           let tBody := tBody.instantiateRev (tvars.map (·.toExpr.toPExpr))
           let sBody := sBody.instantiateRev (svars.map (·.toExpr.toPExpr))
           let (true, usesPI) ← usesPrfIrrel tBody sBody | return (false, none)
-          -- dbg_trace s!"DBG[1]: TypeChecker.lean:445: svars={(svars.map (·.fvarId.name))}"
-          -- if !defEq then return (false, none)
           let ptbodEqsbod? ← if usesPI then
             let (true, ptbodEqsbod?) ← isDefEq 6 tBody sBody | return (false, none) -- TODO refactor isDefEq to return normalized terms that were finally compared (to eliminate unused fvar dependencies)
-            -- if !defEq then 
-            --   dbg_trace s!"DBG[12]: TypeChecker.lean:510 (after if !defEq then)"
-            --   let (defEq, usesPI) ← withL4LTraceO $ usesPrfIrrel tBody sBody
-            --   dbg_trace s!"DBG[13]: TypeChecker.lean:512 (after let (defEq, usesPI) ← withL4LTrace  us…)"
-            --   dbg_trace s!"{defEq}"
             -- if ptbodEqsbod?.isNone && usesPI then
             --   dbg_trace s!"HERE 2"
             pure ptbodEqsbod?
@@ -688,6 +696,7 @@ def meths : ExtMethods RecM := {
     getTypeLevel := getTypeLevel
     ensureSortCorePure := ensureSortCorePure
     inferTypePure := inferTypePure
+    inferTypeCheck := inferTypeCheck
     inferTypeLean := inferTypeLean
     inferType := inferType
     appPrfIrrelHEq := appPrfIrrelHEq
@@ -815,6 +824,9 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
 
   let mkCast'' nm tl tr p e (prfVars prfVals : Array Expr) (lvl : Level) := do
     let pe := p.toExpr (dbg := (← shouldTTrace))
+    -- dbg_trace s!"DBG[2]: TypeChecker.lean:825 {← getTrace}, {← callId}, {p?.isSome}"
+    -- _ ← inferTypeCheck pe.toPExpr
+    -- dbg_trace s!"DBG[3]: TypeChecker.lean:827 (after _ ← inferTypeCheck pe.toPExpr)"
     let app := Lean.mkAppN (← getConst nm [lvl]) #[tl, tr, pe, e]
     pure $ app.replaceFVars prfVars prfVals
 
@@ -1172,10 +1184,6 @@ def inferType' (e : Expr) (_dbg := false) : RecPE := do
     | .letE .. => inferLet e
   modify fun s => { s with inferTypeC := s.inferTypeC.insert e (r, ep?) }
   return (r, ep?)
-
-def inferTypePure' (e : PExpr) : RecM PExpr := do -- TODO make more efficient/use inferOnly := true
-  let eT ← runLeanMinus $ Lean.TypeChecker.inferType e.toExpr
-  pure eT.toPExpr
 
 /--
 Reduces `e` to its weak-head normal form, without unfolding definitions. This
@@ -1570,10 +1578,6 @@ def reduceRecursor (e : PExpr) (cheapK : Bool) : RecM (Option (PExpr × Option E
 private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecEE := do
   -- TODO whnfPure optimization
   let e := e'.toPExpr
-  -- if (← shouldTTrace) then
-  --   dbg_trace s!"\nDBG[1]: TypeChecker.lean:1545 (after if (← shouldTTrace) then)"
-  --   -- _ ← inferTypePure 9999 e
-  --   dbg_trace s!"DBG[2]: TypeChecker.lean:1547 (after _ ← inferTypePure 9999 e)"
   match e' with
   | .bvar .. | .sort .. | .mvar .. | .forallE .. | .const .. | .lam .. | .lit .. => return (e, none)
   | .mdata _ e => 
@@ -1638,13 +1642,7 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
         let cont := do
           let r := f.instantiateRange (rargs'.size - m) rargs'.size rargs'
           let r := r.mkAppRevRange 0 (rargs'.size - m) rargs' |>.toPExpr
-          if (← shouldTTrace) then
-            dbg_trace s!"DBG[2]: TypeChecker.lean:2011 (after if (← shouldTTrace) then)"
-            _ ← withL4LTrace $ whnfLean e
-            dbg_trace s!"DBG[3]: TypeChecker.lean:2013 (after _ ← isDefEqLean tn sn)"
-          ttrace s!"DBG[11]: TypeChecker.lean:1623 (after ttrace s!DBG[3]: TypeChecker.lean:201…)"
           let (r', rEqr'?) ← whnfCore 54 r cheapK cheapProj
-          ttrace s!"DBG[12]: TypeChecker.lean:1625 (after let (r, rEqr?) ← whnfCore 54 r cheapK …)"
           let eEqr'? ← appHEqTrans? e frargs' r' eEqfrargs'? rEqr'?
           save (r', eEqr'?)
         if let .lam _ _ body _ := f then
@@ -1653,18 +1651,11 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
         else cont
       loop 1 body
     else if f == f0 then
-      if (← shouldTTrace) then
-        dbg_trace s!"DBG[2]: TypeChecker.lean:2011 (after if (← shouldTTrace) then)"
-        _ ← withL4LTrace $ reduceRecursorLean e false cheapProj
-        dbg_trace s!"DBG[3]: TypeChecker.lean:2013 (after _ ← isDefEqLean tn sn)"
-      ttrace s!"DBG[13]: TypeChecker.lean:1634 (after else if f == f0 then)"
       if let some (r, eEqr?) ← reduceRecursor e cheapK then
-        ttrace s!"DBG[15]: TypeChecker.lean:1636 (after if let some (r, eEqr?) ← reduceRecurso…)"
         let (r', rEqr'?) ← whnfCore 55 r cheapK cheapProj
         let eEqr'? ← appHEqTrans? e r r' eEqr? rEqr'?
         pure (r', eEqr'?)
       else
-        ttrace s!"DBG[16]: TypeChecker.lean:1642 (after pure (e, none))"
         pure (e, none)
     else
       -- FIXME replace with reduceRecursor? adding arguments can only result in further normalization if the head reduced to a partial recursor application
@@ -1709,7 +1700,6 @@ private def _whnf' (e' : Expr) (cheapK := false) : RecEE := do
   | 0 => throw .deterministicTimeout
   | fuel+1 => do
     let env ← getEnv
-    ttrace s!"DBG[X]: TypeChecker.lean:1546 (after | .mdata _ e =>)"
     let (ler, leEqler?) ← whnfCore' le (cheapK := cheapK)
     let eEqler? ← appHEqTrans? e le ler eEqle? leEqler?
     if let some (ler', lerEqler'?) ← reduceNative env ler then return (ler', ← appHEqTrans? e ler ler' eEqler? lerEqler'?)
@@ -2053,16 +2043,9 @@ def isDefEqCore' (t s : PExpr) : RecM (Bool × (Option EExpr)) := do
                 pure ()
   | _, _ => pure ()
 
-  if (← shouldTTrace) then
-    dbg_trace s!"DBG[2]: TypeChecker.lean:2011 (after if (← shouldTTrace) then)"
-    _ ← withL4LTrace $ whnfCoreLean sn'
-    dbg_trace s!"DBG[3]: TypeChecker.lean:2013 (after _ ← isDefEqLean tn sn)"
-
   -- above functions used `cheapProj = true`, `cheapK = true`, so we may not have a complete WHNF
   let (tn'', tn'Eqtn''?) ← whnfCore 79 tn'
-  ttrace s!"DBG[4]: TypeChecker.lean:2017 (after let (tn, tnEqtn?) ← whnfCore 79 tn)"
   let (sn'', sn'Eqsn''?) ← whnfCore 80 sn'
-  ttrace s!"DBG[5]: TypeChecker.lean:2019 (after let (sn, snEqsn?) ← whnfCore 80 sn)"
   if (tn'' == tn' && sn'' == sn') then
     if !(unsafe ptrEq tn'' tn') then
       -- dbg_trace s!"ptrEq mismatch 1"
