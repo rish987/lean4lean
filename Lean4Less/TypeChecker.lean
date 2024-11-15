@@ -407,6 +407,10 @@ def appHEqSymm? (theqs? : Option EExpr) : RecM (Option EExpr) := do
   let some theqs := theqs? | return none
   appHEqSymm theqs
 
+def inferTypeCheck (e : PExpr) : RecM PExpr := do -- TODO make more efficient/use inferOnly := true
+  let eT ← runLeanMinus $ Lean.TypeChecker.inferTypeCheck e.toExpr
+  pure eT.toPExpr
+
 /--
 Returns whether `t` and `s` are definitionally equal according to Lean's
 algorithmic definitional equality judgment.
@@ -418,7 +422,10 @@ did not/would not throw an error). This ensures in particular that any calls to
 `inferType e (inferOnly := false)` on subterms `e` would not fail, so we know
 that `e` types as the return value of `inferType e (inferOnly := true)`.
 -/
-def isDefEqCore (n : Nat) (t s : PExpr) : RecB := fun m => m.isDefEqCore n t s
+def isDefEqCore (n : Nat) (t s : PExpr) : RecB := fun m => do
+  let ret ← m.isDefEqCore n t s
+  pure ret
+
 
 def isDefEqCorePure (n : Nat) (t s : PExpr) : RecM Bool := fun m => m.isDefEqCorePure n t s
 
@@ -459,10 +466,6 @@ def inferTypePure' (e : PExpr) : RecM PExpr := do -- TODO make more efficient/us
   let eT ← runLeanMinus $ Lean.TypeChecker.inferType e.toExpr
   pure eT.toPExpr
 
-def inferTypeCheck (e : PExpr) : RecM PExpr := do -- TODO make more efficient/use inferOnly := true
-  let eT ← runLeanMinus $ Lean.TypeChecker.inferTypeCheck e.toExpr
-  pure eT.toPExpr
-
 @[inherit_doc isDefEqCore]
 def isDefEq (n : Nat) (t s : PExpr) : RecB := do
   -- if let some p := (← get).isDefEqCache.get? (t, s) then
@@ -480,9 +483,6 @@ def isDefEq (n : Nat) (t s : PExpr) : RecB := do
 
   if result then
     if let some p := p? then
-      dbg_trace s!"DBG[4]: TypeChecker.lean:440 {← getTrace true}"
-      _ ← inferTypeCheck p
-      dbg_trace s!"DBG[6]: TypeChecker.lean:481 (after _ ← inferTypeCheck p)"
       modify fun st => { st with isDefEqCache := st.isDefEqCache.insert (t, s) p }
     else
       modify fun st => { st with eqvManager := st.eqvManager.addEquiv t s }
@@ -1198,8 +1198,9 @@ applications/struct projections of the same recursor/projection, where we
 might save some work by directly checking if the major premises/struct
 arguments are defeq (rather than eagerly applying a recursor rule/projection).
 -/
-def whnfCore (n : Nat) (e : PExpr) (cheapK := false) (cheapProj := false) : RecEE :=
-  fun m => m.whnfCore n e cheapK cheapProj
+def whnfCore (n : Nat) (e : PExpr) (cheapK := false) (cheapProj := false) : RecEE := fun m => do
+  let ret ← m.whnfCore n e cheapK cheapProj
+  pure ret
 
 /--
 Gets the weak-head normal form of the free variable `e`,
@@ -1584,8 +1585,14 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
     return ← _whnfCore' e cheapK cheapProj
   | .fvar id => if !isLetFVar (← getLCtx) id then return (e, none)
   | .app .. | .letE .. | .proj .. => pure ()
-  if let some r := (← get).whnfCoreCache.get? e then -- FIXME important to optimize this -- FIXME should this depend on cheapK?
-    return r
+  if let some (e', eEqe'?) := (← get).whnfCoreCache.get? e then -- FIXME important to optimize this -- FIXME should this depend on cheapK?
+    let eEqe'? ←
+      if eEqe'?.isSome then
+        let (u, A) ← getTypeLevel e
+        pure $ .some $ .sry {u, A, B := (← inferTypePure 0 e'), a := e, b := e'} -- TODO use let variables
+      else
+        pure none
+    return (e', eEqe'?)
   let rec save r := do
     if !cheapK && !cheapProj then
       modify fun s => { s with whnfCoreCache := s.whnfCoreCache.insert e r }
@@ -1694,8 +1701,14 @@ private def _whnf' (e' : Expr) (cheapK := false) : RecEE := do
       return (e, none)
   | .lam .. | .app .. | .const .. | .letE .. | .proj .. => pure ()
   -- check cache
-  if let some r := (← get).whnfCache.get? (e, cheapK) then
-    return r
+  if let some (e', eEqe'?) := (← get).whnfCache.get? (e, cheapK) then
+    let eEqe'? ←
+      if eEqe'?.isSome then
+        let (u, A) ← getTypeLevel e
+        pure $ .some $ .sry {u, A, B := (← inferTypePure 0 e'), a := e, b := e'} -- TODO use let variables
+      else
+        pure none
+    return (e', eEqe'?)
   let rec loop le eEqle?
   | 0 => throw .deterministicTimeout
   | fuel+1 => do

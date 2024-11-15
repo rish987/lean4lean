@@ -21,11 +21,24 @@ match fuel with
     -- let recDepth := (defFuel - fuel)
     let m : RecM (CallDataT d):=
       match d with
-      | .isDefEqCore t s => isDefEqCore' t s
+      | .isDefEqCore t s => do
+        let ret ← isDefEqCore' t s
+        -- if let some p := ret.2 then
+        --   dbg_trace s!"DBG[4]: TypeChecker.lean:440 {← getTrace true m}, {n}"
+        --   _ ← inferTypeCheck p m
+        --   dbg_trace s!"DBG[6]: TypeChecker.lean:481 (after _ ← inferTypeCheck p)"
+        pure ret
       | .isDefEqApp t s m p => _isDefEqApp t s m p
       | .isDefEqCorePure t s => isDefEqCorePure' t s
       | .quickIsDefEq t s b => quickIsDefEq' t s b
-      | .whnfCore e k p => whnfCore' e k p
+      | .whnfCore e k p => do
+        let ret ← whnfCore' e k p
+        if ← shouldTTrace then
+          if let some p := ret.2 then
+            dbg_trace s!"DBG[A]: TypeChecker.lean:440 {← getTrace true}"
+            _ ← inferTypeCheck p
+            dbg_trace s!"DBG[B]: TypeChecker.lean:481 (after _ ← inferTypeCheck p)"
+        pure ret
       | .whnf e k => whnf' e k
       | .whnfPure e => whnfPure' e
       | .inferType e d => inferType' e d
@@ -114,7 +127,7 @@ match fuel with
     let mut traceId := none
     -- traceId := Option.some 31447
     -- traceId := Option.some 26425
-    -- traceId := Option.some 33496
+    traceId := Option.some 32839
     try
       let ret ← withCallId s.numCalls traceId do
         if tr then
