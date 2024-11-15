@@ -87,6 +87,8 @@ structure ExtMethods (m : Type → Type u) where
   callId : m Nat
   numCalls : m Nat
   shouldTTrace : m Bool
+  shouldTrace : m Bool
+  getTrace : Bool → m String
 
 structure ExtMethodsR (m : Type → Type u) extends ExtMethods m where
   isDefEqApp' : PExpr → PExpr → Std.HashMap Nat (Option EExpr) → m (Bool × Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))
