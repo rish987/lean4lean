@@ -184,9 +184,9 @@ def numCalls : RecM Nat := do
 
 def dbgFIds := #["_kernel_fresh.2100".toName, "_kernel_fresh.2101".toName, "_kernel_fresh.2102".toName]
 
-def mkIdNew (n : Nat) : RecM Name := do
+def mkIdNew (n : Nat) (pref := `_kernel_fresh): RecM Name := do
   let nid := (← get).nid
-  let fid := .mkNum `_kernel_fresh nid
+  let fid := .mkNum pref nid
   -- for id in dbgFIds do
   --   if id == fid then
   --     dbg_trace s!"DBG[2]: TypeChecker.lean:191 {id}, {n}"
@@ -442,7 +442,7 @@ def isDefEqAppLean (t s : Expr) : RecM (Bool × Bool) := do
   let (ret, s) ← runLeanRecM' $ Lean.TypeChecker.Inner.isDefEqApp t s
   pure (ret, s.data.used)
 
-def usesPrfIrrel' (t s : Expr) (fuel := 1000) : RecM (Bool × Bool) := do
+def usesPrfIrrel' (t s : Expr) (fuel := 1000) : RecM (Bool × Bool) := do -- FIXME is this accurate when the cache is used?
   let (ret, s) ← runLeanRecM' $ Lean.TypeChecker.isDefEq t s fuel
   pure (ret, s.data.used)
 
@@ -708,6 +708,8 @@ def meths : ExtMethods RecM := {
     shouldTTrace := shouldTTrace
     callId := do pure (← readThe Context).callId
     numCalls := do pure (← get).numCalls
+    getTrace := fun b => getTrace b
+    shouldTrace := shouldTrace
   }
 
 def methsA : ExtMethodsA RecM := {
@@ -1714,9 +1716,18 @@ private def _whnf' (e' : Expr) (cheapK := false) : RecEE := do
   | fuel+1 => do
     let env ← getEnv
     let (ler, leEqler?) ← whnfCore' le (cheapK := cheapK)
+    if ← shouldTTrace then
+      let i := 1000 - (fuel + 1)
+      dbg_trace s!"DBG[2]: TypeChecker.lean:1718 {i}"
+      _ ← inferTypeCheck ler
+      dbg_trace s!"DBG[3]: TypeChecker.lean:1720 (after dbg_trace s!DBG[2]: TypeChecker.lean:171…)"
+      for arg in ler.toExpr.getAppArgs do
+        if arg.hash == 2497994801 || arg.hash == 2679615295 then
+          dbg_trace s!"DBG[1]: TypeChecker.lean:1725 {← callId}, {arg.hash} {i}"
     let eEqler? ← appHEqTrans? e le ler eEqle? leEqler?
     if let some (ler', lerEqler'?) ← reduceNative env ler then return (ler', ← appHEqTrans? e ler ler' eEqler? lerEqler'?)
     if let some (ler', lerEqler'?) ← reduceNat ler then return (ler', ← appHEqTrans? e ler ler' eEqler? lerEqler'?)
+    -- let some newHead := unfoldDefinitionCore env ler.toExpr.getAppFn.toPExpr | return (ler, eEqler?)
     let some leru := unfoldDefinition env ler | return (ler, eEqler?)
     loop leru eEqler? fuel
   let r ← loop e none 1000
