@@ -74,6 +74,7 @@ structure TypeChecker.Context where
   introduced by isDefEqLambda.
   -/
   eqFVars : Std.HashSet (FVarId × FVarId) := {}
+  deltaFvarToExpr : Std.HashMap Name Expr := {}
   safety : DefinitionSafety := .safe
   callId : Nat := 0
   trace : Bool := false
@@ -83,15 +84,17 @@ structure TypeChecker.Context where
 
 namespace TypeChecker
 
+def deltaPrefix : Name := `_delta
+
 abbrev M := ReaderT Context <| StateT State <| Except KernelException
 
 def M.run (env : Environment) (x : M α)
-   (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) (nid : Nat := 0) (fvarTypeToReusedNamePrefix : Std.HashMap Expr Name := {}) (trace := false) (state : State := {}) (eqFVars : Std.HashSet (FVarId × FVarId) := {}) : Except KernelException (α × State) := do
-  x {env, safety, lctx, opts, lparams, trace, eqFVars} |>.run {state with nid, fvarTypeToReusedNamePrefix}
+   (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) (nid : Nat := 0) (fvarTypeToReusedNamePrefix : Std.HashMap Expr Name := {}) (trace := false) (state : State := {}) (eqFVars : Std.HashSet (FVarId × FVarId) := {}) (deltaFvarToExpr : Std.HashMap Name Expr := {}) : Except KernelException (α × State) := do
+  x {env, safety, lctx, opts, lparams, trace, eqFVars, deltaFvarToExpr} |>.run {state with nid, fvarTypeToReusedNamePrefix}
 
 def M.run' (env : Environment) (x : M α)
-   (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) (nid : Nat := 0) (fvarTypeToReusedNamePrefix : Std.HashMap Expr Name := {}) (trace := false) (eqFVars : Std.HashSet (FVarId × FVarId) := {}) : Except KernelException α := do
-  x {env, safety, lctx, opts, lparams, trace, eqFVars} |>.run' {nid, fvarTypeToReusedNamePrefix}
+   (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) (nid : Nat := 0) (fvarTypeToReusedNamePrefix : Std.HashMap Expr Name := {}) (trace := false) (eqFVars : Std.HashSet (FVarId × FVarId) := {}) (deltaFvarToExpr : Std.HashMap Name Expr := {}) : Except KernelException α := do
+  x {env, safety, lctx, opts, lparams, trace, eqFVars, deltaFvarToExpr} |>.run' {nid, fvarTypeToReusedNamePrefix}
 
 def getCallStack : M (Array Nat) := do pure $ (← readThe Context).callStack.map (·.1)
 
@@ -466,9 +469,12 @@ def reduceRecursor (e : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) :
   return none
 
 def whnfFVar (e : Expr) (cheapRec cheapProj : Bool) : RecM Expr := do
-  if let some (.ldecl (value := v) ..) := (← getLCtx).find? e.fvarId! then
+  let id := e.fvarId!
+  if let some (.ldecl (value := v) ..) := (← getLCtx).find? id then
     return ← whnfCore 73 v cheapRec cheapProj
-  return e
+  else if id.name.getPrefix == deltaPrefix then
+    return ← whnfCore 91 ((← readThe Context).deltaFvarToExpr.get? id.name).get! cheapRec cheapProj
+  return (e)
 
 def reduceProj (idx : Nat) (struct : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) := do
   let mut c ← (if cheapProj then whnfCore 1035 struct cheapRec cheapProj else whnf 1305 struct)
