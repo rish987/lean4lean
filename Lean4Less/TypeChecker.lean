@@ -94,6 +94,7 @@ structure TypeChecker.Context where
   introduced by isDefEqLambda.
   -/
   eqFVars : Std.HashMap (FVarId × FVarId) FVarDataE := {}
+  deltaFvarToExpr : Std.HashMap Name Expr := {}
   safety : DefinitionSafety := .safe
   cheapK := false
   callId : Nat := 0
@@ -1577,6 +1578,8 @@ def reduceRecursor (e : PExpr) (cheapK : Bool) : RecM (Option (PExpr × Option E
     return r
   return none
 
+def deltaPrefix : Name := Lean.TypeChecker.deltaPrefix
+
 @[inherit_doc whnfCore]
 private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecEE := do
   -- TODO whnfPure optimization
@@ -1585,7 +1588,11 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
   | .bvar .. | .sort .. | .mvar .. | .forallE .. | .const .. | .lam .. | .lit .. => return (e, none)
   | .mdata _ e => 
     return ← _whnfCore' e cheapK cheapProj
-  | .fvar id => if !isLetFVar (← getLCtx) id then return (e, none)
+  | .fvar id => if !isLetFVar (← getLCtx) id then
+    -- if id.name.getPrefix == deltaPrefix then
+    --   return ← whnfCore 9912 ((← readThe Context).deltaFvarToExpr.get? id.name).get!.toPExpr cheapK cheapProj
+    -- else
+      return (e, none)
   | .app .. | .letE .. | .proj .. => pure ()
   if let some (e', eEqe'?) := (← get).whnfCoreCache.get? e then -- FIXME important to optimize this -- FIXME should this depend on cheapK?
     let eEqe'? ←
@@ -1716,14 +1723,14 @@ private def _whnf' (e' : Expr) (cheapK := false) : RecEE := do
   | fuel+1 => do
     let env ← getEnv
     let (ler, leEqler?) ← whnfCore' le (cheapK := cheapK)
-    if ← shouldTTrace then
-      let i := 1000 - (fuel + 1)
-      dbg_trace s!"DBG[2]: TypeChecker.lean:1718 {i}"
-      _ ← inferTypeCheck ler
-      dbg_trace s!"DBG[3]: TypeChecker.lean:1720 (after dbg_trace s!DBG[2]: TypeChecker.lean:171…)"
-      for arg in ler.toExpr.getAppArgs do
-        if arg.hash == 2497994801 || arg.hash == 2679615295 then
-          dbg_trace s!"DBG[1]: TypeChecker.lean:1725 {← callId}, {arg.hash} {i}"
+    -- if ← shouldTTrace then
+    --   let i := 1000 - (fuel + 1)
+    --   dbg_trace s!"DBG[2]: TypeChecker.lean:1718 {i}"
+    --   _ ← inferTypeCheck ler
+    --   dbg_trace s!"DBG[3]: TypeChecker.lean:1720 (after dbg_trace s!DBG[2]: TypeChecker.lean:171…)"
+    --   for arg in ler.toExpr.getAppArgs do
+    --     if arg.hash == 2497994801 || arg.hash == 2679615295 then
+    --       dbg_trace s!"DBG[1]: TypeChecker.lean:1725 {← callId}, {arg.hash} {i}"
     let eEqler? ← appHEqTrans? e le ler eEqle? leEqler?
     if let some (ler', lerEqler'?) ← reduceNative env ler then return (ler', ← appHEqTrans? e ler ler' eEqler? lerEqler'?)
     if let some (ler', lerEqler'?) ← reduceNat ler then return (ler', ← appHEqTrans? e ler ler' eEqler? lerEqler'?)
