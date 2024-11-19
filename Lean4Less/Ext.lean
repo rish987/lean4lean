@@ -68,6 +68,7 @@ structure ExtMethods (m : Type → Type u) where
   isDefEqLean : Expr → Expr → m Bool
   whnf  : Nat → PExpr → m (PExpr × Option EExpr)
   whnfPure  : Nat → PExpr → m PExpr
+  setDeltaReplace : Name → PExpr × EExpr → m Unit
   mkId  : Nat → Expr → m Name
   mkId'  : Nat → LocalContext → Expr → m Name
   mkIdNew : Nat → m Name
