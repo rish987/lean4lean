@@ -127,7 +127,8 @@ match fuel with
     let mut traceId := none
     -- traceId := Option.some 31447
     -- traceId := Option.some 26425
-    traceId := Option.some 30792
+    -- traceId := Option.some 30792
+    traceId := Option.some 83495
     try
       let ret ← withCallId s.numCalls traceId do
         if tr then

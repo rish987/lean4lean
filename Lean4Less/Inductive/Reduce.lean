@@ -196,26 +196,31 @@ def inductiveReduceRec [Monad m] [MonadWithReaderOf LocalContext m] [MonadLCtx m
     let eNewMajorType' := (← meth.inferTypePure 121 eNewMajor')
     let e' := (mkAppN recFn recArgs[:majorIdx + 1]) |>.toPExpr
 
-    if ← meth.shouldTrace then
-      -- dbg_trace s!"DBG[4]: Reduce.lean:205 {recFnName}, {(indicesStartIdx, motivesStartIdx, majorIdx)}"
-      let mut i := 0
-      for arg in recArgs do
-        if let .mdata (.mk [(n, _)]) _ := arg then
-          if let some (.some p) := map.get? i then
-            meth.setDeltaReplace n (newRecArgs[i]!.toPExpr, p)
-          dbg_trace s!"DBG[X]: Reduce.lean:204 {n}"
-
-        -- dbg_trace s!"DBG[5]: Reduce.lean:201 {i}, {map.get! i |>.isSome}, {arg.hash}, {arg.hash == 2497994801}, {arg.hash == 2679615295}"
-        _ ← meth.inferTypeCheck arg.toPExpr
-        -- dbg_trace s!"DBG[6]: Reduce.lean:204 {i}"
-        i := i + 1
-      -- dbg_trace s!"DBG[1]: Reduce.lean:196 {← meth.getTrace true}"
-      let (.true, eEqeNewMajor?) ← meth.isDefEqApp 2 e' eNewMajor' map | unreachable!
-      if let some p := eEqeNewMajor? then
-        _ ← meth.inferTypeCheck p
-      -- dbg_trace s!"DBG[3]: Reduce.lean:202: eEqeNewMajor?={eEqeNewMajor?.isSome}"
-      _ ← meth.inferTypeCheck eNewMajor'
-      -- dbg_trace s!"DBG[2]: Reduce.lean:198 (after _ ← meth.inferTypeCheck eNewMajor)"
+    -- if ← meth.shouldTrace then
+    --   -- dbg_trace s!"DBG[1]: Reduce.lean:197 (after let e := {← meth.getTrace true}"
+    --   -- _ ← meth.inferTypeCheck eNewMajor'
+    --   -- dbg_trace s!"DBG[2]: Reduce.lean:199 (after _ ← meth.inferTypeCheck eNewMajor)"
+    --
+    --   -- dbg_trace s!"DBG[4]: Reduce.lean:205 {recFnName}, {(motivesStartIdx, indicesStartIdx, majorIdx)}"
+    --   let mut i := 0
+    --   for (arg, newArg) in recArgs.zip newRecArgs do
+    --
+    --     if let some (.some p) := map.get? i then
+    --       -- dbg_trace s!"DBG[3]: Reduce.lean:208 {i}, {arg.hash}"
+    --       if let .mdata (.mk [(n, _)]) e := arg then
+    --         meth.setDeltaReplace n (newRecArgs[i]!.toPExpr, p)
+    --         dbg_trace s!"DBG[X]: Reduce.lean:204 {n}, {e}"
+    --
+    --     -- dbg_trace s!"DBG[5]: Reduce.lean:201 {i}, {map.get! i |>.isSome}, {arg.hash}, {arg.hash == 2497994801}, {arg.hash == 2679615295}"
+    --     -- _ ← meth.inferTypeCheck arg.toPExpr
+    --     -- dbg_trace s!"DBG[6]: Reduce.lean:204 {i}"
+    --     i := i + 1
+    --   -- dbg_trace s!"DBG[1]: Reduce.lean:196 {← meth.getTrace true}"
+    --   -- let (.true, eEqeNewMajor?) ← meth.isDefEqApp 2 e' eNewMajor' map | unreachable!
+    --   -- if let some p := eEqeNewMajor? then
+    --   --   _ ← meth.inferTypeCheck p
+    --   -- dbg_trace s!"DBG[3]: Reduce.lean:202: eEqeNewMajor?={eEqeNewMajor?.isSome}"
+    --   -- dbg_trace s!"DBG[2]: Reduce.lean:198 (after _ ← meth.inferTypeCheck eNewMajor)"
 
     let eType' := (← meth.inferTypePure 129 e')
     -- dbg_trace s!"DBG[3]: Reduce.lean:198 (after let eType := (← meth.inferTypeLean 129…)"
