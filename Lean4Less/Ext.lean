@@ -63,12 +63,13 @@ section
 
 structure ExtMethods (m : Type → Type u) where
   isDefEq : Nat → PExpr → PExpr → m (Bool × Option EExpr)
+  withDeferPI : {T : Type} → m T → m T
   isDefEqApp : Nat → PExpr → PExpr → Std.HashMap Nat (Option EExpr) → m (Bool × Option EExpr)
   isDefEqPure : Nat → PExpr → PExpr → m Bool
   isDefEqLean : Expr → Expr → m Bool
   whnf  : Nat → PExpr → m (PExpr × Option EExpr)
   whnfPure  : Nat → PExpr → m PExpr
-  setDeltaReplace : Name → PExpr × EExpr → m Unit
+  setDeltaReplace : Name → PExpr × (Option EExpr) → m Unit
   mkId  : Nat → Expr → m Name
   mkId'  : Nat → LocalContext → Expr → m Name
   mkIdNew : Nat → m Name

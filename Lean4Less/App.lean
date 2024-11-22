@@ -673,6 +673,7 @@ def isDefEqApp''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
 
 def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
    (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default) (tfEqsf? : Option (Option EExpr) := none) : m (Bool × (Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))) := do
+  -- dbg_trace s!"DBG[1]: App.lean:683 (after (targsEqsargs? : Std.HashMap Nat {← meth.callId}"
   if meth.opt then
     isDefEqAppOpt''' meth tf sf tArgs sArgs targsEqsargs? tfEqsf?
   else

@@ -32,7 +32,7 @@ structure TypeChecker.State where
   isDefEqCache : Std.HashMap (PExpr × PExpr) EExpr := Std.HashMap.empty (capacity := 1000)
   isDefEqAppCache : Std.HashMap (Array PExpr × Array PExpr) (Option (EExpr × Array (Option (PExpr × PExpr × EExpr)))) := {}
   fvarRegistry : Std.HashMap Name Nat := {} -- for debugging purposes
-  deltaReplace : Std.HashMap Name (PExpr × (EExpr)) := {}
+  deltaReplace : Std.HashMap Name (PExpr × (Option EExpr)) := {}
   eqvManager : EquivManager := {}
   lctx : LocalContext := {}
   numCalls : Nat := 0
@@ -104,6 +104,7 @@ structure TypeChecker.Context where
   dbgCallId : Option Nat := none
   callStack : Array (Nat × Nat × (Option CallData)) := #[]
   lparams : List Name := []
+  deferPI : Bool := false
 
 namespace TypeChecker
 
@@ -149,11 +150,15 @@ structure Methods where
 abbrev RecM := ReaderT Methods M
 abbrev RecPE := RecM (PExpr × (Option PExpr))
 abbrev RecEE := RecM (PExpr × (Option EExpr))
+abbrev RecEEM := RecM (PExpr × (Option EExpr) × Option MData)
 abbrev RecB := RecM (Bool × (Option EExpr))
 abbrev RecLB := RecM (LBool × (Option EExpr))
 
 def shouldTrace : M Bool := do
   pure $ (← readThe Context).callStack.any (·.2.1 == (← readThe Context).dbgCallId)
+
+def deferPI : M Bool := do
+  pure $ (← readThe Context).deferPI
 
 def shouldTTrace : M Bool := do
   pure $ (← readThe Context).callId == (← readThe Context).dbgCallId
@@ -212,9 +217,9 @@ def mkId' (n : Nat) (lctx : LocalContext) (dom : Expr) : RecM Name := do
 def mkId (n : Nat) (dom : Expr) : RecM Name := do
   mkId' n (← getLCtx) dom
 
-def setDeltaReplace (n : Name) (rep : PExpr × EExpr) : RecM Unit := do
+def setDeltaReplace (n : Name) (rep : PExpr × (Option EExpr)) : RecM Unit := do
   modify fun st => { st with deltaReplace := st.deltaReplace.insert n rep }
-  dbg_trace s!"DBG[X]: Reduce.lean:204 {n}"
+  -- dbg_trace s!"DBG[X]: Reduce.lean:204 {n}"
 
 def runLeanMinus (M : Lean.TypeChecker.M T) : RecM T := do
   let trace := (← readThe Context).L4LTraceOverride || ((← readThe Context).L4LTrace && (← shouldTrace))
@@ -287,6 +292,9 @@ def whnfPure (n : Nat) (e : PExpr) : RecM PExpr := fun m => m.whnfPure n e
 
 @[inline] def withForallOpt [MonadWithReaderOf Context m] (x : m α) : m α :=
   withReader (fun l => {l with forallOpt := true}) x
+
+@[inline] def withDeferPI [MonadWithReaderOf Context m] (x : m α) : m α :=
+  withReader (fun l => {l with deferPI := true}) x
 
 def dbg_wrap (idx : Nat) (m : RecM α) : RecM α := do
   modify fun s => {s with numCalls := s.numCalls + 1} 
@@ -429,11 +437,16 @@ did not/would not throw an error). This ensures in particular that any calls to
 that `e` types as the return value of `inferType e (inferOnly := true)`.
 -/
 def isDefEqCore (n : Nat) (t s : PExpr) : RecB := fun m => do -- FIXME also try the cache (this function may be called directly)
+  -- if (← callId m) == 92295 then
+  --  dbg_trace s!"DBG[19]: TypeChecker.lean:439 (after if (← callId) == 92295 then) {(← get).numCalls}"
   let (ret, p?) ← m.isDefEqCore n t s
   if let .mdata (.mk [(n, _)]) e := t.toExpr then
-    dbg_trace s!"DBG[2]: TypeChecker.lean:434 {n}, {ret}, {e == s}"
-    if let some p := p? then
-      setDeltaReplace n (s, p) m
+    -- dbg_trace s!"DBG[2]: TypeChecker.lean:434 {n}, {ret}, {e == s}, {p?.isSome}"
+    setDeltaReplace n (s, p?) m
+    -- if let some p := p? then
+    --   setDeltaReplace n (s, p) m
+  -- if p?.isSome then
+  --   dbg_trace s!"DBG[18]: TypeChecker.lean:446 {← callId m}"
   pure (ret, p?)
 
 
@@ -480,13 +493,14 @@ def inferTypePure' (e : PExpr) : RecM PExpr := do -- TODO make more efficient/us
 def _isDefEq (n : Nat) (t s : PExpr) : RecB := do
   -- if let some p := (← get).isDefEqCache.get? (t, s) then
   -- 
-  if ((← get).isDefEqCache.get? (t, s)).isSome || ((← get).isDefEqCache.get? (s, t)).isSome then
+  if not (← shouldTrace) && (((← get).isDefEqCache.get? (t, s)).isSome || ((← get).isDefEqCache.get? (s, t)).isSome) then
     -- return (true, .some p)
     let (u, A) ← getTypeLevel t
-    let p := .sry {u, A, B := (← inferTypePure 0 s), a := t, b := s}
+    let p? := .some $ .sry {u, A, B := (← inferTypePure 0 s), a := t, b := s}
     if let .mdata (.mk [(n, _)]) _ := t.toExpr then
-      setDeltaReplace n (s, p)
-    return (true, .some $ p) -- TODO use let variables
+      setDeltaReplace n (s, p?)
+    -- dbg_trace s!"HERE"
+    return (true, p?) -- TODO use let variables
   -- else if let some p := (← get).isDefEqCache.get? (s, t) then
   --   let (lvl, sType) ← getTypeLevel s
   --   let tType ← inferTypePure 99 t
@@ -573,6 +587,7 @@ def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : P
   loop 0 #[] #[] #[] #[]
 
 def mkHRefl (n : Nat) (lvl : Level) (T : PExpr) (t : PExpr) : RecM EExpr := do -- 7
+  dbg_trace s!"DBG[17]: TypeChecker.lean:584 (after def mkHRefl (n : Nat) (lvl : Level) (T :…)"
   pure $ .refl {u := lvl, A := T, a := t, n}
 
 def isDefEqPure (n : Nat) (t s : PExpr) (fuel := 1000) : RecM Bool := do
@@ -698,10 +713,14 @@ def alignForAll (numBinds : Nat) (ltl ltr : Expr) : RecM (Expr × Expr × Nat) :
   | _ => pure (ltl, ltr, 0)
 
 def isDefEqApp (n : Nat) (t s : PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default)
-  (tfEqsf? : Option (Option EExpr) := none) : RecM (Bool × Option EExpr) := fun m => m.isDefEqApp n t s targsEqsargs? tfEqsf?
+  (tfEqsf? : Option (Option EExpr) := none) : RecM (Bool × Option EExpr) := fun m => do
+    if (← callId m) == 92296 then
+      dbg_trace s!"DBG[26]: TypeChecker.lean:716 {(← get).numCalls}"
+    m.isDefEqApp n t s targsEqsargs? tfEqsf?
 
 def meths : ExtMethods RecM := {
     isDefEq := isDefEq
+    withDeferPI := withDeferPI
     isDefEqApp := fun n t s m => isDefEqApp n t s (targsEqsargs? := m)
     isDefEqPure := isDefEqPure
     isDefEqLean := isDefEqLean
@@ -740,14 +759,16 @@ def methsA : ExtMethodsA RecM := {
 
 def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default)
   (tfEqsf? : Option (Option EExpr) := none) : RecM (Bool × Option (EExpr × Array (Option (PExpr × PExpr × EExpr)))) := do
-  if let some p? := (← get).isDefEqAppCache.get? (#[tf] ++ tArgs, #[sf] ++ sArgs) then
-    let t := Lean.mkAppN tf (tArgs.map (·.toExpr))
-    let s := Lean.mkAppN sf (sArgs.map (·.toExpr))
-    let (u, A) ← getTypeLevel t.toPExpr
-    if let some p := p? then
-      return (true, .some $ (.sry {u, A, B := (← inferTypePure 0 s.toPExpr), a := t.toPExpr, b := s.toPExpr}, p.2)) -- TODO use let variables
-    else
-      return (true, none) -- TODO use let variables
+  if not (← shouldTrace) then
+    if let some p? := (← get).isDefEqAppCache.get? (#[tf] ++ tArgs, #[sf] ++ sArgs) then
+      let t := Lean.mkAppN tf (tArgs.map (·.toExpr))
+      let s := Lean.mkAppN sf (sArgs.map (·.toExpr))
+      let (u, A) ← getTypeLevel t.toPExpr
+      -- dbg_trace s!"HERE"
+      if let some p := p? then
+        return (true, .some $ (.sry {u, A, B := (← inferTypePure 0 s.toPExpr), a := t.toPExpr, b := s.toPExpr}, p.2)) -- TODO use let variables
+      else
+        return (true, none) -- TODO use let variables
   let (isDefEq, p?) ← App.isDefEqApp'' methsA tf sf tArgs sArgs targsEqsargs? tfEqsf?
   if isDefEq then
     modify fun st => { st with isDefEqAppCache := st.isDefEqAppCache.insert (#[tf] ++ tArgs, #[sf] ++ sArgs) p? }
@@ -771,8 +792,9 @@ their function heads and arguments being defeq.
 -/
 def _isDefEqApp (t s : PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default)
   (tfEqsf? : Option (Option EExpr) := none) : RecM (Bool × Option EExpr) := do
-  if let some p := (← get).isDefEqCache.get? (t, s) then
-    return (true, .some p)
+  if not (← shouldTrace) then
+    if let some p := (← get).isDefEqCache.get? (t, s) then
+      return (true, .some p)
   let (isDefEq, data?) ← isDefEqApp' t s targsEqsargs? tfEqsf?
   let p? := data?.map (·.1)
   if let some p := p? then
@@ -944,7 +966,10 @@ def maybeCast (n : Nat) (p? : Option EExpr) (typLhs typRhs e : PExpr) : RecM PEx
 def isDefEqProofIrrel' (t s tType sType : PExpr) (pt? : Option EExpr) (n : Nat) (useRfl := false) : RecM (Option EExpr) := do
   if ← isDefEqPure (2000 + n) t s 15 then
     if useRfl then
-      return .some $ .refl {u := 0, A := tType, a := t, n := 50}
+      let p := .refl {u := 0, A := tType, a := t, n := 50}
+      if (← deferPI) && (← shouldTrace) then
+        dbg_trace s!"DBG[J]: TypeChecker.lean:2259 {p}"
+      return .some $ p
     else
       return none
   else
@@ -952,6 +977,8 @@ def isDefEqProofIrrel' (t s tType sType : PExpr) (pt? : Option EExpr) (n : Nat) 
       appPrfIrrelHEq tType sType pt t s
     else
       appPrfIrrel tType t s
+    if (← deferPI) && (← shouldTrace) then
+      dbg_trace s!"DBG[H]: TypeChecker.lean:2259 {useRfl}, {t}\n\n{s}"
     return (.some p)
 
 def methsR : ExtMethodsR RecM := {
@@ -1603,10 +1630,13 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
   match e' with
   | .bvar .. | .sort .. | .mvar .. | .forallE .. | .const .. | .lam .. | .lit .. => return (e, none)
   | .mdata _ e => 
-    return ← _whnfCore' e cheapK cheapProj
+    let (eN, p?) ← _whnfCore' e cheapK cheapProj
+    if eN == e then -- preserve mdata
+      return (e'.toPExpr, none)
+    return (eN, p?)
   | .fvar id => if !isLetFVar (← getLCtx) id then return (e, none)
   | .app .. | .letE .. | .proj .. => pure ()
-  if (← get).useCache then
+  if not (← shouldTrace) && (← get).useCache then
     if let some (e', eEqe'?) := (← get).whnfCoreCache.get? e then -- FIXME important to optimize this -- FIXME should this depend on cheapK?
       let eEqe'? ←
         if eEqe'?.isSome then
@@ -1614,6 +1644,7 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
           pure $ .some $ .sry {u, A, B := (← inferTypePure 0 e'), a := e, b := e'} -- TODO use let variables
         else
           pure none
+      -- dbg_trace s!"HERE"
       return (e', eEqe'?)
   let rec save r := do
     if !cheapK && !cheapProj then
@@ -1727,7 +1758,7 @@ private def _whnf' (e' : Expr) (cheapK := false) : RecEE := do
       return (e, none)
   | .lam .. | .app .. | .const .. | .letE .. | .proj .. => pure ()
   -- check cache
-  if (← get).useCache then
+  if not (← shouldTrace) && (← get).useCache then
     if let some (e', eEqe'?) := (← get).whnfCache.get? (e, cheapK) then
       let eEqe'? ←
         if eEqe'?.isSome then
@@ -1735,6 +1766,7 @@ private def _whnf' (e' : Expr) (cheapK := false) : RecEE := do
           pure $ .some $ .sry {u, A, B := (← inferTypePure 0 e'), a := e, b := e'} -- TODO use let variables
         else
           pure none
+      -- dbg_trace s!"HERE"
       return (e', eEqe'?)
   let rec loop le eEqle?
   | 0 => throw .deterministicTimeout
@@ -1742,24 +1774,24 @@ private def _whnf' (e' : Expr) (cheapK := false) : RecEE := do
     let i := 1000 - (fuel + 1)
     let env ← getEnv
     let (ler, leEqler?) ← whnfCore' le (cheapK := cheapK)
-    let mut any := false
-    if (← shouldTTrace) then
-      for arg in ler.toExpr.getAppArgs do
-        if arg.hash == 1036060218 then
-          any := true
-          dbg_trace s!"DBG[A]: {← getTrace true}, {ler.toExpr.getAppArgs.size}, {i}"
-      if let .const d .. := ler.toExpr.getAppFn then
-        dbg_trace s!"DBG[49]: TypeChecker.lean:1737 {d}"
-      dbg_trace s!"DBG[47]: TypeChecker.lean:1737 (after if any then)"
-      _ ← inferTypeCheck ler
-      dbg_trace s!"DBG[48]: TypeChecker.lean:1740 (after _ ← inferTypeCheck ler)"
+    -- let mut any := false
+    -- if (← shouldTTrace) then
+    --   for arg in ler.toExpr.getAppArgs do
+    --     if arg.hash == 1036060218 then
+    --       any := true
+    --       dbg_trace s!"DBG[A]: {← getTrace true}, {ler.toExpr.getAppArgs.size}, {i}"
+    --   if let .const d .. := ler.toExpr.getAppFn then
+    --     dbg_trace s!"DBG[49]: TypeChecker.lean:1737 {d}"
+    --   dbg_trace s!"DBG[47]: TypeChecker.lean:1737 (after if any then)"
+    --   _ ← inferTypeCheck ler
+    --   dbg_trace s!"DBG[48]: TypeChecker.lean:1740 (after _ ← inferTypeCheck ler)"
 
     let (ler', (indRepMap : Std.HashMap Nat (Expr × Name))) ←
       if (← shouldTTrace) then
       -- if false then
-        dbg_trace s!"DBG[2]: TypeChecker.lean:1718 {i}, {← getTrace true}"
+        dbg_trace s!"checking: {i}"
         _ ← inferTypeCheck ler
-        dbg_trace s!"DBG[8]: TypeChecker.lean:1720 (after dbg_trace s!DBG[2]: TypeChecker.lean:171…)"
+        dbg_trace s!"done checking"
         let mut newArgs := #[]
         let mut indRepMap := default
         let mut argi := 0
@@ -1768,7 +1800,7 @@ private def _whnf' (e' : Expr) (cheapK := false) : RecEE := do
             -- if arg.hash == 1036060218 then
             if not (arg.ctorName == "mdata") then
               let n := .num (.num `A i) newArgs.size
-              dbg_trace s!"DBG[3]: TypeChecker.lean:1733 {newArgs.size}, {ler.toExpr.getAppArgs.size}"
+              -- dbg_trace s!"DBG[3]: TypeChecker.lean:1733 {newArgs.size}, {ler.toExpr.getAppArgs.size}"
               indRepMap := indRepMap.insert newArgs.size (arg, n)
               pure $ Expr.mdata (.mk [(n, .ofNat 0)]) arg
             else pure arg
@@ -1829,45 +1861,46 @@ private def _whnf' (e' : Expr) (cheapK := false) : RecEE := do
             map := map.insert idx none
         else
           map := map.insert idx none
-    --   if let some lastIdx := lastIdx? then
-    --     newInitArgs := newInitArgs[:lastIdx + 1]
-    --     initArgs := initArgs[:lastIdx + 1]
-    --     for e in initArgs do
-    --       if let Expr.mdata d e := e then
-    --         dbg_trace s!"DBG[20]: TypeChecker.lean:1762 {d}"
-    --     dbg_trace s!"DBG[9]: TypeChecker.lean:1754 (after if let some (newArg, argEqnewArg?) := ("
-    --     let initLer := Lean.mkAppN ler'.toExpr.getAppFn initArgs |>.toPExpr
-    --     let initNewLer := Lean.mkAppN ler'.toExpr.getAppFn newInitArgs |>.toPExpr
-    --     if (← isValidApp 0 initNewLer) then
-    --       dbg_trace s!"DBG[15]: TypeChecker.lean:1777 (after if (← isValidApp 0 initNewLer) then)"
-    --       let initLerType ← inferTypePure 0 initLer
-    --       let newInitLerType ← inferTypePure 0 initNewLer
-    --       let remArgs := args[lastIdx + 1:].toArray
-    --       let newRemArgsData ← replaceFType methsR initLerType newInitLerType remArgs
-    --       let newRemArgs := newRemArgsData.map (·.1.toExpr)
-    --       let newLer := Lean.mkAppN ler'.toExpr.getAppFn (newInitArgs ++ newRemArgs) |>.toPExpr
-    --       assert! (← isValidApp 0 newLer)
-    --       for idx in [:newRemArgsData.size] do
-    --         let (_, argEqnewArg?) := newRemArgsData[idx]!
-    --         map := map.insert (lastIdx + 1 + idx) argEqnewArg?
-    --
-    --       let (.true, lerEqnewLer?) ← isDefEqApp 2 ler' newLer map | unreachable!
-    --       let eEqnewLer? ← appHEqTrans? e ler' newLer eEqler'? lerEqnewLer?
-    --       let some newLeru := unfoldDefinition env newLer | return (newLer, eEqnewLer?)
-    --       for e in newLeru.toExpr.getAppArgs do
-    --         if let Expr.mdata d e := e then
-    --           dbg_trace s!"DBG[19]: TypeChecker.lean:1797 {d}"
-    --       dbg_trace s!"DBG[17]: TypeChecker.lean:1793 (after let some newLeru := unfoldDefinition env…)"
-    --       modify fun s => { s with useCache := false }
-    --       let some leru := unfoldDefinition env ler | unreachable!
-    --       dbg_trace s!"DBG[23]: TypeChecker.lean:1808 (after let some leru := unfoldDefinition env le…)"
-    --       let (nf, eEqnewNf?) ← loop leru eEqler'? fuel
-    --       dbg_trace s!"DBG[21]: TypeChecker.lean:1807 (after modify fun s =>  s with useCache := fals…)"
-    --       let (newNf, eEqnewNf?) ← loop newLeru eEqnewLer? fuel
-    --       modify fun s => { s with useCache := true }
-    --       dbg_trace s!"DBG[7]: TypeChecker.lean:1751 {← isDefEqPure 0 nf newNf}"
-    --     else
-    --       dbg_trace s!"DBG[6]: TypeChecker.lean:1762 (after dbg_trace s!DBG[1]: TypeChecker.lean:176…)"
+      if let some lastIdx := lastIdx? then
+        newInitArgs := newInitArgs[:lastIdx + 1]
+        initArgs := initArgs[:lastIdx + 1]
+        for e in initArgs do
+          if let Expr.mdata d e := e then
+            dbg_trace s!"DBG[20]: TypeChecker.lean:1762 {d}"
+        let initLer := Lean.mkAppN ler'.toExpr.getAppFn initArgs |>.toPExpr
+        let initNewLer := Lean.mkAppN ler'.toExpr.getAppFn newInitArgs |>.toPExpr
+        if (← isValidApp 0 initNewLer) then
+          dbg_trace s!"DBG[15]: TypeChecker.lean:1777 (after if (← isValidApp 0 initNewLer) then)"
+          let initLerType ← inferTypePure 0 initLer
+          let newInitLerType ← inferTypePure 0 initNewLer
+          let remArgs := args[lastIdx + 1:].toArray
+          let newRemArgsData ← replaceFType methsR initLerType newInitLerType remArgs
+          let newRemArgs := newRemArgsData.map (·.1.toExpr)
+          let newLer := Lean.mkAppN ler'.toExpr.getAppFn (newInitArgs ++ newRemArgs) |>.toPExpr
+          assert! (← isValidApp 0 newLer)
+          for idx in [:newRemArgsData.size] do
+            let (_, argEqnewArg?) := newRemArgsData[idx]!
+            map := map.insert (lastIdx + 1 + idx) argEqnewArg?
+
+          let (.true, lerEqnewLer?) ← isDefEqApp 2 ler' newLer map | unreachable!
+          let eEqnewLer? ← appHEqTrans? e ler' newLer eEqler'? lerEqnewLer?
+          let some newLeru := unfoldDefinition env newLer | return (newLer, eEqnewLer?)
+          let mut ix := 0
+          for e in newLeru.toExpr.getAppArgs do
+            if let Expr.mdata d e := e then
+              dbg_trace s!"DBG[19]: TypeChecker.lean:1797 {d}, {newInitArgs.size}, {newRemArgs.size}, {ix}"
+            ix := ix + 1
+          dbg_trace s!"DBG[17]: TypeChecker.lean:1793 (after let some newLeru := unfoldDefinition env…)"
+          modify fun s => { s with useCache := false }
+          let some leru := unfoldDefinition env ler | unreachable!
+          dbg_trace s!"DBG[23]: TypeChecker.lean:1808 (after let some leru := unfoldDefinition env le…)"
+          let (nf, eEqnewNf?) ← loop leru eEqler'? fuel
+          dbg_trace s!"DBG[21]: TypeChecker.lean:1807 (after modify fun s =>  s with useCache := fals…)"
+          let (newNf, eEqnewNf?) ← loop newLeru eEqnewLer? fuel
+          modify fun s => { s with useCache := true }
+          dbg_trace s!"DBG[7]: TypeChecker.lean:1751 {← isDefEqPure 0 nf newNf}"
+        else
+          dbg_trace s!"DBG[6]: TypeChecker.lean:1762 (after dbg_trace s!DBG[1]: TypeChecker.lean:176…)"
 
     pure (nf', eEqnf'?)
   let r ← loop e none 1000
@@ -2127,12 +2160,16 @@ def isDefEqCore' (t s : PExpr) : RecM (Bool × (Option EExpr)) := do
 
   -- if ← isDefEqPure 74 t s 15 then -- NOTE: this is a tradeoff between runtime and output size -- TODO put back
   --   return (true, none)
+  if (← callId) == 92296 then
+    dbg_trace s!"DBG[6]: TypeChecker.lean:2149 (after --   return (true, none)) {← callId}"
   let (r, pteqs?) ← quickIsDefEq 88 t s (useHash := true)
   if r != .undef then return (r == .true, pteqs?)
 
   if !t.toExpr.hasFVar && s.toExpr.isConstOf ``true then
     let (t, p?) ← whnf 75 t
     if t.toExpr.isConstOf ``true then return (true, p?)
+  if (← callId) == 92296 then
+    dbg_trace s!"DBG[7]: TypeChecker.lean:2156 (after if t.toExpr.isConstOf true then return (…)"
 
   let (tn, tEqtn?) ← whnfCore 76 t (cheapK := true) (cheapProj := true)
   let (sn, sEqsn?) ← whnfCore 77 s (cheapK := true) (cheapProj := true)
@@ -2141,6 +2178,8 @@ def isDefEqCore' (t s : PExpr) : RecM (Bool × (Option EExpr)) := do
     let tEqs'? ← appHEqTrans? t t' s' tEqt'? t'Eqs'?
     let s'Eqs? ← appHEqSymm? sEqs'?
     appHEqTrans? t s' s tEqs'? s'Eqs?
+  if (← callId) == 92296 then
+    dbg_trace s!"DBG[8]: TypeChecker.lean:2165 (after appHEqTrans? t s s tEqs? sEqs?)"
 
   if (tn == t && sn == s) then
     if !(unsafe ptrEq tn t) then
@@ -2156,12 +2195,23 @@ def isDefEqCore' (t s : PExpr) : RecM (Bool × (Option EExpr)) := do
       return (false, none)
     else if r == .true then
       return (true, ← mktEqs? tn sn tEqtn? sEqsn? tnEqsn?)
+  if (← callId) == 92296 then
+    dbg_trace s!"DBG[9]: TypeChecker.lean:2181 (after return (true, ← mktEqs? tn sn tEqtn? s…)"
 
-  let (r, tnEqsn?) ← isDefEqProofIrrel tn sn
-  if r != .undef then 
-    if r == .true then
+  if not (← deferPI) then
+    let (r, tnEqsn?) ← isDefEqProofIrrel tn sn
+    if (← callId) == 92296 then
+      dbg_trace s!"DBG[4]: TypeChecker.lean:2181: tnEqsn?={tnEqsn?.isSome}, {← deferPI}"
+    if r != .undef then 
+      if r == .true then
+        return (true, ← mktEqs? tn sn tEqtn? sEqsn? tnEqsn?)
+      return (false, none)
+  else
+    match ← isDefEqApp 6 tn sn with
+    | (true, tnEqsn?) =>
       return (true, ← mktEqs? tn sn tEqtn? sEqsn? tnEqsn?)
-    return (false, none)
+    | _ =>
+      pure ()
 
   match ← lazyDeltaReduction tn sn with
   | .continue ..
@@ -2175,6 +2225,8 @@ def isDefEqCore' (t s : PExpr) : RecM (Bool × (Option EExpr)) := do
 
   let tEqtn'? ← appHEqTrans? t tn tn' tEqtn? tnEqtn'?
   let sEqsn'? ← appHEqTrans? s sn sn' sEqsn? snEqsn'?
+  if (← callId) == 92296 then
+    dbg_trace s!"DBG[10]: TypeChecker.lean:2203 (after let sEqsn? ← appHEqTrans? s sn sn sEqs…)"
 
   match tn'.toExpr, sn'.toExpr with
   | .const tf tl, .const sf sl =>
@@ -2206,6 +2258,8 @@ def isDefEqCore' (t s : PExpr) : RecM (Bool × (Option EExpr)) := do
               | _ =>
                 pure ()
   | _, _ => pure ()
+  if (← callId) == 92296 then
+    dbg_trace s!"DBG[11]: TypeChecker.lean:2235 (after | _, _ => pure ())"
 
   -- above functions used `cheapProj = true`, `cheapK = true`, so we may not have a complete WHNF
   let (tn'', tn'Eqtn''?) ← whnfCore 79 tn'
@@ -2224,6 +2278,8 @@ def isDefEqCore' (t s : PExpr) : RecM (Bool × (Option EExpr)) := do
     let sEqsn''? ← appHEqTrans? s sn' sn'' sEqsn'? sn'Eqsn''?
     let (true, tn''Eqsn''?) ← isDefEqCore 81 tn'' sn'' | return (false, none)
     let r? := ← mktEqs? tn'' sn'' tEqtn''? sEqsn''? tn''Eqsn''?
+    if (← callId) == 92296 then
+      dbg_trace s!"DBG[13]: TypeChecker.lean:2254 (after let r? := ← mktEqs? tn sn tEqtn? sEqsn…)"
     return (true, r?)
 
   -- optimized by above functions using `cheapK = true`
@@ -2235,11 +2291,26 @@ def isDefEqCore' (t s : PExpr) : RecM (Bool × (Option EExpr)) := do
   --       return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)
   --   else
   --     return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? none)
+  if (← callId) == 92296 then
+    dbg_trace s!"DBG[24]: TypeChecker.lean:2280 (after if (← callId) == 92296 then) {(← get).numCalls}"
   match ← isDefEqApp 7 tn' sn' with
   | (true, tn'Eqsn'?) =>
+    if (← callId) == 92296 then
+      dbg_trace s!"DBG[25]: TypeChecker.lean:2284 (after if (← callId) == 92296 then)"
     return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)
   | _ =>
     pure ()
+  if (← callId) == 92296 then
+    dbg_trace s!"DBG[12]: TypeChecker.lean:2270 (after pure ())"
+
+  if (← deferPI) then
+    let (r, tnEqsn?) ← isDefEqProofIrrel tn sn
+    if (← callId) == 92296 then
+      dbg_trace s!"DBG[5]: TypeChecker.lean:2267 {tnEqsn?.isSome}, {← deferPI}"
+    if r != .undef then 
+      if r == .true then
+        return (true, ← mktEqs? tn sn tEqtn? sEqsn? tnEqsn?)
+      return (false, none)
 
   match ← tryEtaExpansion tn' sn' with
   | (true, tn'Eqsn'?) => return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)
@@ -2256,9 +2327,13 @@ def isDefEqCore' (t s : PExpr) : RecM (Bool × (Option EExpr)) := do
       return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? none)
     else
       return (false, none)
+  if (← callId) == 92296 then
+    dbg_trace s!"DBG[14]: TypeChecker.lean:2296 (after return (false, none))"
   let (r, tn'Eqsn'?) ← isDefEqUnitLike tn' sn'
   if r then
     return (true, ← mktEqs? tn' sn' tEqtn'? sEqsn'? tn'Eqsn'?)
+  if (← callId) == 92296 then
+    dbg_trace s!"DBG[15]: TypeChecker.lean:2300 (after return (true, ← mktEqs? tn sn tEqtn? s…)"
   return (false, none)
 
 def isDefEqCorePure' (t s : PExpr) : RecM Bool := do

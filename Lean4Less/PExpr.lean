@@ -13,7 +13,7 @@ deriving Inhabited, BEq
 
 namespace PExpr
 
-def toExpr : PExpr → Expr := PExpr.expr
+def toExpr (e : PExpr) : Expr := e.expr.consumeMData
 
 end PExpr
 
