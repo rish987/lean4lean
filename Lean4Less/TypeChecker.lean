@@ -466,9 +466,7 @@ def inferTypePure' (e : PExpr) : RecM PExpr := do -- TODO make more efficient/us
   let eT ← runLeanMinus $ Lean.TypeChecker.inferType e.toExpr
   pure eT.toPExpr
 
-@[inherit_doc isDefEqCore]
-def isDefEq (n : Nat) (t s : PExpr) : RecB := do
-  -- if let some p := (← get).isDefEqCache.get? (t, s) then
+def checkIsDefEqCache (t s : PExpr) (m : RecB) : RecB := do
   if ((← get).isDefEqCache.get? (t, s)).isSome || ((← get).isDefEqCache.get? (s, t)).isSome then
     -- return (true, .some p)
     let (u, A) ← getTypeLevel t
@@ -477,18 +475,18 @@ def isDefEq (n : Nat) (t s : PExpr) : RecB := do
   --   let (lvl, sType) ← getTypeLevel s
   --   let tType ← inferTypePure 99 t
   --   return (true, .some $ p.reverse s t sType tType lvl)
-
-  let r ← isDefEqCore n t s
-  let (result, p?) := r
-
+  let r@(result, p?) ← m
   if result then
     if let some p := p? then
       modify fun st => { st with isDefEqCache := st.isDefEqCache.insert (t, s) p }
     else
       modify fun st => { st with eqvManager := st.eqvManager.addEquiv t s }
-  -- else if result && p?.isSome then
   pure r
 
+@[inherit_doc isDefEqCore]
+def isDefEq (n : Nat) (t s : PExpr) : RecB := do
+  checkIsDefEqCache t s do
+    isDefEqCore n t s
 
 def reduceRecursorLean (t : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) := do
   runLeanRecM $ Lean.TypeChecker.Inner.reduceRecursor t cheapRec cheapProj
@@ -708,6 +706,8 @@ def meths : ExtMethods RecM := {
     shouldTTrace := shouldTTrace
     callId := do pure (← readThe Context).callId
     numCalls := do pure (← get).numCalls
+    shouldTrace := shouldTrace
+    getTrace := fun b => getTrace b
   }
 
 def methsA : ExtMethodsA RecM := {
@@ -750,13 +750,12 @@ their function heads and arguments being defeq.
 -/
 def _isDefEqApp (t s : PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default)
   (tfEqsf? : Option (Option EExpr) := none) : RecM (Bool × Option EExpr) := do
-  if let some p := (← get).isDefEqCache.get? (t, s) then
-    return (true, .some p)
-  let (isDefEq, data?) ← isDefEqApp' t s targsEqsargs? tfEqsf?
-  let p? := data?.map (·.1)
-  if let some p := p? then
-    modify fun st => { st with isDefEqCache := st.isDefEqCache.insert (t, s) p }
-  pure (isDefEq, p?)
+  checkIsDefEqCache t s do
+    let (isDefEq, data?) ← isDefEqApp' t s targsEqsargs? tfEqsf?
+    let p? := data?.map (·.1)
+    if let some p := p? then
+      modify fun st => { st with isDefEqCache := st.isDefEqCache.insert (t, s) p }
+    pure (isDefEq, p?)
 
 def isDefEqForallOpt' (t s : PExpr) : RecB := do
   let (.some (tAbsType, tAbsDomsVars, tAbsDoms, sAbsType, sAbsDomsVars, sAbsDoms, tAbsDomsEqsAbsDoms?, _)) ← App.forallAbs methsA 2000 t s | return (false, none)
@@ -923,7 +922,8 @@ def maybeCast (n : Nat) (p? : Option EExpr) (typLhs typRhs e : PExpr) : RecM PEx
 def isDefEqProofIrrel' (t s tType sType : PExpr) (pt? : Option EExpr) (n : Nat) (useRfl := false) : RecM (Option EExpr) := do
   if ← isDefEqPure (2000 + n) t s 15 then
     if useRfl then
-      return .some $ .refl {u := 0, A := tType, a := t, n := 50}
+      let p := .refl {u := 0, A := tType, a := t, n := 50}
+      return .some p
     else
       return none
   else

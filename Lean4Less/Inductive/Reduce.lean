@@ -196,7 +196,8 @@ def inductiveReduceRec [Monad m] [MonadWithReaderOf LocalContext m] [MonadLCtx m
     let eNewMajorType' := (← meth.inferTypePure 121 eNewMajor')
     let e' := (mkAppN recFn recArgs[:majorIdx + 1]) |>.toPExpr
     let eType' := (← meth.inferTypePure 129 e')
-    -- dbg_trace s!"DBG[3]: Reduce.lean:198 (after let eType := (← meth.inferTypeLean 129…)"
+    -- dbg_trace s!"DBG[3]: Reduce.lean:198 (after let eType := (← meth.inferTypeLean 129…) {← meth.getTrace true}"
+    -- _ ← meth.inferTypeCheck eNewMajor'
     -- dbg_trace s!"DBG[2]: Reduce.lean:198 (after let eNewMajorType := (← meth.inferType…)"
     let remArgsData ← replaceFType meth eType' eNewMajorType' remArgs
     let remArgsNew := remArgsData.map fun (remArgNew, _) => remArgNew
