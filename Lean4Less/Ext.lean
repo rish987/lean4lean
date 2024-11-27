@@ -89,6 +89,7 @@ structure ExtMethods (m : Type → Type u) where
   shouldTTrace : m Bool
   shouldTrace : m Bool
   getTrace : Bool → m String
+  withNewFVar : Nat → Name → PExpr → BinderInfo → (LocalDecl → m α) → m α
 
 structure ExtMethodsR (m : Type → Type u) extends ExtMethods m where
   isDefEqApp' : PExpr → PExpr → Std.HashMap Nat (Option EExpr) → m (Bool × Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))
@@ -144,3 +145,6 @@ def replaceParams (meth : ExtMethodsR m) (fType : Expr) (params : Array Expr) (n
 
 @[inline] def withEqFVar [MonadWithReaderOf (Std.HashMap (FVarId × FVarId) FVarDataE) m] (idt ids : FVarId) (eq : FVarDataE) (x : m α) : m α :=
   withReader (fun l => l.insert (idt, ids) eq) x
+
+instance : Coe LocalDecl FVarId where
+  coe decl := decl.fvarId

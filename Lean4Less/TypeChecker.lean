@@ -210,6 +210,12 @@ def mkId' (n : Nat) (lctx : LocalContext) (dom : Expr) : RecM Name := do
 def mkId (n : Nat) (dom : Expr) : RecM Name := do
   mkId' n (← getLCtx) dom
 
+def withNewFVar (n : Nat) (name : Name) (dom : PExpr) (bi : BinderInfo) (m : LocalDecl → RecM α) : RecM α := do
+  let id := ⟨← mkId n dom⟩
+  withLCtx ((← getLCtx).mkLocalDecl id name dom bi) do
+    let some var := (← getLCtx).find? id | throw $ .other "unreachable!"
+    m var
+
 def runLeanMinus (M : Lean.TypeChecker.M T) : RecM T := do
   let trace := (← readThe Context).L4LTraceOverride || ((← readThe Context).L4LTrace && (← shouldTrace))
   let (ret, newState) ← Lean.TypeChecker.M.run (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := false, proofIrrelevance := false}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams)
@@ -506,9 +512,7 @@ def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : P
     else pure none
     let sort ← inferTypePure 5 tDom
     let .sort lvl := (← ensureSortCorePure sort tDom).toExpr | throw $ .other "unreachable 5"
-    let idt := ⟨← mkId 1 tDom⟩
-    withLCtx ((← getLCtx).mkLocalDecl idt tName tDom tBi) do
-      let some tvar := (← getLCtx).find? idt | unreachable!
+    withNewFVar 1 tName tDom tBi fun tvar => do
       let tvars := tvars.push tvar
 
       let cont d? svar := do
@@ -533,18 +537,12 @@ def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : P
           pure (true, ret) -- FIXME can iterate backwards instead of reversing lists?
 
       if p?.isSome || tvars'.any fun tvar' => tDom.containsFVar' tvar' then
-        let ids := ⟨← mkId 2 sDom⟩
-        withLCtx ((← getLCtx).mkLocalDecl ids sName sDom sBi) do
-          let some svar := (← getLCtx).find? ids | unreachable!
+        withNewFVar 2 sName sDom sBi fun svar => do
           let teqsType := mkAppN (.const `HEq [lvl]) #[tDom, tvar.toExpr, sDom, svar.toExpr]
           let seqtType := mkAppN (.const `HEq [lvl]) #[sDom, svar.toExpr, tDom, tvar.toExpr]
-          let idtEqs := ⟨← mkId 3 teqsType⟩
-          withLCtx ((← getLCtx).mkLocalDecl idtEqs default teqsType default) do
-            let idsEqt := ⟨← mkId 4 seqtType⟩
-            withLCtx ((← getLCtx).mkLocalDecl idsEqt default seqtType default) do
-              let some vtEqs := (← getLCtx).find? idtEqs | unreachable!
-              let some vsEqt := (← getLCtx).find? idsEqt | unreachable!
-              withEqFVar idt ids { aEqb := vtEqs, bEqa := vsEqt, a := tvar.toExpr.toPExpr, b := svar.toExpr.toPExpr, A := tDom, B := sDom, u := lvl } do
+          withNewFVar 3 default teqsType.toPExpr default fun vtEqs => do
+            withNewFVar 4 default seqtType.toPExpr default fun vsEqt => do
+              withEqFVar tvar svar { aEqb := vtEqs, bEqa := vsEqt, a := tvar.toExpr.toPExpr, b := svar.toExpr.toPExpr, A := tDom, B := sDom, u := lvl } do
                 cont (.some (svar, vtEqs, vsEqt, p?)) svar 
       else
         cont none tvar
@@ -664,15 +662,13 @@ def alignForAll (numBinds : Nat) (ltl ltr : Expr) : RecM (Expr × Expr × Nat) :
   | numBinds' + 1 => do
     match (← whnfPure 11 ltl.toPExpr).toExpr, (← whnfPure 12 ltr.toPExpr).toExpr with
     | .forallE nl tdl tbl bil, .forallE nr tdr tbr bir => do
-      let idl := ⟨← mkId 6 tdl⟩
-      withLCtx ((← getLCtx).mkLocalDecl idl nl tdl bil) do
-        let idr := ⟨← mkId 7 tdr⟩
-        withLCtx ((← getLCtx).mkLocalDecl idr nr tdr bir) do
-          let ntbl := tbl.instantiate1 (.fvar idl)
-          let ntbr := tbr.instantiate1 (.fvar idr)
+      withNewFVar 6 nl tdl.toPExpr bil fun vl => do
+        withNewFVar 7 nr tdr.toPExpr bir fun vr => do
+          let ntbl := tbl.instantiate1 (.fvar vl)
+          let ntbr := tbr.instantiate1 (.fvar vr)
           let (atbl, atbr, n) ← alignForAll numBinds' ntbl ntbr
-          let nltl := (← getLCtx).mkForall #[(.fvar idl)] atbl
-          let nltr := (← getLCtx).mkForall #[(.fvar idr)] atbr
+          let nltl := (← getLCtx).mkForall #[(.fvar vl)] atbl
+          let nltr := (← getLCtx).mkForall #[(.fvar vr)] atbr
           pure (nltl, nltr, n + 1)
     | _, _ => pure (ltl, ltr, 0)
   | _ => pure (ltl, ltr, 0)
@@ -708,6 +704,7 @@ def meths : ExtMethods RecM := {
     numCalls := do pure (← get).numCalls
     shouldTrace := shouldTrace
     getTrace := fun b => getTrace b
+    withNewFVar := withNewFVar
   }
 
 def methsA : ExtMethodsA RecM := {
@@ -760,10 +757,10 @@ def _isDefEqApp (t s : PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr) :=
 def isDefEqForallOpt' (t s : PExpr) : RecB := do
   let (.some (tAbsType, tAbsDomsVars, tAbsDoms, sAbsType, sAbsDomsVars, sAbsDoms, tAbsDomsEqsAbsDoms?, _)) ← App.forallAbs methsA 2000 t s | return (false, none)
 
-  let tLCtx := tAbsDomsVars.foldl (init := (← getLCtx)) fun acc (id, n, (type : PExpr)) => LocalContext.mkLocalDecl acc id n type default
-  let sLCtx := sAbsDomsVars.foldl (init := (← getLCtx)) fun acc (id, n, (type : PExpr)) => LocalContext.mkLocalDecl acc id n type default
-  let tf' := tLCtx.mkLambda (tAbsDomsVars.map (.fvar ·.1)) tAbsType
-  let sf' := sLCtx.mkLambda (sAbsDomsVars.map (.fvar ·.1)) sAbsType
+  let tLCtx := tAbsDomsVars.foldl (init := (← getLCtx)) fun acc v => LocalContext.mkLocalDecl acc v.fvarId v.userName v.type default
+  let sLCtx := sAbsDomsVars.foldl (init := (← getLCtx)) fun acc v => LocalContext.mkLocalDecl acc v.fvarId v.userName v.type default
+  let tf' := tLCtx.mkLambda (tAbsDomsVars.map (.fvar ·.fvarId)) tAbsType
+  let sf' := sLCtx.mkLambda (sAbsDomsVars.map (.fvar ·.fvarId)) sAbsType
 
   let mut tAbsDomsEqsAbsDomsMap := default
   let mut idx := 0
@@ -837,15 +834,14 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
     match remLams, e, tl, tr, p with
     | remLams' + 1, .lam n _ b bi, .forallE _ _ tbl .., .forallE _ tdr tbr .., .forallE forallData =>
       let {A, a, extra, u, ..} := forallData
-      let id := ⟨← mkId 5 tdr⟩
-      withLCtx ((← getLCtx).mkLocalDecl id n tdr bi) do
+      withNewFVar 5 n tdr.toPExpr bi fun var => do
         let (UaEqVx? : Option EExpr) := 
           match extra with
           | .ABUV {UaEqVx, ..}
           | .UV {UaEqVx, ..} => Option.some UaEqVx
           | _ => none
 
-        let v := .fvar id
+        let v := .fvar var
 
         let (newPrfVars, newPrfVals, vCast) ←
           match extra with
@@ -952,8 +948,7 @@ def inferLambda (e : Expr) (dbg := false) : RecPE := loop #[] false e where
     let (sort', p?) ← ensureSortCore sort d
     let d' ← maybeCast 20 p? sort sort' (d'?.getD d.toPExpr)
 
-    let id := ⟨← mkId 8 d'⟩
-    withLCtx ((← getLCtx).mkLocalDecl id name d' bi) do
+    withNewFVar 8 name d' bi fun id => do
       let fvars := fvars.push (.fvar id)
       loop fvars (domPatched || d'?.isSome || p?.isSome) body
   | e => do
@@ -987,8 +982,7 @@ def inferForall (e : Expr) : RecPE := loop #[] #[] false e where
     let d' ← maybeCast 22 p? sort sort' (d'?.getD d.toPExpr)
 
     let us := us.push lvl
-    let id := ⟨← mkId 9 d'⟩
-    withLCtx ((← getLCtx).mkLocalDecl id name d' bi) do
+    withNewFVar 9 name d' bi fun id => do
       let fvars := fvars.push (.fvar id)
       loop fvars us (domPatched || d'?.isSome || p?.isSome) body
   | e => do
@@ -1227,16 +1221,14 @@ def appProjThm? (structName : Name) (projIdx : Nat) (struct structN : PExpr) (st
     let rec loop remType (paramVars : Array Expr) n := do
       match (← whnfPure 34 remType.toPExpr).toExpr, n with
       | .forallE n d b i, m + 1 =>
-        let idr := ⟨← mkId 11 d⟩
-        withLCtx ((← getLCtx).mkLocalDecl idr n d i) do
+        withNewFVar 11 n d.toPExpr i fun idr => do
           let rVar := (.fvar idr)
           let remCtorType := b.instantiate1 rVar
           let paramVars := paramVars.push rVar
           loop remCtorType paramVars m
       | _, 0 =>
         let structType := Lean.mkAppN structTypeC paramVars
-        let ids := ⟨← mkId 12 structType⟩
-        withLCtx ((← getLCtx).mkLocalDecl ids default structType default) do
+        withNewFVar 12 default structType.toPExpr default fun ids => do
           let s := Expr.fvar ids
 
           let f := (← getLCtx).mkLambda (paramVars ++ #[s]) (.proj structName projIdx s) |>.toPExpr

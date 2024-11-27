@@ -165,10 +165,7 @@ def mkAppEqProof (T S : PExpr) (TEqS? : Option EExpr) (as bs : Array PExpr) (asE
 
     let sort ← meth.inferTypePure 213 A
     let .sort u := (← meth.ensureSortCorePure sort A).toExpr | throw $ .other "unreachable 5"
-    let ida := ⟨← meth.mkId 201 A⟩
-    withLCtx ((← getLCtx).mkLocalDecl ida aName A aBi) do
-      let some aVar := (← getLCtx).find? ida | unreachable!
-
+    meth.withNewFVar 201 aName A aBi fun aVar => do
       let cont d? bVar := do 
         let ds? := ds?.push d?
         let Ua := (T'.instantiate1 aVar.toExpr).toPExpr
@@ -196,18 +193,12 @@ def mkAppEqProof (T S : PExpr) (TEqS? : Option EExpr) (as bs : Array PExpr) (asE
           pure ret
 
       if let some AEqB := AEqB? then 
-        let idb := ⟨← meth.mkId 202 B⟩
-        withLCtx ((← getLCtx).mkLocalDecl idb bName B bBi) do
-          let some bVar := (← getLCtx).find? idb | unreachable!
+        meth.withNewFVar 202 bName B bBi fun bVar => do
           let teqsType := mkAppN (.const `HEq [u]) #[A, aVar.toExpr, B, bVar.toExpr]
           let seqtType := mkAppN (.const `HEq [u]) #[B, bVar.toExpr, A, aVar.toExpr]
-          let idaEqb := ⟨← meth.mkId 203 teqsType⟩
-          withLCtx ((← getLCtx).mkLocalDecl idaEqb default teqsType default) do
-            let idbEqa := ⟨← meth.mkId 204 seqtType⟩
-            withLCtx ((← getLCtx).mkLocalDecl idbEqa default seqtType default) do
-              let some vaEqb := (← getLCtx).find? idaEqb | unreachable!
-              let some vbEqa := (← getLCtx).find? idbEqa | unreachable!
-              withEqFVar ida idb {aEqb := vaEqb, bEqa := vbEqa, a := (Expr.fvar ida).toPExpr, b := (Expr.fvar idb).toPExpr, A := A, B := B, u} do
+          meth.withNewFVar 203 default teqsType.toPExpr default fun vaEqb => do
+            meth.withNewFVar 204 default seqtType.toPExpr default fun vbEqa => do
+              withEqFVar aVar bVar {aEqb := vaEqb, bEqa := vbEqa, a := (Expr.fvar aVar).toPExpr, b := (Expr.fvar bVar).toPExpr, A := A, B := B, u} do
                 let d := (vaEqb, vbEqa, AEqB)
                 cont (.some d) bVar
       else
@@ -221,8 +212,8 @@ def mkAppEqProof (T S : PExpr) (TEqS? : Option EExpr) (as bs : Array PExpr) (asE
 
 -- TODO generalize so can also be used for lambdas
 def forallAbs (max : Nat) (tfT' sfT' : Expr) : m
-    (Option (PExpr × Array (FVarId × Name × PExpr) × Array PExpr ×
-     PExpr × Array (FVarId × Name × PExpr) × Array PExpr ×
+    (Option (PExpr × Array LocalDecl × Array PExpr ×
+     PExpr × Array LocalDecl × Array PExpr ×
      Array (Option EExpr) × Std.HashSet Nat)) := do
   let rec loop tfT sfT tDomsVars tDoms sDomsVars sDoms tDomsEqsDoms (absArgs' : Std.HashSet Nat) idx' (origDomVars origDomVarsAbs : Array (FVarId × FVarId)) (origDomVarsRefs : Std.HashMap (FVarId × FVarId) (Std.HashSet (FVarId × FVarId))) (origDomVarsToNewDomVars : Std.HashMap (FVarId × FVarId) (FVarId × FVarId)) := do
 
@@ -251,10 +242,8 @@ def forallAbs (max : Nat) (tfT' sfT' : Expr) : m
         let MsNamePrefix := sName.getRoot.toString ++ "T" |>.toName
         let MsName := sName.replacePrefix (sName.getRoot) MsNamePrefix
 
-        let MtVar := (⟨← meth.mkId 205 Mt.toPExpr⟩, MtName, Mt.toPExpr)
-        withLCtx ((← getLCtx).mkLocalDecl MtVar.1 MtVar.2.1 MtVar.2.2 tBi) do
-          let MsVar := (⟨← meth.mkId 206 Ms.toPExpr⟩, MsName, Ms.toPExpr)
-          withLCtx ((← getLCtx).mkLocalDecl MsVar.1 MsVar.2.1 MsVar.2.2 sBi) do
+        meth.withNewFVar 205 MtName Mt.toPExpr tBi fun MtVar => do
+          meth.withNewFVar 206 MsName Ms.toPExpr sBi fun MsVar => do
             let tDomsVars := tDomsVars.push MtVar
             let sDomsVars := sDomsVars.push MsVar
             let tDom := (← getLCtx).mkLambda (origDepVars.map fun (tvar, _) => (Expr.fvar tvar)) tType |>.toPExpr
@@ -263,8 +252,8 @@ def forallAbs (max : Nat) (tfT' sfT' : Expr) : m
             let sDoms := sDoms.push sDom
             let (true, tDomEqsDom?) ← meth.isDefEq 216 tDom sDom | return none
             let tDomsEqsDoms := tDomsEqsDoms.push tDomEqsDom?
-            let newtType := Lean.mkAppN (.fvar MtVar.1) (depVars.map (.fvar ·.1))
-            let newsType := Lean.mkAppN (.fvar MsVar.1) (depVars.map (.fvar ·.2))
+            let newtType := Lean.mkAppN (.fvar MtVar) (depVars.map (.fvar ·.1))
+            let newsType := Lean.mkAppN (.fvar MsVar) (depVars.map (.fvar ·.2))
             f (.some (newtType, newsType)) tDomsVars sDomsVars tDoms sDoms tDomsEqsDoms
       else
         f none tDomsVars sDomsVars tDoms sDoms tDomsEqsDoms
@@ -288,11 +277,9 @@ def forallAbs (max : Nat) (tfT' sfT' : Expr) : m
               for (tvar', svar') in origDomVarsRefs.get! (tvar, svar) do
                 refs := refs.insert (tvar', svar')
 
-          let idt := ⟨← meth.mkId 207 tDom⟩
-
           let (true, tDomEqsDom?) ← meth.isDefEq 220 tDom.toPExpr sDom.toPExpr | return none
 
-          let cont' ids := do
+          let cont' idt ids := do
             let tBod := tBod.instantiate1 (.fvar idt)
             let sBod := sBod.instantiate1 (.fvar ids)
             let origDomVarsRefs := origDomVarsRefs.insert (idt, ids) refs
@@ -300,10 +287,8 @@ def forallAbs (max : Nat) (tfT' sfT' : Expr) : m
             withMaybeAbs tDom sDom tDomEqsDom? (fun newtsDom? tDomsVars sDomsVars tDoms sDoms tDomsEqsDoms => do
                 if let some (newtDom, newsDom) := newtsDom? then
                   let origDomVarsAbs := origDomVarsAbs.push (idt, ids)
-                  let idnewt := ⟨← meth.mkId 208 newtDom⟩
-                  withLCtx ((← getLCtx).mkLocalDecl idnewt tName newtDom tBi) do
-                    let idnews := ⟨← meth.mkId 209 newsDom⟩
-                    withLCtx ((← getLCtx).mkLocalDecl idnews sName newsDom sBi) do
+                  meth.withNewFVar 208 tName newtDom.toPExpr tBi fun idnewt => do
+                    meth.withNewFVar 209 sName newsDom.toPExpr sBi fun idnews => do
                       let origDomVarsToNewDomVars := origDomVarsToNewDomVars.insert (idt, ids) (idnewt, idnews)
                       let absArgs' := absArgs'.insert idx'
                       loop tBod sBod tDomsVars tDoms sDomsVars sDoms tDomsEqsDoms absArgs' (idx' + 1) origDomVars origDomVarsAbs origDomVarsRefs origDomVarsToNewDomVars
@@ -313,26 +298,12 @@ def forallAbs (max : Nat) (tfT' sfT' : Expr) : m
               )
               tName sName
 
-          withLCtx ((← getLCtx).mkLocalDecl idt tName tDom tBi) do
-            let some tVar := (← getLCtx).find? idt | unreachable!
+          meth.withNewFVar 207 tName tDom.toPExpr tBi fun idt => do
             if tDomEqsDom?.isSome then
-              let ids := ⟨← meth.mkId 210 sDom⟩
-              let sort ← meth.inferTypePure 221 tDom.toPExpr
-              let .sort lvl := (← meth.ensureSortCorePure sort tDom).toExpr | unreachable!
-              let teqsType := mkAppN (.const `HEq [lvl]) #[tDom, (.fvar idt), sDom, (.fvar ids)]
-              let seqtType := mkAppN (.const `HEq [lvl]) #[sDom, (.fvar ids), tDom, (.fvar idt)]
-              withLCtx ((← getLCtx).mkLocalDecl ids sName sDom sBi) do
-                let some sVar := (← getLCtx).find? idt | unreachable!
-                let idtEqs := ⟨← meth.mkId 211 teqsType⟩
-                withLCtx ((← getLCtx).mkLocalDecl idtEqs default teqsType default) do
-                  let idsEqt := ⟨← meth.mkId 212 seqtType⟩
-                  withLCtx ((← getLCtx).mkLocalDecl idsEqt default seqtType default) do
-                    let some vtEqs := (← getLCtx).find? idtEqs | unreachable!
-                    -- let some vsEqt := (← getLCtx).find? idsEqt | unreachable!
-                    withEqFVar idt ids {aEqb := vtEqs, bEqa := default, a := tVar.toExpr.toPExpr, b := sVar.toExpr.toPExpr, A := tDom.toPExpr, B := sDom.toPExpr, u := lvl} do -- TODO is this really needed?
-                      cont' ids
+              meth.withNewFVar 210 sName sDom.toPExpr sBi fun ids => do
+                cont' idt ids
             else
-              cont' idt
+              cont' idt idt
         | tBod, sBod =>
           cont tBod sBod
     else
@@ -398,6 +369,8 @@ def deconstructAppHEq : AppData EExpr
   | _ => unreachable!
 end
 
+instance : Coe LocalDecl (FVarId × Name × PExpr) where
+coe decl := (decl.fvarId, decl.userName, decl.type.toPExpr)
 
 def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
    (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default) (_tfEqsf? : Option (Option EExpr) := none) : m (Bool × (Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))) := do
@@ -438,8 +411,8 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
     else
       pure none
 
-  let getELCtx vars := do
-    pure $ vars.foldl (init := (← getLCtx)) fun acc (v, n, T) => acc.mkLocalDecl v n T
+  let getELCtx (vars : Array (FVarId × Name × PExpr)) := do
+    pure $ vars.foldl (init := (← getLCtx)) fun acc ((v, n, T) ) => acc.mkLocalDecl v n T
 
   let mut taEqsaDatas := #[]
 
@@ -509,7 +482,9 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
           let mut absArgs' := default
           for pos in absArgsOffset' do
             absArgs' := absArgs'.insert (pos + idx)
-          pure ((⟨← meth.mkId' 213 (← getELCtx tfTAbsDomsVars) tfType⟩, `f, tfType), tfTAbsDomsVars, tfTAbsDoms, (⟨← meth.mkId' 214 (← getELCtx sfTAbsDomsVars) sfType⟩, `g, sfType), sfTAbsDomsVars, sfTAbsDoms, tfTAbsDomsEqsfTAbsDoms?, absArgs')
+          let tfVar := (⟨← meth.mkId' 213 (← getELCtx (tfTAbsDomsVars.map (Coe.coe ·))) tfType⟩, `f, tfType)
+          let sfVar := (⟨← meth.mkId' 214 (← getELCtx (sfTAbsDomsVars.map (Coe.coe ·))) sfType⟩, `g, sfType)
+          pure (tfVar, tfTAbsDomsVars, tfTAbsDoms, sfVar, sfTAbsDomsVars, sfTAbsDoms, tfTAbsDomsEqsfTAbsDoms?, absArgs')
 
         tBodFun := Expr.fvar tfVar.1 |>.toPExpr
         sBodFun := Expr.fvar sfVar.1 |>.toPExpr
@@ -526,8 +501,8 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
         sArgsIs' := sArgsIs' ++ #[1]
         tArgsVars := #[]
         sArgsVars := #[]
-        tVars := tfTAbsDomsVars ++ #[tfVar]
-        sVars := sfTAbsDomsVars ++ #[sfVar]
+        tVars := (tfTAbsDomsVars.map fun v => (v.fvarId, v.userName, v.type.toPExpr)) ++ #[tfVar]
+        sVars := (sfTAbsDomsVars.map fun v => (v.fvarId, v.userName, v.type.toPExpr)) ++ #[sfVar]
         tEtaVars := 0
         sEtaVars := 0
         absArgs := absArgs'
