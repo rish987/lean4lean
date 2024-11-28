@@ -1333,14 +1333,14 @@ def reduceBinNatOp (op : Name) (f : Nat → Nat → Nat) (a b : PExpr) : RecM (O
   let some v1 := natLitExt? a' | return none
   let some v2 := natLitExt? b' | return none
   let nat := (Expr.const `Nat []).toPExpr
-  let mut appEqapp'? ← if pa?.isSome || pb?.isSome then
-      let pa ← pa?.getDM (mkHRefl 2 (.succ .zero) nat a')
-      let pb ← pb?.getDM (mkHRefl 3 (.succ .zero) nat b')
+  let mut (true, appEqapp'?) ← do
       let fab := Lean.mkAppN (.const op []) #[a, b] |>.toPExpr
       let fab' := Lean.mkAppN (.const op []) #[a', b'] |>.toPExpr
-      pure $ .some $ Lean.mkAppN (← getConst `L4L.appHEqBinNatFn []) #[nat, nat, .const op [], a, a', b, b', pa, pb] |>.toEExpr (.succ .zero) nat nat fab fab'
-    else
-      pure none
+      let mut targsEqsargs? := default
+      targsEqsargs? := targsEqsargs?.insert 0 pa?
+      targsEqsargs? := targsEqsargs?.insert 1 pb?
+      isDefEqApp 9901 fab fab' (targsEqsargs? := targsEqsargs?) (tfEqsf? := some none)
+    | throw $ .other "reduceBinNatOp error"
   let result := (Expr.lit <| .natVal <| f v1 v2).toPExpr
   let app := Lean.mkAppN (.const op []) #[a, b] |>.toPExpr
   let app' := Lean.mkAppN (.const op []) #[a', b'] |>.toPExpr
@@ -1364,15 +1364,14 @@ def reduceBinNatPred (op : Name) (f : Nat → Nat → Bool) (a b : PExpr) : RecM
   let (b', pb?) := (← whnf 39 b)
   let some v1 := natLitExt? a' | return none
   let some v2 := natLitExt? b' | return none
-  let bool := (Expr.const `Bool []).toPExpr
-  let ret? ← if pa?.isSome || pb?.isSome then
-      let pa ← pa?.getDM (mkHRefl 4 (.succ .zero) (Expr.const `Bool []).toPExpr a')
-      let pb ← pb?.getDM (mkHRefl 5 (.succ .zero) (Expr.const `Bool []).toPExpr b')
+  let (true, ret?) ← do
       let fab := Lean.mkAppN (.const op []) #[a, b] |>.toPExpr
       let fab' := Lean.mkAppN (.const op []) #[a', b'] |>.toPExpr
-      pure $ .some $ Lean.mkAppN (← getConst `L4L.appHEqBinNatFn []) #[.const `Nat [], .const `Bool [], .const op [], a, a', b, b', pa, pb] |>.toEExpr (.succ .zero) bool bool fab fab'
-    else
-      pure none
+      let mut targsEqsargs? := default
+      targsEqsargs? := targsEqsargs?.insert 0 pa?
+      targsEqsargs? := targsEqsargs?.insert 1 pb?
+      isDefEqApp 9902 fab fab' (targsEqsargs? := targsEqsargs?) (tfEqsf? := some none)
+    | throw $ .other "reduceBinNatPred error"
   return (toExpr (f v1 v2) |>.toPExpr, ret?)
 
 def mkNatSuccAppArgHEq? (p? : Option EExpr) (t s : PExpr) : RecM (Option EExpr) := do
