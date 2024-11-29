@@ -626,10 +626,10 @@ def isDefEqForall' (t s : PExpr) (numBinds : Nat) (f : Option EExpr → RecM (Op
           if let .some (b, aEqb, bEqa, hAB?) := d? then
             let B := b.type.toPExpr
             if let some hAB := hAB? then
-              pure $ .ABUV {B, b, vaEqb := {aEqb, bEqa}, hAB, V, UaEqVx}
+              pure $ .ABUV {B, b, vaEqb := {aEqb, bEqa, lets := #[]}, hAB, V, UaEqVx, blets := #[]}
             else -- (if explicit == true)
               let hAB ← mkHRefl 7 u.succ (Expr.sort u).toPExpr A
-              pure $ .ABUV {B, b, vaEqb := {aEqb, bEqa}, hAB, V, UaEqVx}
+              pure $ .ABUV {B, b, vaEqb := {aEqb, bEqa, lets := #[]}, hAB, V, UaEqVx, blets := #[]}
               -- pure $ .ABApp {b, vaEqb := {aEqb, bEqa}}
           else
             pure $ .UV {V, UaEqVx}
@@ -644,11 +644,11 @@ def isDefEqForall' (t s : PExpr) (numBinds : Nat) (f : Option EExpr → RecM (Op
           let dep := Ua.containsFVar' a || Vx.containsFVar' x
           if dep then
             let UaEqVx ← mkHRefl 1 UaTypeLvl UaType Ua
-            pure $ .ABUV {B, b, vaEqb := {aEqb, bEqa}, hAB, V, UaEqVx}
+            pure $ .ABUV {B, b, vaEqb := {aEqb, bEqa, lets := #[]}, hAB, V, UaEqVx, blets := #[]}
           else
-            pure $ .AB {B, b, vaEqb := {aEqb, bEqa}, hAB}
+            pure $ .AB {B, b, vaEqb := {aEqb, bEqa, lets := #[]}, hAB, blets := #[]}
 
-        UaEqVx? := .some $ .forallE {u, v, A, a, U, extra}
+        UaEqVx? := .some $ .forallE {u, v, A, a, U, extra, alets := #[]}
 
       Ua := (← getLCtx).mkForall #[a.toExpr] Ua |>.toPExpr
       Vx := (← getLCtx).mkForall #[x.toExpr] Vx |>.toPExpr
@@ -1449,14 +1449,14 @@ def isDefEqLambda (t s : PExpr) : RecB := do
         let extra ← if let some (b, aEqb, bEqa, hAB?) := d? then
           let hAB ← hAB?.getDM (mkHRefl 8 u.succ (Expr.sort u).toPExpr A)
           let B := b.type.toPExpr
-          pure $ .ABUV {B, b, hAB, vaEqb := {aEqb, bEqa}} {V}
+          pure $ .ABUV {B, b, hAB, vaEqb := {aEqb, bEqa, lets := #[]}, blets := #[]} {V}
         else
           let (_, UaEqVx?) ← isDefEq 43 Ua Vx
           if UaEqVx?.isSome then
             pure $ .UV {V}
           else
             pure $ .none
-        faEqgx? := .some $ .lam {u, v, A, a, U, f, g, faEqgx, extra}
+        faEqgx? := .some $ .lam {u, v, A, a, U, f, g, faEqgx, extra, alets := #[]}
 
       fa := f
       gx := g

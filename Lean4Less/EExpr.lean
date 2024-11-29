@@ -46,6 +46,15 @@ hash l := hash (l.toExpr, l.type)
 instance : BEq LocalDecl where
 beq l l' := (l.toExpr, l.type) == (l'.toExpr, l'.type)
 
+structure EContext where
+  dbg : Bool := false -- (for debugging purposes)
+  rev : Bool := false
+  reversedFvars : Std.HashSet LocalDecl := {}
+
+structure LocalDeclE where
+(index : Nat) (fvarId : FVarId) (userName : Name) (type : Expr) (value : EContext → Expr)
+deriving Inhabited
+
 /--
 Tracks fvars for an equality in both directions (useful when reversing equalities).
 -/
@@ -59,10 +68,11 @@ aEqb : LocalDecl
 bEqa : LocalDecl
 deriving Inhabited, Hashable, BEq
 
-structure FVarData where
+structure FVarData (EExpr : Type) where
 aEqb : LocalDecl
 bEqa : LocalDecl
-deriving Inhabited, Hashable, BEq
+lets : Array LocalDeclE
+deriving Inhabited
 
 structure SorryData where
 u    : Level
@@ -74,56 +84,57 @@ deriving Inhabited, Hashable, BEq
 
 
 
-structure LamABData (EExpr : Type) :=
+structure LamABData (EExpr : Type) where
 B      : PExpr
 b      : LocalDecl
-vaEqb  : FVarData
+blets  : Array LocalDeclE
+vaEqb  : FVarData EExpr
 hAB    : EExpr
-deriving Hashable, BEq
 
-structure LamUVData :=
+structure LamUVData where
 V   : PExpr × LocalDecl
 deriving Hashable, BEq
 
-inductive LamDataExtra (EExpr : Type) :=
+inductive LamDataExtra (EExpr : Type) where
 | ABUV : LamABData EExpr → LamUVData → LamDataExtra EExpr
 | UV   : LamUVData → LamDataExtra EExpr
 | none : LamDataExtra EExpr
-deriving Inhabited, Hashable, BEq
+deriving Inhabited
 
-structure LamData (EExpr : Type) :=
+structure LamData (EExpr : Type) where
 u      : Level
 v      : Level
 A      : PExpr
 U      : PExpr × LocalDecl
 f      : PExpr
 a      : LocalDecl
+alets  : Array LocalDeclE
 g      : PExpr
 faEqgx : EExpr
 extra  : LamDataExtra EExpr := .none
-deriving Inhabited, Hashable, BEq
+deriving Inhabited
 
 
-structure ForallUVData (EExpr : Type) :=
+structure ForallUVData (EExpr : Type) where
 V      : PExpr × LocalDecl
 UaEqVx : EExpr
 deriving Inhabited, Hashable, BEq
 
-structure ForallABUVData (EExpr : Type) :=
+structure ForallABUVData (EExpr : Type) where
 B      : PExpr
 b      : LocalDecl
-vaEqb  : FVarData
+blets  : Array LocalDeclE
+vaEqb  : FVarData EExpr
 hAB    : EExpr
 V      : PExpr × LocalDecl
 UaEqVx : EExpr
-deriving Hashable, BEq
 
-structure ForallABData (EExpr : Type) :=
+structure ForallABData (EExpr : Type) where
 B      : PExpr
 b      : LocalDecl
-vaEqb  : FVarData
+blets  : Array LocalDeclE
+vaEqb  : FVarData EExpr
 hAB    : EExpr
-deriving Hashable, BEq
 
 -- structure ForallABUVAppData (EExpr : Type) :=
 -- b      : LocalDecl
@@ -137,33 +148,36 @@ deriving Hashable, BEq
 -- vaEqb  : FVarData
 -- deriving Hashable, BEq
 
-inductive ForallDataExtra (EExpr : Type) :=
+inductive ForallDataExtra (EExpr : Type) where
 | ABUV   : ForallABUVData EExpr → ForallDataExtra EExpr
 | UV     : ForallUVData EExpr → ForallDataExtra EExpr
 | AB     : ForallABData EExpr → ForallDataExtra EExpr
-deriving Inhabited, Hashable, BEq
+deriving Inhabited
 
-structure ForallData (EExpr : Type) :=
+structure ForallData (EExpr : Type) where
 u      : Level
 v      : Level
 A      : PExpr
 a      : LocalDecl
+alets  : Array LocalDeclE
 U      : PExpr × LocalDecl
 extra  : ForallDataExtra EExpr
-deriving Inhabited, Hashable, BEq
+deriving Inhabited
 
 
 
 structure HUVDataExtra (EExpr : Type) where
 b      : LocalDecl
-vaEqb  : FVarData
-deriving Inhabited, Hashable, BEq
+blets  : Array LocalDeclE
+vaEqb  : FVarData EExpr
+deriving Inhabited
 
 structure HUVData (EExpr : Type) where
 a      : LocalDecl
+alets  : Array LocalDeclE
 UaEqVb : EExpr
 extra  : Option (HUVDataExtra EExpr)
-deriving Inhabited, Hashable, BEq
+deriving Inhabited
 
 
 
@@ -200,14 +214,14 @@ g    : PExpr
 fEqg : EExpr
 b    : PExpr
 aEqb : EExpr
-deriving Inhabited, Hashable, BEq
+deriving Inhabited
 
 structure AppDataUVFun (EExpr : Type) where
 V    : PExpr × LocalDecl
 hUV  : HUVData EExpr
 g    : PExpr
 fEqg : EExpr
-deriving Inhabited, Hashable, BEq
+deriving Inhabited
 
 structure AppDataABUV (EExpr : Type) where
 B    : PExpr
@@ -218,7 +232,7 @@ g    : PExpr
 fEqg : EExpr
 b    : PExpr
 aEqb : EExpr
-deriving Inhabited, Hashable, BEq
+deriving Inhabited
 
 inductive AppDataExtra (EExpr : Type) where
 | none  : AppDataNone EExpr → AppDataExtra EExpr
@@ -228,7 +242,7 @@ inductive AppDataExtra (EExpr : Type) where
 | UVFun : AppDataUVFun EExpr → AppDataExtra EExpr
 | AB    : AppDataAB EExpr → AppDataExtra EExpr
 | ABUV  : AppDataABUV EExpr → AppDataExtra EExpr
-deriving Inhabited, Hashable, BEq
+deriving Inhabited
 
 structure AppData (EExpr : Type) where
 u     : Level
@@ -238,7 +252,7 @@ U     : PExpr × LocalDecl -- TODO make fvar arg optional
 f     : PExpr
 a     : PExpr
 extra : AppDataExtra EExpr
-deriving Inhabited, Hashable, BEq
+deriving Inhabited
 
 
 
@@ -363,16 +377,11 @@ inductive EExpr where
     --     (t.data.hasLevelMVar || v.data.hasLevelMVar || b.data.hasLevelMVar)
     --     (t.data.hasLevelParam || v.data.hasLevelParam || b.data.hasLevelParam)
     -- | .lit l => mkData (mixHash 3 (hash l))
-deriving Inhabited, Hashable, BEq
-
-structure EContext where
-  dbg : Bool := false -- (for debugging purposes)
-  rev : Bool := false
-  reversedFvars : Std.HashSet LocalDecl := {}
+deriving Inhabited
 
 structure EState where -- TODO why is this needed for dbg_trace to show up?
-  toExprCache : Std.HashMap EExpr Expr := {}
-  reverseCache : Std.HashMap EExpr EExpr := {}
+  -- toExprCache : Std.HashMap EExpr Expr := {}
+  -- reverseCache : Std.HashMap EExpr EExpr := {}
 
 abbrev EM := ReaderT EContext <| StateT EState <| Id
 
@@ -382,7 +391,7 @@ def EM.run (dbg : Bool := false) (x : EM α) : α :=
 def withRev (rev : Bool) (x : EM α) : EM α :=
   withReader (fun ctx => {ctx with rev}) x
 
-def withReversedFVar (d : FVarData) (x : EM α) : EM α :=
+def withReversedFVar (d : FVarData EExpr) (x : EM α) : EM α :=
   withReader (fun ctx => {ctx with reversedFvars := ctx.reversedFvars.insert d.aEqb}) x
 
 def swapRev (x : EM α) : EM α :=
@@ -748,18 +757,30 @@ def _root_.Lean.LocalDecl.replaceFVar (fvar val : PExpr) (var : LocalDecl) : Loc
 -- -- | .rev _ _ _ _ _ e => e
 --
 -- end
+-- 
+def expandLets (vars : Array (LocalDecl × (Array LocalDeclE))) : EM (Array LocalDecl) := do
+  let mut ret := #[]
+  for (d, lets) in vars do
+    ret := ret.push d
+    for l in lets do
+      ret := ret.push (.ldecl 0 l.fvarId l.userName l.type (l.value (← read)) false default)
+  pure ret
 
 mutual
 def HUVData.toExprDep' (e : HUVData EExpr) : EM Expr := match e with -- FIXME why can't I use a single function here?
-| {a, UaEqVb, extra} => do
+| {a, UaEqVb, extra, alets} => do
   let ret ← if (← rev) then
     match extra with
-      | .some {b, vaEqb} => pure $ mkLambda #[b, a, vaEqb.bEqa] (← withReversedFVar vaEqb UaEqVb.toExpr')
-      | .none => pure $ mkLambda #[a] (← UaEqVb.toExpr')
+      | .some {b, vaEqb, blets} => withReversedFVar vaEqb do
+        pure $ mkLambda (← expandLets #[(b, blets), (a, alets), (vaEqb.bEqa, vaEqb.lets)]) (← UaEqVb.toExpr')
+      | .none =>
+        pure $ mkLambda (← expandLets #[(a, alets)]) (← UaEqVb.toExpr')
   else
     match extra with
-      | .some {b, vaEqb} => pure $ mkLambda #[a, b, vaEqb.aEqb] (← UaEqVb.toExpr')
-      | .none => pure $ mkLambda #[a] (← UaEqVb.toExpr')
+      | .some {b, vaEqb, blets} =>
+        pure $ mkLambda (← expandLets #[(a, alets), (b, blets), (vaEqb.aEqb, vaEqb.lets)]) (← UaEqVb.toExpr')
+      | .none => 
+        pure $ mkLambda (← expandLets #[(a, alets)]) (← UaEqVb.toExpr')
   pure ret
 
 def HUVData.toExpr' (e : HUVData EExpr) : EM Expr := match e with
@@ -776,13 +797,13 @@ if dep then name.toString ++ "'" |>.toName else name
 def dbgFIds := #["_kernel_fresh.3032".toName, "_kernel_fresh.3036".toName, "_kernel_fresh.910".toName, "_kernel_fresh.914".toName]
 
 def LamData.toExpr (e : LamData EExpr) : EM Expr := match e with
-| {u, v, A, U, f, a, g, faEqgx, extra} => do
+| {u, v, A, U, f, a, g, faEqgx, extra, alets} => do
   if (← rev) then
     let hfg ← match extra with
-    | .ABUV {b, vaEqb, ..} .. =>
-      pure $ mkLambda #[b, a, vaEqb.bEqa] (← withReversedFVar vaEqb faEqgx.toExpr')
+    | .ABUV {b, vaEqb, blets, ..} .. => withReversedFVar vaEqb do
+      pure $ mkLambda (← expandLets #[(b, blets), (a, alets), (vaEqb.bEqa, vaEqb.lets)]) (← faEqgx.toExpr')
     | .UV ..
-    | .none => pure $ mkLambda #[a] (← faEqgx.toExpr')
+    | .none => pure $ mkLambda (← expandLets #[(a, alets)]) (← faEqgx.toExpr')
 
     let (args, dep) ← match extra with
     | .ABUV {B, hAB, ..} {V} =>
@@ -798,10 +819,10 @@ def LamData.toExpr (e : LamData EExpr) : EM Expr := match e with
     pure $ Lean.mkAppN (.const n [u, v]) args
   else
     let hfg ← match extra with
-    | .ABUV {b, vaEqb, ..} .. =>
-      pure $ mkLambda #[a, b, vaEqb.aEqb] (← faEqgx.toExpr')
+    | .ABUV {b, vaEqb, blets, ..} .. =>
+      pure $ mkLambda (← expandLets #[(a, alets), (b, blets), (vaEqb.aEqb, vaEqb.lets)]) (← faEqgx.toExpr')
     | .UV ..
-    | .none => pure $ mkLambda #[a] (← faEqgx.toExpr')
+    | .none => pure $ mkLambda (← expandLets #[(a, alets)]) (← faEqgx.toExpr')
 
     let (args, dep, U) ← match extra with
     | .ABUV {B, hAB, b, ..} {V} =>
@@ -827,7 +848,7 @@ let name := match d with
 if dep then name.toString ++ "'" |>.toName else name
 
 def ForallData.toExpr (e : ForallData EExpr) : EM Expr := match e with
-| {u, v, A, U, a, extra} => do
+| {u, v, A, U, a, extra, alets} => do
 
   let (U, V?, dep) :=
     match extra with
@@ -844,10 +865,10 @@ def ForallData.toExpr (e : ForallData EExpr) : EM Expr := match e with
     let hUV dep := do
       if dep then
         match extra with
-        | .ABUV {b, vaEqb, UaEqVx, ..} =>
-          pure $ mkLambda #[b, a, vaEqb.bEqa] (← withReversedFVar vaEqb UaEqVx.toExpr')
+        | .ABUV {b, vaEqb, UaEqVx, blets, ..} => withReversedFVar vaEqb do
+          pure $ mkLambda (← expandLets #[(b, blets), (a, alets), (vaEqb.bEqa, vaEqb.lets)]) (← UaEqVx.toExpr')
         | .UV {UaEqVx, ..} =>
-          pure $ mkLambda #[a] (← UaEqVx.toExpr')
+          pure $ mkLambda (← expandLets #[(a, alets)]) (← UaEqVx.toExpr')
         | _ => unreachable!
       else
         match extra with
@@ -868,10 +889,10 @@ def ForallData.toExpr (e : ForallData EExpr) : EM Expr := match e with
     let hUV dep := do
       if dep then
         match extra with
-        | .ABUV {b, vaEqb, UaEqVx, ..} =>
-          pure $ mkLambda #[a, b, vaEqb.aEqb] (← UaEqVx.toExpr')
+        | .ABUV {b, vaEqb, UaEqVx, blets, ..} =>
+          pure $ mkLambda (← expandLets #[(a, alets), (b, blets), (vaEqb.aEqb, vaEqb.lets)]) (← UaEqVx.toExpr')
         | .UV {UaEqVx, ..} =>
-          pure $ mkLambda #[a] (← UaEqVx.toExpr')
+          pure $ mkLambda (← expandLets #[(a, alets)]) (← UaEqVx.toExpr')
         | _ => unreachable!
       else
         match extra with
@@ -1007,24 +1028,19 @@ def SorryData.toExpr : SorryData → EM Expr
     pure $ Lean.mkAppN (.const `sorryAx [0]) #[Lean.mkAppN (.const ``HEq [u]) #[A, a, B, b], .const `Bool.false []]
 
 def EExpr.toExpr' (e : EExpr) : EM Expr := do
-  -- if let some ex := (← get).toExprCache[e]? then
-  --   return ex
   let ret ← match e with
   | .lam d
   | .forallE d
   | .app d
   | .fvar d
   | .trans d
-  -- | .symm d
   | .refl d
   | .prfIrrel d
   | .sry d  => d.toExpr
-  -- | .rev .. => panic! "encountered thunked reversal"
   | .rev e => do
     let ret ← (swapRev e.toExpr')
     pure ret
 
-  -- modify fun st => { st with toExprCache := st.toExprCache.insert e ret }
   pure ret
 
 -- def EExpr.toSorry (e : EExpr) : EExpr :=
