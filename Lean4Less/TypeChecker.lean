@@ -833,7 +833,7 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
   let rec loop remLams e tl tr (lamVars prfVars prfVals : Array Expr) p : RecM Expr := do
     match remLams, e, tl, tr, p with
     | remLams' + 1, .lam n _ b bi, .forallE _ _ tbl .., .forallE _ tdr tbr .., .forallE forallData =>
-      let {A, a, extra, u, ..} := forallData
+      let {A, a, extra, u, alets, ..} := forallData
       withNewFVar 5 n tdr.toPExpr bi fun var => do
         let (UaEqVx? : Option EExpr) := 
           match extra with
@@ -843,27 +843,34 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
 
         let v := .fvar var
 
-        let (newPrfVars, newPrfVals, vCast) ←
+        let (newPrfVars, newPrfVals, vCast, (lets : Array LocalDeclE)) ←
           match extra with
-          | .ABUV {B, b, vaEqb, hAB, ..}
-          | .AB {B, b, vaEqb, hAB, ..} =>
+          | .ABUV {B, b, vaEqb, hAB, blets, ..}
+          | .AB {B, b, vaEqb, hAB, blets, ..} =>
             let hBA ← appHEqSymm hAB
             let vCast ← mkCast'' `L4L.castHEq B.toExpr A.toExpr hBA v prfVars prfVals u
             let vCastEqv ← mkCast'' `L4L.castOrigHEq B.toExpr A.toExpr hBA v prfVars prfVals u
-            pure (#[a.toExpr, b.toExpr, vaEqb.aEqb.toExpr], #[vCast, v, vCastEqv], vCast)
+
+            let newPrfVars := #[a.toExpr, b.toExpr, vaEqb.aEqb.toExpr]
+            let newPrfVals := #[vCast, v, vCastEqv]
+            pure (newPrfVars, newPrfVals, vCast, (alets ++ blets ++ vaEqb.lets).map fun l => {l with value := fun ctx => (l.value ctx).replaceFVars (prfVars ++ newPrfVars) (prfVals ++ newPrfVals)})
           | _ => 
-            pure (#[a.toExpr], #[v], v)
+            pure (#[a.toExpr], #[v], v, alets.map fun l => {l with value := fun ctx => (l.value ctx).replaceFVars prfVars prfVals})
         let prfVars := prfVars ++ newPrfVars
         let prfVals := prfVals ++ newPrfVals
-
-        let lamVars := lamVars.push v
-        let b := b.instantiate1 vCast
-        let tbl := tbl.instantiate1 vCast
-        let tbr := tbr.instantiate1 v
-        if let some (UaEqVx : EExpr) := UaEqVx? then
-          loop remLams' b tbl tbr lamVars prfVars prfVals UaEqVx
-        else
-          pure $ (← getLCtx).mkLambda lamVars b
+        let mut lctx ← getLCtx
+        for l in lets do
+          lctx := lctx.addDecl l
+        withLCtx lctx do
+          -- TODO also add to the context the let variables with types and values instantiated by prfVars -> prfVals, and append them to lamVars
+          let lamVars := lamVars.push v ++ (lets.map (Expr.fvar ·.fvarId))
+          let b := b.instantiate1 vCast -- FIXME this may duplicate proofs
+          let tbl := tbl.instantiate1 vCast
+          let tbr := tbr.instantiate1 v
+          if let some (UaEqVx : EExpr) := UaEqVx? then
+            loop remLams' b tbl tbr lamVars prfVars prfVals UaEqVx
+          else
+            pure $ (← getLCtx).mkLambda lamVars b
     | _, _, _, _, _ =>
       let cast ← mkCast' `L4L.castHEq tl tr p e prfVars prfVals
       pure $ (← getLCtx).mkLambda lamVars cast
@@ -962,7 +969,7 @@ def inferLambda (e : Expr) (dbg := false) : RecPE := loop #[] false e where
 
     let patch ←
       if domPatched || e'?.isSome then do
-        pure $ some $ ((← getLCtx).mkLambda fvars e').toPExpr
+        pure $ some $ ((← getLCtx).mkLambda fvars e').toPExpr -- TODO TODO let vars
       else 
         pure none
 

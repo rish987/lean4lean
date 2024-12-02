@@ -1,4 +1,5 @@
-import Std
+import patch.PatchTheoremsAx
+import Lean4Less.Commands
 
 universe u v
 
@@ -316,11 +317,15 @@ set_option pp.explicit true
 
 axiom G : P → Prop
 axiom H : (p : P) → G p → Type
+axiom Hq : G q → Type
 axiom H.mk : (p : P) → (g : G p) → H p g
 axiom gq : G q
 axiom gp : G p
 
 noncomputable def pushTest : (g : G q) → H q g := fun (g : G p) => H.mk p g
+noncomputable def pushTestIdem : (g : G q) → G q := fun (g : G p) => g
+noncomputable def pushTestIdemApp : (g : G q) → Type := fun (g : G p) => Hq g
+#check_l4l pushTestIdem
 
 -- #print BitVec.mul_def
 

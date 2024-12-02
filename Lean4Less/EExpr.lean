@@ -55,6 +55,9 @@ structure LocalDeclE where
 (index : Nat) (fvarId : FVarId) (userName : Name) (type : Expr) (value : EContext → Expr)
 deriving Inhabited
 
+instance : Coe LocalDeclE LocalDecl where
+coe l := .ldecl l.index l.fvarId l.userName l.type (l.value {}) false default -- TODO investigate use of `LocalDeclKind` field
+
 /--
 Tracks fvars for an equality in both directions (useful when reversing equalities).
 -/
