@@ -326,72 +326,6 @@ inductive EExpr where
 | prfIrrel : PIData EExpr → EExpr
 | sry      : SorryData → EExpr
 | rev      : EExpr → EExpr -- "thunked" equality reversal
--- with
---   @[computed_field]
---   usedFVars : @& EExpr → Std.HashSet FVarId
---   | .lam d
---   | .forallE d
---   | .app d
---   | .trans d
---   | .fvar d
---   | .refl d
---   | .prfIrrel d
---   | .sry d   => sorry
---   | _ => sorry
--- with
---   @[computed_field]
---   data : @& EExpr → UInt64
--- | .other d
--- | .lam d
--- | .forallE d
--- | .app d
--- | .trans d
--- | .symm d
--- | .refl d
--- | .prfIrrel d
--- | .sry d   => hash d
--- | .rev s t S T l e => hash (#[s, t, S, T], l, data e)
-    -- | .const n lvls => mkData (mixHash 5 <| mixHash (hash n) (hash lvls)) 0 0 false false (lvls.any Level.hasMVar) (lvls.any Level.hasParam)
-    -- | .bvar idx => mkData (mixHash 7 <| hash idx) (idx+1)
-    -- | .sort lvl => mkData (mixHash 11 <| hash lvl) 0 0 false false lvl.hasMVar lvl.hasParam
-    -- | .fvar fvarId => mkData (mixHash 13 <| hash fvarId) 0 0 true
-    -- | .mvar fvarId => mkData (mixHash 17 <| hash fvarId) 0 0 false true
-    -- | .mdata _m e =>
-    --   let d := e.data.approxDepth.toUInt32+1
-    --   mkData (mixHash d.toUInt64 <| e.data.hash) e.data.looseBVarRange.toNat d e.data.hasFVar e.data.hasExprMVar e.data.hasLevelMVar e.data.hasLevelParam
-    -- | .proj s i e =>
-    --   let d := e.data.approxDepth.toUInt32+1
-    --   mkData (mixHash d.toUInt64 <| mixHash (hash s) <| mixHash (hash i) e.data.hash)
-    --       e.data.looseBVarRange.toNat d e.data.hasFVar e.data.hasExprMVar e.data.hasLevelMVar e.data.hasLevelParam
-    -- | .app f a => mkAppData f.data a.data
-    -- | .lam _ t b _ =>
-    --   let d := (max t.data.approxDepth.toUInt32 b.data.approxDepth.toUInt32) + 1
-    --   mkDataForBinder (mixHash d.toUInt64 <| mixHash t.data.hash b.data.hash)
-    --     (max t.data.looseBVarRange.toNat (b.data.looseBVarRange.toNat - 1))
-    --     d
-    --     (t.data.hasFVar || b.data.hasFVar)
-    --     (t.data.hasExprMVar || b.data.hasExprMVar)
-    --     (t.data.hasLevelMVar || b.data.hasLevelMVar)
-    --     (t.data.hasLevelParam || b.data.hasLevelParam)
-    -- | .forallE _ t b _ =>
-    --   let d := (max t.data.approxDepth.toUInt32 b.data.approxDepth.toUInt32) + 1
-    --   mkDataForBinder (mixHash d.toUInt64 <| mixHash t.data.hash b.data.hash)
-    --     (max t.data.looseBVarRange.toNat (b.data.looseBVarRange.toNat - 1))
-    --     d
-    --     (t.data.hasFVar || b.data.hasFVar)
-    --     (t.data.hasExprMVar || b.data.hasExprMVar)
-    --     (t.data.hasLevelMVar || b.data.hasLevelMVar)
-    --     (t.data.hasLevelParam || b.data.hasLevelParam)
-    -- | .letE _ t v b _ =>
-    --   let d := (max (max t.data.approxDepth.toUInt32 v.data.approxDepth.toUInt32) b.data.approxDepth.toUInt32) + 1
-    --   mkDataForLet (mixHash d.toUInt64 <| mixHash t.data.hash <| mixHash v.data.hash b.data.hash)
-    --     (max (max t.data.looseBVarRange.toNat v.data.looseBVarRange.toNat) (b.data.looseBVarRange.toNat - 1))
-    --     d
-    --     (t.data.hasFVar || v.data.hasFVar || b.data.hasFVar)
-    --     (t.data.hasExprMVar || v.data.hasExprMVar || b.data.hasExprMVar)
-    --     (t.data.hasLevelMVar || v.data.hasLevelMVar || b.data.hasLevelMVar)
-    --     (t.data.hasLevelParam || v.data.hasLevelParam || b.data.hasLevelParam)
-    -- | .lit l => mkData (mixHash 3 (hash l))
 deriving Inhabited
 
 structure EState where -- TODO why is this needed for dbg_trace to show up?
@@ -402,6 +336,9 @@ abbrev EM := ReaderT EContext <| StateT EState <| Id
 
 def EM.run (dbg : Bool := false) (x : EM α) : α :=
   (StateT.run (x { dbg }) {}).1
+
+def EM.run' (ctx : EContext := {}) (x : EM α) : α :=
+  (StateT.run (x ctx) {}).1
 
 def withRev (rev : Bool) (x : EM α) : EM α :=
   withReader (fun ctx => {ctx with rev}) x

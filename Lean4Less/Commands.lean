@@ -98,7 +98,6 @@ def transL4L (n : Array Name) (env? : Option Environment := none) : Lean.Elab.Co
   transL4L' n env
 
 def checkL4L (ns : Array Name) (env : Environment) (printOutput := true) (printProgress := false) (interactive := false) : IO Environment := do
-  dbg_trace s!"DBG[4]: Commands.lean:100 {interactive}"
   let env ← transL4L' ns env (pp := printOutput) (printProgress := printProgress) (interactive := interactive)
   let nSet := ns.foldl (init := default) fun acc n => acc.insert n
 

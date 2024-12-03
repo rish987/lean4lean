@@ -31,6 +31,7 @@ structure TypeChecker.State where
   isDefEqCache : Std.HashMap (PExpr × PExpr) EExpr := Std.HashMap.empty (capacity := 1000)
   isDefEqAppCache : Std.HashMap (Array PExpr × Array PExpr) (Option (EExpr × Array (Option (PExpr × PExpr × EExpr)))) := {}
   fvarRegistry : Std.HashMap Name Nat := {} -- for debugging purposes
+  initLets : Array LocalDeclE := {}
   fvarsToLets : Std.HashMap FVarId (Array LocalDeclE) := {}
   eqvManager : EquivManager := {}
   lctx : LocalContext := {}
@@ -122,14 +123,14 @@ instance : MonadEnv M where
 
 instance : MonadLCtx M where
   getLCtx := return (← get).lctx
-
-instance (priority := low) : MonadWithReaderOf LocalContext M where
-  withReader f := fun x => do
-    let sOrig ← get
-    modify fun s => { s with lctx := f s.lctx }
-    let ret ← x
-    modify fun s => { s with lctx := sOrig.lctx }
-    pure ret
+--
+-- instance (priority := low) : MonadWithReaderOf LocalContext M where
+--   withReader f := fun x => do
+--     let sOrig ← get
+--     modify fun s => { s with lctx := f s.lctx }
+--     let ret ← x
+--     modify fun s => { s with lctx := sOrig.lctx }
+--     pure ret
 
 instance (priority := low) : MonadWithReaderOf (Std.HashMap (FVarId × FVarId) FVarDataE) M where
   withReader f := withReader fun s => { s with eqFVars := f s.eqFVars }
@@ -195,18 +196,18 @@ def mkIdNew (n : Nat) : RecM Name := do
   pure fid
 
 def mkId' (n : Nat) (lctx : LocalContext) (dom : Expr) : RecM Name := do
-  let id ← if let some np := (← get).fvarTypeToReusedNamePrefix[dom]? then
-    let mut count := 0
-    while lctx.findFVar? (Expr.fvar $ .mk (Name.mkNum np count)) |>.isSome do
-      count := count + 1
-    pure $ Name.mkNum np count
-  else
-    let np ← mkIdNew n
-    modify fun st => { st with fvarTypeToReusedNamePrefix := st.fvarTypeToReusedNamePrefix.insert dom np }
-    pure $ Name.mkNum np 0
-  modify fun st => { st with fvarRegistry := st.fvarRegistry.insert id n }
-  pure id
-  -- mkIdNew n
+  -- let id ← if let some np := (← get).fvarTypeToReusedNamePrefix[dom]? then
+  --   let mut count := 0
+  --   while lctx.findFVar? (Expr.fvar $ .mk (Name.mkNum np count)) |>.isSome do
+  --     count := count + 1
+  --   pure $ Name.mkNum np count
+  -- else
+  --   let np ← mkIdNew n
+  --   modify fun st => { st with fvarTypeToReusedNamePrefix := st.fvarTypeToReusedNamePrefix.insert dom np }
+  --   pure $ Name.mkNum np 0
+  -- modify fun st => { st with fvarRegistry := st.fvarRegistry.insert id n }
+  -- pure id
+  mkIdNew n -- FIXME FIXME need to handle let variables
 
 def mkId (n : Nat) (dom : Expr) : RecM Name := do
   mkId' n (← getLCtx) dom
@@ -218,11 +219,43 @@ def _root_.Lean.LocalContext.mkLocalDecl' (lctx : LocalContext) (fvarId : FVarId
     let decl := LocalDecl.cdecl idx fvarId userName type bi kind
     { fvarIdToDecl := map.insert fvarId decl, decls := decls.push decl }
 
+-- @[inline] def withLCtx' (lctx : LocalContext) (x : M α) : M α := do
+--   let sOrig ← get
+--   modify fun s => { s with lctx := f s.lctx }
+--   withReader (fun _ => lctx) x
+--
+def withNewFVar' (id : FVarId) (m : LocalDecl → RecM α) : RecM α := do
+  let some var := (← getLCtx).find? id | throw $ .other "unreachable!"
+  let ret ← m var
+
+  let afterLctx := (← getLCtx)
+  let afterDecls := afterLctx.decls.toArray
+  let afterMap := afterLctx.fvarIdToDecl
+  -- delete this decl and all the lets after it without changing any prior part of the context
+  -- (which may contain other injected let expressions)
+  let varInd := (afterLctx.decls.toArray.findIdx? fun d? => if let some d := d? then d.fvarId == id else false).get!
+  let mut resetMap := afterMap
+  let resetDecls := afterDecls[:varInd].toArray.toPArray'
+  for d? in afterDecls[varInd:] do
+    if let some d := d? then
+      resetMap := resetMap.erase d.fvarId
+  let resetLctx := {decls := resetDecls, fvarIdToDecl := resetMap}
+  modify fun s => { s with lctx := resetLctx }
+  pure ret
+
 def withNewFVar (n : Nat) (name : Name) (dom : PExpr) (bi : BinderInfo) (m : LocalDecl → RecM α) : RecM α := do
   let id := ⟨← mkId n dom⟩
-  withLCtx ((← getLCtx).mkLocalDecl' id name dom bi) do
-    let some var := (← getLCtx).find? id | throw $ .other "unreachable!"
-    m var
+  let newLctx := ((← getLCtx).mkLocalDecl' id name dom bi)
+  modify fun s => { s with lctx := newLctx }
+
+  withNewFVar' id m
+
+def withNewLetVar (n : Nat) (name : Name) (type : PExpr) (val : Expr) (m : LocalDecl → RecM α) : RecM α := do
+  let id := ⟨← mkIdNew n⟩
+  let newLctx := ((← getLCtx).mkLetDecl id name type val)
+  modify fun s => { s with lctx := newLctx }
+
+  withNewFVar' id m
 
 def runLeanMinus (M : Lean.TypeChecker.M T) : RecM T := do
   let trace := (← readThe Context).L4LTraceOverride || ((← readThe Context).L4LTrace && (← shouldTrace))
@@ -492,7 +525,29 @@ def checkIsDefEqCache (t s : PExpr) (m : RecB) : RecB := do
   let r@(result, p?) ← m
   if result then
     if let some p := p? then
-      modify fun st => { st with isDefEqCache := st.isDefEqCache.insert (t, s) p }
+      let mut lastVar? : Option (FVarId × Nat) := none
+      let mut i := 0
+      for v? in (← getLCtx).decls do
+        let pe := p.toExpr
+        if let some v := v? then
+          if pe.containsFVar' v then
+            lastVar? := .some (v, i)
+        i := i + 1
+      let (u, A) ← getTypeLevel t
+      let type := mkAppN (.const `HEq [u]) #[A, t, (← inferTypePure 0 s), s]
+      let decl := .mk 0 (.mk (← mkIdNew 500)) default type fun ctx => p.toExpr'.run' ctx
+      if let some (lastVar, idx) := lastVar? then
+        let mut fvarsToLets := (← get).fvarsToLets
+        let lets := fvarsToLets.get? lastVar |>.getD #[] |>.push decl
+        fvarsToLets := fvarsToLets.insert lastVar lets
+        let s ← get
+        let newDecls := s.lctx.decls.toArray.insertAt! (idx + 1) decl -- FIXME too inefficient to go back and forth between Array and PersistentArray?
+        modify fun st => { st with fvarsToLets := fvarsToLets, lctx := {st.lctx with decls := newDecls.toPArray', fvarIdToDecl := st.lctx.fvarIdToDecl.insert decl.fvarId decl}}
+      else
+        let s ← get
+        let newDecls := s.lctx.decls.toArray.insertAt! 0 decl -- FIXME too inefficient to go back and forth between Array and PersistentArray?
+        modify fun st => { st with initLets := st.initLets.push decl, lctx := {st.lctx with decls := newDecls.toPArray', fvarIdToDecl := st.lctx.fvarIdToDecl.insert decl.fvarId decl}}
+      modify fun st => { st with isDefEqCache := st.isDefEqCache.insert (t, s) p}
     else
       modify fun st => { st with eqvManager := st.eqvManager.addEquiv t s }
   pure r
@@ -692,6 +747,13 @@ def getLets (fid : FVarId) : RecM (Array LocalDeclE) := do
   pure ret
 decreasing_by
   sorry -- TODO the index of fid in the local context is guaranteed to increase
+
+def getInitLets : RecM (Array LocalDeclE) := do
+  let lets := (← get).initLets
+  let mut ret := #[]
+  for l in lets do
+    ret := ret.push l ++ (← getLets l.fvarId)
+  pure ret
 
 def meths : ExtMethods RecM := {
     isDefEq := isDefEq
@@ -1012,7 +1074,8 @@ def inferForall (e : Expr) : RecPE := loop #[] #[] false e where
 
     let us := us.push lvl
     withNewFVar 9 name d' bi fun id => do
-      let fvars := fvars.push (.fvar id)
+      let lets : Array LocalDeclE ← getLets id
+      let fvars := fvars.push (.fvar id) ++ lets.map (Expr.fvar ·.fvarId)
       loop fvars us (domPatched || d'?.isSome || p?.isSome) body
   | e => do
     let e := e.instantiateRev fvars
@@ -1063,8 +1126,8 @@ def markUsed (n : Nat) (fvars : Array Expr) (b : Expr) (used : Array Bool) : Arr
 /--
 Infers the type of let-expression `e`.
 -/
-def inferLet (e : Expr) : RecPE := loop #[] #[] false e where
-  loop fvars vals typePatched : Expr → RecPE
+def inferLet (e : Expr) : RecPE := loop #[] false e where
+  loop fvars typePatched : Expr → RecPE
   | .letE name type val body _ => do
     let type := type.instantiateRev fvars
     let (sort, type'?) ← inferType 20 type 
@@ -1075,29 +1138,14 @@ def inferLet (e : Expr) : RecPE := loop #[] #[] false e where
     let val' := val'?.getD val.toPExpr
     let ((true, pVal?), valC') ← smartCast' valType type' val' 17 |
       throw <| .letTypeMismatch (← getEnv) (← getLCtx) name valType type'
-    let id := ⟨← mkIdNew 10⟩
-    withLCtx ((← getLCtx).mkLetDecl id name type' valC') do
-      let fvars := fvars.push (.fvar id)
-      let vals := vals.push valC'
-      loop fvars vals (typePatched || type'?.isSome || pType?.isSome || val'?.isSome || pVal?.isSome) body
+    withNewLetVar 10 name type' valC' fun var => do
+      let lets : Array LocalDeclE ← getLets var
+      let fvars := fvars.push (.fvar var) ++ lets.map (Expr.fvar ·.fvarId)
+      loop fvars (typePatched || type'?.isSome || pType?.isSome || val'?.isSome || pVal?.isSome) body
   | e => do
     let (r, e'?) ← inferType 22 (e.instantiateRev fvars)
     let e' := e'?.getD e.toPExpr
     let r := r.toExpr.cheapBetaReduce.toPExpr
-    let rec loopUsed i (used : Array Bool) :=
-      match i with
-      | 0 => used
-      | i+1 =>
-        let used := if used[i]! then markUsed i fvars vals[i]! used else used
-        loopUsed i used
-    let used := mkArray fvars.size false
-    let used := markUsed fvars.size fvars r used
-    let used := loopUsed fvars.size used
-    let mut usedFVars := #[]
-    for fvar in fvars, b in used do
-      if b then
-        usedFVars := usedFVars.push fvar
-    -- FIXME `usedFVars` is never used
     let patch? ←
       if typePatched || e'?.isSome then do
         pure $ .some $ (← getLCtx).mkForall fvars e' |>.toPExpr -- TODO TODO
@@ -1505,9 +1553,9 @@ Otherwise, defers to the calling function.
 -/
 def quickIsDefEq' (t s : PExpr) (useHash := false) : RecLB := do
   -- optimization for terms that are already α-equivalent
-  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 (eqvManager := m)) => -- TODO why do I have to list these?
+  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 (eqvManager := m)) => -- TODO why do I have to list these?
     let (b, m) := m.isEquiv useHash t s
-    (b, .mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 (eqvManager := m))
+    (b, .mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 (eqvManager := m))
   then
     return (.true, none)
   let res : Option (Bool × PExpr) ← match t.toExpr, s.toExpr with

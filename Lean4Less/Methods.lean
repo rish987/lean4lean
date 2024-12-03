@@ -190,7 +190,7 @@ With the level context `lps`, infers the type of expression `e` and checks that
 Use `inferType` to infer type alone.
 -/
 def check (e : Expr) (lps : List Name) : MPE := do
-  let ret ← withReader ({ · with lparams := lps }) (inferType 82 e).run
+  let (type, patch?) ← withReader ({ · with lparams := lps }) (inferType 82 e).run
   -- let (_, e'?) := ret
 
   -- if let some e' := e'? then
@@ -198,7 +198,11 @@ def check (e : Expr) (lps : List Name) : MPE := do
   --     if not ((← getEnv).find? c).isSome then
   --       throw $ .other s!"possible patching loop detected ({c})"
 
-  pure ret
+  let patch? :=
+    if let some patch := patch? then
+      .some $ (← getLCtx).mkLambda ((← getInitLets.run).map (Expr.fvar ·.fvarId)) patch |>.toPExpr
+    else none
+  pure (type, patch?)
 
 def checkPure (e : Expr) (lps : List Name) : M PExpr :=
   withReader ({ · with lparams := lps }) (inferTypePure 83 e.toPExpr).run
