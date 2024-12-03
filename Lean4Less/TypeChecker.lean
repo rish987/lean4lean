@@ -31,6 +31,7 @@ structure TypeChecker.State where
   isDefEqCache : Std.HashMap (PExpr × PExpr) EExpr := Std.HashMap.empty (capacity := 1000)
   isDefEqAppCache : Std.HashMap (Array PExpr × Array PExpr) (Option (EExpr × Array (Option (PExpr × PExpr × EExpr)))) := {}
   fvarRegistry : Std.HashMap Name Nat := {} -- for debugging purposes
+  fvarsToLets : Std.HashMap FVarId (Array LocalDeclE) := {}
   eqvManager : EquivManager := {}
   lctx : LocalContext := {}
   numCalls : Nat := 0
@@ -210,9 +211,16 @@ def mkId' (n : Nat) (lctx : LocalContext) (dom : Expr) : RecM Name := do
 def mkId (n : Nat) (dom : Expr) : RecM Name := do
   mkId' n (← getLCtx) dom
 
+def _root_.Lean.LocalContext.mkLocalDecl' (lctx : LocalContext) (fvarId : FVarId) (userName : Name) (type : Expr) (bi : BinderInfo := BinderInfo.default) (kind : LocalDeclKind := .default) : LocalContext :=
+  match lctx with
+  | { fvarIdToDecl := map, decls := decls } =>
+    let idx  := 0
+    let decl := LocalDecl.cdecl idx fvarId userName type bi kind
+    { fvarIdToDecl := map.insert fvarId decl, decls := decls.push decl }
+
 def withNewFVar (n : Nat) (name : Name) (dom : PExpr) (bi : BinderInfo) (m : LocalDecl → RecM α) : RecM α := do
   let id := ⟨← mkId n dom⟩
-  withLCtx ((← getLCtx).mkLocalDecl id name dom bi) do
+  withLCtx ((← getLCtx).mkLocalDecl' id name dom bi) do
     let some var := (← getLCtx).find? id | throw $ .other "unreachable!"
     m var
 
@@ -676,6 +684,15 @@ def alignForAll (numBinds : Nat) (ltl ltr : Expr) : RecM (Expr × Expr × Nat) :
 def isDefEqApp (n : Nat) (t s : PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default)
   (tfEqsf? : Option (Option EExpr) := none) : RecM (Bool × Option EExpr) := fun m => m.isDefEqApp n t s targsEqsargs? tfEqsf?
 
+def getLets (fid : FVarId) : RecM (Array LocalDeclE) := do
+  let some lets := (← get).fvarsToLets[fid]? | pure #[]
+  let mut ret := #[]
+  for l in lets do
+    ret := ret.push l ++ (← getLets l.fvarId)
+  pure ret
+decreasing_by
+  sorry -- TODO the index of fid in the local context is guaranteed to increase
+
 def meths : ExtMethods RecM := {
     isDefEq := isDefEq
     isDefEqApp := fun n t s m => isDefEqApp n t s (targsEqsargs? := m)
@@ -705,6 +722,7 @@ def meths : ExtMethods RecM := {
     shouldTrace := shouldTrace
     getTrace := fun b => getTrace b
     withNewFVar := withNewFVar
+    getLets := getLets
   }
 
 def methsA : ExtMethodsA RecM := {
@@ -858,19 +876,18 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
             pure (#[a.toExpr], #[v], v, alets.map fun l => {l with value := fun ctx => (l.value ctx).replaceFVars prfVars prfVals})
         let prfVars := prfVars ++ newPrfVars
         let prfVals := prfVals ++ newPrfVals
-        let mut lctx ← getLCtx
-        for l in lets do
-          lctx := lctx.addDecl l
-        withLCtx lctx do
-          -- TODO also add to the context the let variables with types and values instantiated by prfVars -> prfVals, and append them to lamVars
-          let lamVars := lamVars.push v ++ (lets.map (Expr.fvar ·.fvarId))
-          let b := b.instantiate1 vCast -- FIXME this may duplicate proofs
-          let tbl := tbl.instantiate1 vCast
-          let tbr := tbr.instantiate1 v
-          if let some (UaEqVx : EExpr) := UaEqVx? then
-            loop remLams' b tbl tbr lamVars prfVars prfVals UaEqVx
-          else
-            pure $ (← getLCtx).mkLambda lamVars b
+        -- let mut lctx ← getLCtx
+        -- for l in lets do
+        --   lctx := lctx.addDecl l
+        -- withLCtx lctx do
+        let lamVars := lamVars.push v ++ lets.map (Expr.fvar ·.fvarId)
+        let b := b.instantiate1 vCast -- FIXME this may duplicate proofs
+        let tbl := tbl.instantiate1 vCast
+        let tbr := tbr.instantiate1 v
+        if let some (UaEqVx : EExpr) := UaEqVx? then
+          loop remLams' b tbl tbr lamVars prfVars prfVals UaEqVx
+        else
+          pure $ (← getLCtx).mkLambda lamVars b
     | _, _, _, _, _ =>
       let cast ← mkCast' `L4L.castHEq tl tr p e prfVars prfVals
       pure $ (← getLCtx).mkLambda lamVars cast
@@ -956,7 +973,12 @@ def inferLambda (e : Expr) (dbg := false) : RecPE := loop #[] false e where
     let d' ← maybeCast 20 p? sort sort' (d'?.getD d.toPExpr)
 
     withNewFVar 8 name d' bi fun id => do
-      let fvars := fvars.push (.fvar id)
+      let lets : Array LocalDeclE ← getLets id
+      let fvars := fvars.push (.fvar id) ++ lets.map (Expr.fvar ·.fvarId)
+      -- let mut lctx ← getLCtx
+      -- for l in lets do
+      --   lctx := lctx.addDecl l
+      -- withLCtx lctx do
       loop fvars (domPatched || d'?.isSome || p?.isSome) body
   | e => do
     let e := e.instantiateRev fvars
@@ -969,7 +991,7 @@ def inferLambda (e : Expr) (dbg := false) : RecPE := loop #[] false e where
 
     let patch ←
       if domPatched || e'?.isSome then do
-        pure $ some $ ((← getLCtx).mkLambda fvars e').toPExpr -- TODO TODO let vars
+        pure $ some $ ((← getLCtx).mkLambda fvars e').toPExpr
       else 
         pure none
 
@@ -1001,7 +1023,7 @@ def inferForall (e : Expr) : RecPE := loop #[] #[] false e where
 
     let patch? ←
       if domPatched || e'?.isSome || p?.isSome then do
-        pure $ .some $ ((← getLCtx).mkForall fvars e').toPExpr
+        pure $ .some $ ((← getLCtx).mkForall fvars e').toPExpr -- TODO TODO
       else
         pure none
     return ((Expr.sort <| us.foldr mkLevelIMax' lvl ).toPExpr, patch?)
@@ -1078,7 +1100,7 @@ def inferLet (e : Expr) : RecPE := loop #[] #[] false e where
     -- FIXME `usedFVars` is never used
     let patch? ←
       if typePatched || e'?.isSome then do
-        pure $ .some $ (← getLCtx).mkForall fvars e' |>.toPExpr
+        pure $ .some $ (← getLCtx).mkForall fvars e' |>.toPExpr -- TODO TODO
       else
         pure none
     return ((← getLCtx).mkForall fvars r |>.toPExpr, patch?)
@@ -1483,9 +1505,9 @@ Otherwise, defers to the calling function.
 -/
 def quickIsDefEq' (t s : PExpr) (useHash := false) : RecLB := do
   -- optimization for terms that are already α-equivalent
-  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 (eqvManager := m)) => -- TODO why do I have to list these?
+  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 (eqvManager := m)) => -- TODO why do I have to list these?
     let (b, m) := m.isEquiv useHash t s
-    (b, .mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 (eqvManager := m))
+    (b, .mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 (eqvManager := m))
   then
     return (.true, none)
   let res : Option (Bool × PExpr) ← match t.toExpr, s.toExpr with

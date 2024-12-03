@@ -328,6 +328,18 @@ inductive EExpr where
 | rev      : EExpr → EExpr -- "thunked" equality reversal
 -- with
 --   @[computed_field]
+--   usedFVars : @& EExpr → Std.HashSet FVarId
+--   | .lam d
+--   | .forallE d
+--   | .app d
+--   | .trans d
+--   | .fvar d
+--   | .refl d
+--   | .prfIrrel d
+--   | .sry d   => sorry
+--   | _ => sorry
+-- with
+--   @[computed_field]
 --   data : @& EExpr → UInt64
 -- | .other d
 -- | .lam d
