@@ -3,6 +3,9 @@ import Lean4Less.PExpr
 
 open Lean
 
+instance : Coe LocalDecl FVarId where
+  coe decl := decl.fvarId
+
 namespace Lean4Less
 
 def mkLambda (vars : Array LocalDecl) (b : Expr) : PExpr := LocalContext.mkLambda (vars.foldl (init := default) fun lctx decl => lctx.addDecl decl) (vars.map (·.toExpr)) b |>.toPExpr
@@ -49,7 +52,7 @@ beq l l' := (l.toExpr, l.type) == (l'.toExpr, l'.type)
 structure EContext where
   dbg : Bool := false -- (for debugging purposes)
   rev : Bool := false
-  reversedFvars : Std.HashSet LocalDecl := {}
+  reversedFvars : Std.HashSet FVarId := {}
 
 structure LocalDeclE where
 (index : Nat) (fvarId : FVarId) (userName : Name) (type : Expr) (value : EContext → Expr)
@@ -69,6 +72,15 @@ b : PExpr
 u : Level
 aEqb : LocalDecl
 bEqa : LocalDecl
+deriving Inhabited, Hashable, BEq
+
+structure LVarDataE where
+A : PExpr
+B : PExpr
+a : PExpr
+b : PExpr
+u : Level
+v : FVarId
 deriving Inhabited, Hashable, BEq
 
 structure FVarData (EExpr : Type) where
@@ -323,9 +335,81 @@ inductive EExpr where
 -- | symm     : SymmData EExpr → EExpr
 | refl     : ReflData → EExpr
 | fvar     : FVarDataE → EExpr
+| lvar     : LVarDataE → EExpr
 | prfIrrel : PIData EExpr → EExpr
 | sry      : SorryData → EExpr
 | rev      : EExpr → EExpr -- "thunked" equality reversal
+-- with
+--   @[computed_field]
+--   usedFVars : @& EExpr → FVarIdSet
+--   | .lam {u, v, A, U, f, a, g, faEqgx, extra, alets} =>
+--     match extra with
+--     | .none =>
+--       default
+--     | _ =>
+--       default
+--   | .forallE d
+--   | .app d
+--   | .trans d
+--   | .fvar d
+--   | .refl d
+--   | .prfIrrel d
+--   | .sry d   => sorry
+--   | _ => sorry
+-- with
+--   @[computed_field]
+--   data : @& EExpr → UInt64
+-- | .other d
+-- | .lam d
+-- | .forallE d
+-- | .app d
+-- | .trans d
+-- | .symm d
+-- | .refl d
+-- | .prfIrrel d
+-- | .sry d   => hash d
+-- | .rev s t S T l e => hash (#[s, t, S, T], l, data e)
+    -- | .const n lvls => mkData (mixHash 5 <| mixHash (hash n) (hash lvls)) 0 0 false false (lvls.any Level.hasMVar) (lvls.any Level.hasParam)
+    -- | .bvar idx => mkData (mixHash 7 <| hash idx) (idx+1)
+    -- | .sort lvl => mkData (mixHash 11 <| hash lvl) 0 0 false false lvl.hasMVar lvl.hasParam
+    -- | .fvar fvarId => mkData (mixHash 13 <| hash fvarId) 0 0 true
+    -- | .mvar fvarId => mkData (mixHash 17 <| hash fvarId) 0 0 false true
+    -- | .mdata _m e =>
+    --   let d := e.data.approxDepth.toUInt32+1
+    --   mkData (mixHash d.toUInt64 <| e.data.hash) e.data.looseBVarRange.toNat d e.data.hasFVar e.data.hasExprMVar e.data.hasLevelMVar e.data.hasLevelParam
+    -- | .proj s i e =>
+    --   let d := e.data.approxDepth.toUInt32+1
+    --   mkData (mixHash d.toUInt64 <| mixHash (hash s) <| mixHash (hash i) e.data.hash)
+    --       e.data.looseBVarRange.toNat d e.data.hasFVar e.data.hasExprMVar e.data.hasLevelMVar e.data.hasLevelParam
+    -- | .app f a => mkAppData f.data a.data
+    -- | .lam _ t b _ =>
+    --   let d := (max t.data.approxDepth.toUInt32 b.data.approxDepth.toUInt32) + 1
+    --   mkDataForBinder (mixHash d.toUInt64 <| mixHash t.data.hash b.data.hash)
+    --     (max t.data.looseBVarRange.toNat (b.data.looseBVarRange.toNat - 1))
+    --     d
+    --     (t.data.hasFVar || b.data.hasFVar)
+    --     (t.data.hasExprMVar || b.data.hasExprMVar)
+    --     (t.data.hasLevelMVar || b.data.hasLevelMVar)
+    --     (t.data.hasLevelParam || b.data.hasLevelParam)
+    -- | .forallE _ t b _ =>
+    --   let d := (max t.data.approxDepth.toUInt32 b.data.approxDepth.toUInt32) + 1
+    --   mkDataForBinder (mixHash d.toUInt64 <| mixHash t.data.hash b.data.hash)
+    --     (max t.data.looseBVarRange.toNat (b.data.looseBVarRange.toNat - 1))
+    --     d
+    --     (t.data.hasFVar || b.data.hasFVar)
+    --     (t.data.hasExprMVar || b.data.hasExprMVar)
+    --     (t.data.hasLevelMVar || b.data.hasLevelMVar)
+    --     (t.data.hasLevelParam || b.data.hasLevelParam)
+    -- | .letE _ t v b _ =>
+    --   let d := (max (max t.data.approxDepth.toUInt32 v.data.approxDepth.toUInt32) b.data.approxDepth.toUInt32) + 1
+    --   mkDataForLet (mixHash d.toUInt64 <| mixHash t.data.hash <| mixHash v.data.hash b.data.hash)
+    --     (max (max t.data.looseBVarRange.toNat v.data.looseBVarRange.toNat) (b.data.looseBVarRange.toNat - 1))
+    --     d
+    --     (t.data.hasFVar || v.data.hasFVar || b.data.hasFVar)
+    --     (t.data.hasExprMVar || v.data.hasExprMVar || b.data.hasExprMVar)
+    --     (t.data.hasLevelMVar || v.data.hasLevelMVar || b.data.hasLevelMVar)
+    --     (t.data.hasLevelParam || v.data.hasLevelParam || b.data.hasLevelParam)
+    -- | .lit l => mkData (mixHash 3 (hash l))
 deriving Inhabited
 
 structure EState where -- TODO why is this needed for dbg_trace to show up?
@@ -343,8 +427,11 @@ def EM.run' (ctx : EContext := {}) (x : EM α) : α :=
 def withRev (rev : Bool) (x : EM α) : EM α :=
   withReader (fun ctx => {ctx with rev}) x
 
-def withReversedFVar (d : FVarData EExpr) (x : EM α) : EM α :=
-  withReader (fun ctx => {ctx with reversedFvars := ctx.reversedFvars.insert d.aEqb}) x
+def withReversedFVar (d : FVarId) (x : EM α) : EM α :=
+  withReader (fun ctx => {ctx with reversedFvars := ctx.reversedFvars.insert d}) x
+
+def withReversedFVars (ds : Array FVarId) (x : EM α) : EM α :=
+  withReader (fun ctx => {ctx with reversedFvars := ds.foldl (init := ctx.reversedFvars) fun acc d => acc.insert d}) x
 
 def swapRev (x : EM α) : EM α :=
   withReader (fun ctx => {ctx with rev := not ctx.rev}) x
@@ -721,9 +808,9 @@ def expandLets (vars : Array (LocalDecl × (Array LocalDeclE))) : EM (Array Loca
 mutual
 def HUVData.toExprDep' (e : HUVData EExpr) : EM Expr := match e with -- FIXME why can't I use a single function here?
 | {a, UaEqVb, extra, alets} => do
-  let ret ← if (← rev) then
+  let ret ← if (← rev) then withReversedFVars (alets.map (·.fvarId)) do
     match extra with
-      | .some {b, vaEqb, blets} => withReversedFVar vaEqb do
+      | .some {b, vaEqb, blets} => withReversedFVars (#[vaEqb.aEqb.fvarId] ++ blets.map (·.fvarId) ++ vaEqb.lets.map (·.fvarId)) do
         pure $ mkLambda (← expandLets #[(b, blets), (a, alets), (vaEqb.bEqa, vaEqb.lets)]) (← UaEqVb.toExpr')
       | .none =>
         pure $ mkLambda (← expandLets #[(a, alets)]) (← UaEqVb.toExpr')
@@ -750,9 +837,9 @@ def dbgFIds := #["_kernel_fresh.3032".toName, "_kernel_fresh.3036".toName, "_ker
 
 def LamData.toExpr (e : LamData EExpr) : EM Expr := match e with
 | {u, v, A, U, f, a, g, faEqgx, extra, alets} => do
-  if (← rev) then
+  if (← rev) then withReversedFVars (alets.map (·.fvarId)) do
     let hfg ← match extra with
-    | .ABUV {b, vaEqb, blets, ..} .. => withReversedFVar vaEqb do
+    | .ABUV {b, vaEqb, blets, ..} .. => withReversedFVars (#[vaEqb.aEqb.fvarId] ++ blets.map (·.fvarId) ++ vaEqb.lets.map (·.fvarId)) do
       pure $ mkLambda (← expandLets #[(b, blets), (a, alets), (vaEqb.bEqa, vaEqb.lets)]) (← faEqgx.toExpr')
     | .UV ..
     | .none => pure $ mkLambda (← expandLets #[(a, alets)]) (← faEqgx.toExpr')
@@ -814,10 +901,10 @@ def ForallData.toExpr (e : ForallData EExpr) : EM Expr := match e with
       (U, default, dep)
 
   let (args, dep) ← if (← rev) then
-    let hUV dep := do
+    let hUV dep := do withReversedFVars (alets.map (·.fvarId)) do
       if dep then
         match extra with
-        | .ABUV {b, vaEqb, UaEqVx, blets, ..} => withReversedFVar vaEqb do
+        | .ABUV {b, vaEqb, UaEqVx, blets, ..} => withReversedFVars (#[vaEqb.aEqb.fvarId] ++ blets.map (·.fvarId) ++ vaEqb.lets.map (·.fvarId)) do
           pure $ mkLambda (← expandLets #[(b, blets), (a, alets), (vaEqb.bEqa, vaEqb.lets)]) (← UaEqVx.toExpr')
         | .UV {UaEqVx, ..} =>
           pure $ mkLambda (← expandLets #[(a, alets)]) (← UaEqVx.toExpr')
@@ -972,6 +1059,19 @@ def FVarDataE.toExpr : FVarDataE → EM Expr
     else
       pure aEqb.toExpr
 
+def LVarDataE.toExpr : LVarDataE → EM Expr
+| {v, u, A, B, a, b} => do
+  if (← rev) then
+    if (← read).reversedFvars.contains v then
+      pure $ .fvar v
+    else
+      pure $ Lean.mkAppN (.const `HEq.symm [u]) #[A, B, a, b, .fvar v]
+  else
+    if (← read).reversedFvars.contains v then
+      pure $ Lean.mkAppN (.const `HEq.symm [u]) #[B, A, b, a, .fvar v]
+    else
+      pure $ .fvar v
+
 def SorryData.toExpr : SorryData → EM Expr
 | {u, A, a, B, b} => do
   if (← rev) then
@@ -985,6 +1085,7 @@ def EExpr.toExpr' (e : EExpr) : EM Expr := do
   | .forallE d
   | .app d
   | .fvar d
+  | .lvar d
   | .trans d
   | .refl d
   | .prfIrrel d

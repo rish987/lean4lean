@@ -61,7 +61,7 @@ def mkAppEqProof? (aVars bVars : Array LocalDecl) (us vs : Array Level) (Uas Vbs
                 unreachable!
           if let .some UaEqVb := UaEqVb? then
             if let some fEqg := fEqg? then
-              let hUV := {a := aVar, UaEqVb, extra := .none, alets := ← meth.getLets aVar}
+              let hUV := {a := aVar, UaEqVb, extra := .none, alets := ← meth.getLets 4 aVar}
               if let some aEqb := aEqb? then
                 pure $ .UV {V, hUV, g, fEqg, b, aEqb}
               else
@@ -90,7 +90,7 @@ def mkAppEqProof? (aVars bVars : Array LocalDecl) (us vs : Array Level) (Uas Vbs
 
           if UaEqVb?.isSome || dep then
             let UaEqVb ← UaEqVb?.getDM $ meth.mkHRefl 200 v.succ (Expr.sort v).toPExpr Ua
-            let hUV := {a := aVar, UaEqVb, extra := .some {b := bVar, vaEqb := {aEqb := vaEqb, bEqa := vbEqa, lets := ← meth.getLets vaEqb}, blets := ← meth.getLets bVar}, alets := ← meth.getLets aVar}
+            let hUV := {a := aVar, UaEqVb, extra := .some {b := bVar, vaEqb := {aEqb := vaEqb, bEqa := vbEqa, lets := ← meth.getLets 5 vaEqb}, blets := ← meth.getLets 6 bVar}, alets := ← meth.getLets 7 aVar}
             let ret := .ABUV {B, hAB, V, hUV, g, fEqg, b, aEqb}
             pure ret
           else

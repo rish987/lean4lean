@@ -122,7 +122,7 @@ match fuel with
     let mut traceId := none
     -- traceId := Option.some 31447
     -- traceId := Option.some 26425
-    -- traceId := Option.some 84739
+    traceId := Option.some 396
     try
       let ret ← withCallId s.numCalls traceId do
         if tr then
@@ -183,6 +183,8 @@ Runs `x` with a limit on the recursion depth.
 -/
 def RecM.run (x : RecM α) : M α := x (Methods.withFuel 1000)
 
+def dbgFIds := #["_kernel_fresh.427".toName]
+
 /--
 With the level context `lps`, infers the type of expression `e` and checks that
 `e` is well-typed according to Lean's typing judgment.
@@ -190,7 +192,7 @@ With the level context `lps`, infers the type of expression `e` and checks that
 Use `inferType` to infer type alone.
 -/
 def check (e : Expr) (lps : List Name) : MPE := do
-  let (type, patch?) ← withReader ({ · with lparams := lps }) (inferType 82 e).run
+  let (type, patch?) ← withReader ({ · with lparams := lps, dbgFIds }) (inferType 82 e).run
   -- let (_, e'?) := ret
 
   -- if let some e' := e'? then
@@ -198,10 +200,12 @@ def check (e : Expr) (lps : List Name) : MPE := do
   --     if not ((← getEnv).find? c).isSome then
   --       throw $ .other s!"possible patching loop detected ({c})"
 
-  let patch? :=
+  let patch? ← do
     if let some patch := patch? then
-      .some $ (← getLCtx).mkLambda ((← getInitLets.run).map (Expr.fvar ·.fvarId)) patch |>.toPExpr
-    else none
+      -- let x := ← (Lean.collectFVars default patch.toExpr).fvarIds.mapM fun v => do pure (v.name, (← get).fvarRegistry.get? v.name)
+      dbg_trace s!"DBG[1]: Methods.lean:202: patch={← (Lean.collectFVars default patch.toExpr).fvarIds.mapM fun v => do pure (v.name, (← get).fvarRegistry.get? v.name)}"
+      pure $ .some $ (← getLCtx).mkLambda ((← getInitLets.run).map (Expr.fvar ·.fvarId)) patch |>.toPExpr
+    else pure none
   pure (type, patch?)
 
 def checkPure (e : Expr) (lps : List Name) : M PExpr :=
