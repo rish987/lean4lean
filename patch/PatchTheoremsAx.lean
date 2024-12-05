@@ -10,6 +10,7 @@ universe u v
 axiom prfIrrel {P : Prop} (p q : P) : HEq p q
 axiom prfIrrelHEq {P Q : Prop} (heq : HEq P Q) (p : P) (q : Q) : HEq p q
 
+#print eq_of_heq
 axiom eq_of_heq {α : Sort u} {a a' : α} (h : HEq a a') : Eq a a'
 
 def castHEq (α β : Sort u) (h : HEq α β) (a : α) : β := cast (eq_of_heq h) a
