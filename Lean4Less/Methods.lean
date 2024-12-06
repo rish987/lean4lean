@@ -7,8 +7,8 @@ open Lean
 
 def defFuel := 1300
 
--- def tr := true
-def tr := false
+def tr := true
+-- def tr := false
 
 mutual
 def fuelWrap (idx : Nat) (fuel : Nat) (d : CallData) : M (CallDataT d) := do
@@ -183,8 +183,8 @@ Runs `x` with a limit on the recursion depth.
 -/
 def RecM.run (x : RecM α) : M α := x (Methods.withFuel 1000)
 
-def dbgFIds := #["_kernel_fresh.37".toName]
--- def dbgFIds : Array Name := #[]
+-- def dbgFIds := #["_kernel_fresh.37".toName]
+def dbgFIds : Array Name := #[]
 
 /--
 With the level context `lps`, infers the type of expression `e` and checks that
