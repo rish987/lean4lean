@@ -122,7 +122,7 @@ match fuel with
     let mut traceId := none
     -- traceId := Option.some 31447
     -- traceId := Option.some 26425
-    traceId := Option.some 384
+    traceId := Option.some 396
     try
       let ret ← withCallId s.numCalls traceId do
         if tr then
@@ -201,12 +201,12 @@ def check (e : Expr) (lps : List Name) : MPE := do
   --     if not ((← getEnv).find? c).isSome then
   --       throw $ .other s!"possible patching loop detected ({c})"
 
-  -- let patch? ← do
-  --   if let some patch := patch? then
-  --     -- let x := ← (Lean.collectFVars default patch.toExpr).fvarIds.mapM fun v => do pure (v.name, (← get).fvarRegistry.get? v.name)
-  --     dbg_trace s!"DBG[1]: Methods.lean:202: patch={← (Lean.collectFVars default patch.toExpr).fvarIds.mapM fun v => do pure (v.name, (← get).fvarRegistry.get? v.name)}"
-  --     pure $ .some $ (← getLCtx).mkLambda ((← getInitLets.run).map (Expr.fvar ·.fvarId)) patch |>.toPExpr
-  --   else pure none
+  let patch? ← do
+    if let some patch := patch? then
+      -- let x := ← (Lean.collectFVars default patch.toExpr).fvarIds.mapM fun v => do pure (v.name, (← get).fvarRegistry.get? v.name)
+      dbg_trace s!"DBG[1]: Methods.lean:202: patch={← (Lean.collectFVars default patch.toExpr).fvarIds.mapM fun v => do pure (v.name, (← get).fvarRegistry.get? v.name)}"
+      pure $ .some patch
+    else pure none
   pure (type, patch?)
 
 def checkPure (e : Expr) (lps : List Name) : M PExpr :=
