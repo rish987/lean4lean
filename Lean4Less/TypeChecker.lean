@@ -560,7 +560,6 @@ def checkIsDefEqCache (t s : PExpr) (m : RecB) : RecB := do
               lastVar? := .some (v, i)
           -- dbg_trace s!"DBG[2]: TypeChecker.lean:535 (after lastVar? := .some (v, i))"
           i := i + 1
-
         -- if (← readThe Context).dbgFIds.size > 0 && decl.fvarId.name == (← readThe Context).dbgFIds[0]! then
         --   dbg_trace s!"DBG[2]: TypeChecker.lean:544 {lastVar?.map (·.1.name)}"
 
@@ -706,7 +705,9 @@ def isDefEqForall' (t s : PExpr) (numBinds : Nat) (f : Option EExpr → RecM (Op
     | _, tBody, sBody =>
       pure (#[], tBody.toPExpr, sBody.toPExpr)
   let (datas, tBody, sBody) ← getData t.toExpr s.toExpr numBinds
+  ttrace s!"DBG[9]: TypeChecker.lean:710 (after let (datas, tBody, sBody) ← getData t.…)"
   isDefEqBinder datas tBody sBody fun Ua Vx UaEqVx? as ds => do
+    ttrace s!"DBG[10]: TypeChecker.lean:712 (after isDefEqBinder datas tBody sBody fun Ua V…)"
     let mut UaEqVx? := UaEqVx?
     let mut Ua := Ua
     let mut Vx := Vx
@@ -947,6 +948,7 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
     match remLams, e, tl, tr, p with
     | remLams' + 1, .lam n _ b bi, .forallE _ _ tbl .., .forallE _ tdr tbr .., .forallE forallData =>
       let {A, a, extra, u, alets, ..} := forallData
+      ttrace s!"DBG[16]: TypeChecker.lean:953: a={a.fvarId.name}"
       withNewFVar 5 n tdr.toPExpr bi fun var => do
         let (UaEqVx? : Option EExpr) := 
           match extra with
@@ -960,6 +962,7 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
           match extra with
           | .ABUV {B, b, vaEqb, hAB, blets, ..}
           | .AB {B, b, vaEqb, hAB, blets, ..} =>
+            ttrace s!"DBG[17]: TypeChecker.lean:953: a={b.fvarId.name}, {vaEqb.aEqb.fvarId.name}"
             let hBA ← appHEqSymm hAB
             let vCast ← mkCast'' `L4L.castHEq B.toExpr A.toExpr hBA v prfVars prfVals u
             let vCastEqv ← mkCast'' `L4L.castOrigHEq B.toExpr A.toExpr hBA v prfVars prfVals u
@@ -968,7 +971,9 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
             let newPrfVals := #[vCast, v, vCastEqv]
             pure (newPrfVars, newPrfVals, vCast, (alets ++ blets ++ vaEqb.lets).map fun l => {l with type := l.type.replaceFVars (prfVars ++ newPrfVars) (prfVals ++ newPrfVals), value := fun ctx => (l.value ctx).replaceFVars (prfVars ++ newPrfVars) (prfVals ++ newPrfVals)})
           | _ => 
-            pure (#[a.toExpr], #[v], v, alets.map fun l => {l with value := fun ctx => (l.value ctx).replaceFVars prfVars prfVals})
+            let newPrfVars := #[a.toExpr]
+            let newPrfVals := #[v]
+            pure (#[a.toExpr], #[v], v, alets.map fun l => {l with type := l.type.replaceFVars (prfVars ++ newPrfVars) (prfVals ++ newPrfVals), value := fun ctx => (l.value ctx).replaceFVars (prfVars ++ newPrfVars) (prfVals ++ newPrfVals)})
         withNewLetVars 20 (lets'.map fun l => (l.userName, l.type, (l.value {}), .some l.fvarId)) fun lets => do
           let prfVars := prfVars ++ newPrfVars
           let prfVals := prfVals ++ newPrfVals
@@ -984,10 +989,25 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
             loop remLams' b tbl tbr lamVars prfVars prfVals UaEqVx
           else
             let ret := (← getLCtx).mkLambda lamVars b
+
+            if ← shouldTTrace then
+              dbg_trace s!"DBG[A]: TypeChecker.lean:971: a.toExpr={ret.containsFVar' (.mk "_kernel_fresh.31".toName)}"
+              for v in lamVars do
+                let some d := (← getLCtx).find? v.fvarId! | unreachable!
+                match d with
+                | .cdecl (fvarId := id) (type := t) .. => dbg_trace s!"DBG[17]: TypeChecker.lean:1114 {id.name}, {t.containsFVar' (.mk "_kernel_fresh.37".toName)}"
+                | .ldecl (fvarId := id) (type := t) (value := v) .. => dbg_trace s!"DBG[17]: TypeChecker.lean:1114 {id.name}, {v.containsFVar' (.mk "_kernel_fresh.37".toName)} {t.containsFVar' (.mk "_kernel_fresh.37".toName)}"
             pure ret
     | _, _, _, _, _ =>
       let cast ← mkCast' `L4L.castHEq tl tr p e prfVars prfVals
       let ret := (← getLCtx).mkLambda lamVars cast
+      if ← shouldTTrace then
+        dbg_trace s!"DBG[A]: TypeChecker.lean:971: a.toExpr={ret.containsFVar' (.mk "_kernel_fresh.31".toName)}"
+        for v in lamVars do
+          let some d := (← getLCtx).find? v.fvarId! | unreachable!
+          match d with
+          | .cdecl (fvarId := id) (type := t) .. => dbg_trace s!"DBG[17]: TypeChecker.lean:1114 {id.name}, {t.containsFVar' (.mk "_kernel_fresh.31".toName)}"
+          | .ldecl (fvarId := id) (type := t) (value := v) .. => dbg_trace s!"DBG[17]: TypeChecker.lean:1114 {id.name}, {v.containsFVar' (.mk "_kernel_fresh.31".toName)} {t.containsFVar' (.mk "_kernel_fresh.31".toName)}"
       pure ret
   termination_by remLams -- TODO why doesn't structural recursion on `p` work here?
 
@@ -1114,11 +1134,11 @@ Infers the type of for-all expression `e`.
 -/
 def inferForall (e : Expr) : RecPE := do
     let ret ← loop #[] #[] false e
-    if ← shouldTTrace then
-      for v in (← getLCtx) do
-        match v with
-        | .cdecl (fvarId := id) (type := t) .. => dbg_trace s!"DBG[17]: TypeChecker.lean:1114 {id.name}, {t.containsFVar' (.mk "_kernel_fresh.37".toName)}"
-        | .ldecl (fvarId := id) (type := t) (value := v) .. => dbg_trace s!"DBG[17]: TypeChecker.lean:1114 {id.name}, {v.containsFVar' (.mk "_kernel_fresh.37".toName)} {t.containsFVar' (.mk "_kernel_fresh.37".toName)}"
+    -- if ← shouldTTrace then
+    --   for v in (← getLCtx) do
+    --     match v with
+    --     | .cdecl (fvarId := id) (type := t) .. => dbg_trace s!"DBG[17]: TypeChecker.lean:1114 {id.name}, {t.containsFVar' (.mk "_kernel_fresh.37".toName)}"
+    --     | .ldecl (fvarId := id) (type := t) (value := v) .. => dbg_trace s!"DBG[17]: TypeChecker.lean:1114 {id.name}, {v.containsFVar' (.mk "_kernel_fresh.37".toName)} {t.containsFVar' (.mk "_kernel_fresh.37".toName)}"
     pure ret
   where
     loop fvars us domPatched : Expr → RecPE
@@ -1131,8 +1151,8 @@ def inferForall (e : Expr) : RecPE := do
 
       let us := us.push lvl
       withNewFVar 9 name d' bi fun id => do
-        if id.fvarId.name == "_kernel_fresh.37".toName then
-          dbg_trace s!"DBG[14]: TypeChecker.lean:1121: id={← callId}"
+        -- if id.fvarId.name == "_kernel_fresh.37".toName then
+        --   dbg_trace s!"DBG[14]: TypeChecker.lean:1121: id={← callId}"
         let fvars := fvars.push (.fvar id)
         loop fvars us (domPatched || d'?.isSome || p?.isSome) body
     | e => do
@@ -1149,7 +1169,7 @@ def inferForall (e : Expr) : RecPE := do
             let lets : Array LocalDeclE ← getLets 2 fvar.fvarId!
             newfvars := newfvars.push fvar ++ (lets.map (Expr.fvar ·.fvarId))
           let ret := ((← getLCtx).mkForall newfvars e').toPExpr
-          dbg_trace s!"DBG[15]: TypeChecker.lean:1139 (after let ret := {ret.toExpr.containsFVar' (.mk "_kernel_fresh.37".toName)}"
+          -- dbg_trace s!"DBG[15]: TypeChecker.lean:1139 (after let ret := {ret.toExpr.containsFVar' (.mk "_kernel_fresh.37".toName)}"
           pure $ .some ret
         else
           pure none
@@ -1215,7 +1235,7 @@ def inferLet (e : Expr) : RecPE := loop #[] false e where
       newfvars := newfvars.push fvar ++ (lets.map (Expr.fvar ·.fvarId))
     let patch? ←
       if typePatched || e'?.isSome then do
-        pure $ .some $ (← getLCtx).mkForall fvars e' |>.toPExpr -- TODO TODO
+        pure $ .some $ (← getLCtx).mkForall newfvars e' |>.toPExpr -- TODO TODO
       else
         pure none
     return ((← getLCtx).mkForall newfvars r |>.toPExpr, patch?)
@@ -1573,7 +1593,9 @@ def isDefEqLambda (t s : PExpr) : RecB := do
     | tBody, sBody =>
       pure (#[], tBody.toPExpr, sBody.toPExpr)
   let (datas, tBody, sBody) ← getData t.toExpr s.toExpr
+  ttrace s!"DBG[11]: TypeChecker.lean:1579 (after let (datas, tBody, sBody) ← getData t.…)"
   let ret ← isDefEqBinder datas tBody sBody fun fa' gx' faEqgb? as ds => do
+    ttrace s!"DBG[12]: TypeChecker.lean:1581 (after let ret ← isDefEqBinder datas tBody sB…)"
     let mut faEqgx? := faEqgb?
     let mut fa := fa'
     let mut gx := gx'

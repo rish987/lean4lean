@@ -25,6 +25,8 @@ def patchAxiom (env : Environment) (v : AxiomVal) :
     Except KernelException ConstantInfo := do
   let type ← (checkConstantVal env v.toConstantVal).run env v.name
     (safety := if v.isUnsafe then .unsafe else .safe)
+  if type.toExpr.hasFVar then
+    throw $ .other "fvar in translated term"
   let v := {v with type}
   return .axiomInfo v
 
@@ -44,6 +46,8 @@ def patchDefinition (env : Environment) (v : DefinitionVal) (allowAxiomReplace :
           return .axiomInfo {v with type, isUnsafe := false}
         else
           throw <| .declTypeMismatch env' (.defnDecl v) valueType
+      if type.toExpr.hasFVar || value.toExpr.hasFVar then
+        throw $ .other "fvar in translated term"
       let v := {v with type, value}
       return .defnInfo v
   else
@@ -66,6 +70,8 @@ def patchDefinition (env : Environment) (v : DefinitionVal) (allowAxiomReplace :
       -- dbg_trace s!"DBG[1]: Methods.lean:202: patch={(Lean.collectFVars default value.toExpr).fvarIds.map fun v => v.name}"
       -- dbg_trace s!"DBG[15]: Environment.lean:65 (after let value ← smartCast valueType type v…)"
       let v := {v with type, value}
+      if type.toExpr.hasFVar || value.toExpr.hasFVar then
+        throw $ .other "fvar in translated term"
       -- dbg_trace s!"DBG[35]: Environment.lean:64 (after let v := v with type, value)"
       return (.defnInfo v)
 
@@ -86,9 +92,13 @@ def patchTheorem (env : Environment) (v : TheoremVal) (allowAxiomReplace := fals
 
   if let .some value := value? then
     let v := {v with type, value}
+    if type.toExpr.hasFVar || value.toExpr.hasFVar then
+      throw $ .other "fvar in translated term"
     return .thmInfo v
   else
     let v := {v with type, isUnsafe := false}
+    if type.toExpr.hasFVar then
+      throw $ .other "fvar in translated term"
     return .axiomInfo v
 
 def patchOpaque (env : Environment) (v : OpaqueVal) :
@@ -100,6 +110,8 @@ def patchOpaque (env : Environment) (v : OpaqueVal) :
     let (true, ret) ← smartCast valueType type value' v.levelParams |
       throw <| .declTypeMismatch env (.opaqueDecl v) valueType
     pure (type, ret)
+  if type.toExpr.hasFVar || value.toExpr.hasFVar then
+    throw $ .other "fvar in translated term"
   let v := {v with type, value}
   return .opaqueInfo v
 
@@ -131,6 +143,8 @@ def patchMutual (env : Environment) (vs : List DefinitionVal) :
       let value' := value'?.getD v'.value.toPExpr
       let (true, value) ← smartCast valueType type value' vs[0]!.levelParams |
         throw <| .declTypeMismatch env' (.mutualDefnDecl vs') valueType
+      if type.toExpr.hasFVar || value.toExpr.hasFVar then
+        throw $ .other "fvar in translated term"
       newvs' := newvs'.append #[{v' with value}]
     return newvs'.map .defnInfo |>.toList
 
