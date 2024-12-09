@@ -1,6 +1,8 @@
 import patch.PatchTheoremsAx
 import Lean4Less.Commands
 
+theorem my_eq_of_heq {α : Sort u} {a a' : α} (h : HEq a a') : Eq a a' := eq_of_heq h
+
 universe u v
 
 axiom P : Prop

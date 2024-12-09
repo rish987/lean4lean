@@ -184,7 +184,7 @@ Runs `x` with a limit on the recursion depth.
 def RecM.run (x : RecM α) : M α := x (Methods.withFuel 1000)
 
 def dbgFIds : Array Name := #[]
--- def dbgFIds := #["_kernel_fresh.63".toName]
+-- def dbgFIds := #["_kernel_fresh.86".toName]
 
 /--
 With the level context `lps`, infers the type of expression `e` and checks that

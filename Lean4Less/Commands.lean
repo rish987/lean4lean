@@ -100,6 +100,7 @@ def transL4L (n : Array Name) (env? : Option Environment := none) : Lean.Elab.Co
 def checkL4L (ns : Array Name) (env : Environment) (printOutput := true) (printProgress := false) (interactive := false) : IO Environment := do
   let env ← transL4L' ns env (pp := printOutput) (printProgress := printProgress) (interactive := interactive)
   let nSet := ns.foldl (init := default) fun acc n => acc.insert n
+  -- unsafe replayFromEnv Lean4Lean.addDecl env.mainModule env.toMap₁ (op := "typecheck") (opts := {proofIrrelevance := false, kLikeReduction := false})
 
   let (_, checkEnv) ← checkConstants (printErr := true) env nSet Lean4Lean.addDecl (initConsts := patchConsts) (opts := {proofIrrelevance := false, kLikeReduction := false}) (interactive := interactive)
 
