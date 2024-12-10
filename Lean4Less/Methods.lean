@@ -122,7 +122,7 @@ match fuel with
     let mut traceId := none
     -- traceId := Option.some 31447
     -- traceId := Option.some 26425
-    -- traceId := Option.some 44
+    -- traceId := Option.some 2592
     try
       let ret ← withCallId s.numCalls traceId do
         if tr then
@@ -183,8 +183,8 @@ Runs `x` with a limit on the recursion depth.
 -/
 def RecM.run (x : RecM α) : M α := x (Methods.withFuel 1000)
 
--- def dbgFIds : Array Name := #[]
-def dbgFIds := #["_kernel_fresh.612".toName]
+def dbgFIds : Array Name := #[]
+-- def dbgFIds := #["_kernel_fresh.182".toName]
 
 /--
 With the level context `lps`, infers the type of expression `e` and checks that

@@ -80,7 +80,8 @@ b : PExpr
 u : Level
 aEqb : LocalDecl
 bEqa : LocalDecl
-deriving Inhabited, Hashable, BEq
+usedLets : FVarIdSet := FVarIdSet.insert default aEqb
+deriving Inhabited
 
 structure LVarDataE where
 A : PExpr
@@ -403,8 +404,8 @@ with
   | .trans d
   | .prfIrrel d
   | .rev d
+  | .fvar d
   | .lvar d => d.usedLets
-  | .fvar _ => default
   | .refl _ => default
   | .sry _  => default
 -- with
@@ -1104,7 +1105,7 @@ def PIData.toExpr (e : PIData EExpr) : EM Expr := match e with
       pure $ Lean.mkAppN (.const `L4L.prfIrrelHEq []) #[P, Q, (← hPQ.1.toExpr'), p, q]
 
 def FVarDataE.toExpr : FVarDataE → EM Expr
-| {aEqb, bEqa, u, A, B, a, b} => do
+| {aEqb, bEqa, u, A, B, a, b, ..} => do
   if (← rev) then
     if (← read).reversedFvars.contains aEqb then
       pure bEqa.toExpr

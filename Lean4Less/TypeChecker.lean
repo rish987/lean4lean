@@ -539,6 +539,7 @@ def checkIsDefEqCache (t s : PExpr) (m : RecB) : RecB := do
   let newp? ←
     if result then
       if let some p := p? then
+        -- let pe := p.toExpr
         let (u, A) ← getTypeLevel t
         let B ← inferTypePure 0 s
         let type := mkAppN (.const `HEq [u]) #[A, t, B, s]
@@ -569,6 +570,10 @@ def checkIsDefEqCache (t s : PExpr) (m : RecB) : RecB := do
               break
           if let some v := v? then
             let a := p.usedLets.contains v
+            -- if pe.containsFVar' v then
+            --   if not a then
+            --     dbg_trace s!"DBG[50]: TypeChecker.lean:561 {v.fvarId.name}, {p.usedLets.toList.map (·.name)}, {type.containsFVar' v}"
+
             if a then
               lastVar? := .some (v, i)
               break
@@ -1036,23 +1041,10 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
           else
             let ret := (← getLCtx).mkLambda lamVars b
 
-            if ← shouldTTrace then
-              for v in lamVars do
-                let some d := (← getLCtx).find? v.fvarId! | unreachable!
-                match d with
-                | .cdecl (fvarId := id) (type := t) .. => dbg_trace s!"DBG[17]: TypeChecker.lean:1114 {id.name}, {t.containsFVar' (.mk "_kernel_fresh.37".toName)}"
-                | .ldecl (fvarId := id) (type := t) (value := v) .. => dbg_trace s!"DBG[17]: TypeChecker.lean:1114 {id.name}, {v.containsFVar' (.mk "_kernel_fresh.37".toName)} {t.containsFVar' (.mk "_kernel_fresh.37".toName)}"
             pure ret
     | _, _, _, _, _ =>
       let cast ← mkCast' `L4L.castHEq tl tr p e (prfVars ++ letVars) (prfVals ++ letVals)
       let ret := (← getLCtx).mkLambda lamVars cast
-      if ← shouldTTrace then
-        dbg_trace s!"DBG[A]: TypeChecker.lean:971: a.toExpr={ret.containsFVar' (.mk "_kernel_fresh.31".toName)}"
-        for v in lamVars do
-          let some d := (← getLCtx).find? v.fvarId! | unreachable!
-          match d with
-          | .cdecl (fvarId := id) (type := t) .. => dbg_trace s!"DBG[17]: TypeChecker.lean:1114 {id.name}, {t.containsFVar' (.mk "_kernel_fresh.31".toName)}"
-          | .ldecl (fvarId := id) (type := t) (value := v) .. => dbg_trace s!"DBG[17]: TypeChecker.lean:1114 {id.name}, {v.containsFVar' (.mk "_kernel_fresh.31".toName)} {t.containsFVar' (.mk "_kernel_fresh.31".toName)}"
       pure ret
   termination_by remLams -- TODO why doesn't structural recursion on `p` work here?
 
