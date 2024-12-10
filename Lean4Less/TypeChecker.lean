@@ -542,24 +542,41 @@ def checkIsDefEqCache (t s : PExpr) (m : RecB) : RecB := do
         let (u, A) ← getTypeLevel t
         let B ← inferTypePure 0 s
         let type := mkAppN (.const `HEq [u]) #[A, t, B, s]
-        let decl := .mk 0 (.mk (← mkIdNew 500)) default type fun ctx => p.toExpr'.run' ctx
+        -- let typeVars := type.collectFVars
+        let decl := .mk 0 (.mk (← mkIdNew 500)) default type p.usedLets fun ctx => p.toExpr'.run' ctx
 
         -- if decl.fvarId.name == "_kernel_fresh.460".toName then
         --   dbg_trace s!"DBG[4]: TypeChecker.lean:543 {(← getLCtx).any fun x => x.fvarId.name == "_kernel_fresh.445".toName}"
         --   dbg_trace s!"DBG[5]: TypeChecker.lean:543 {p.toExpr.containsFVar' (.mk "_kernel_fresh.445".toName)}"
 
-        let pe := p.toExpr
+        -- let pe := p.toExpr
         let mut lastVar? : Option (FVarId × Nat) := none
         let mut i := 0
-        for v? in (← getLCtx).decls do
+        let mut fvars := #[]
+        for v? in (← getLCtx).decls.toList do
           -- dbg_trace s!"DBG[1]: TypeChecker.lean:530 {(← get).nid}"
           if let some v := v? then
-            -- if decl.fvarId.name == "_kernel_fresh.460".toName then
-            --   dbg_trace s!"Y: TypeChecker.lean:541 {v.fvarId.name} {(← getLCtx).decls.size}, {(← getLCtx).size}, {(← get).fvarRegistry.get? v.fvarId.name}"
-            if pe.containsFVar' v || type.containsFVar' v then
+            fvars := fvars.push v.toExpr
+          else
+            throw $ .other "encountered null context variable"
+        let bvarIdx := type.abstract fvars.reverse |>.looseBVarRange
+        if bvarIdx > 0 then
+          lastVar? := .some ((← getLCtx).decls.get! (bvarIdx - 1) |>.get!.fvarId, bvarIdx - 1)
+        i := (← getLCtx).decls.size - 1
+        for v? in (← getLCtx).decls.toList.reverse do
+          if let some (_, lastIdx) := lastVar? then
+            if lastIdx >= i then
+              break
+          if let some v := v? then
+            let a := p.usedLets.contains v
+            if a then
               lastVar? := .some (v, i)
-          -- dbg_trace s!"DBG[2]: TypeChecker.lean:535 (after lastVar? := .some (v, i))"
-          i := i + 1
+              break
+          i := i - 1
+        -- if let some (_, origi) := lastVar'? then
+        --   if let some (_, newi) := lastVar? then
+        --     if newi != origi then
+        --       dbg_trace s!"DBG[72]: TypeChecker.lean:592 {(newi, origi)}"
         -- if (← readThe Context).dbgFIds.size > 0 && decl.fvarId.name == (← readThe Context).dbgFIds[0]! then
         --   dbg_trace s!"DBG[2]: TypeChecker.lean:544 {lastVar?.map (·.1.name)}"
 
@@ -975,7 +992,7 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
         let (UaEqVx? : Option EExpr) := 
           match extra with
           | .ABUV {UaEqVx, ..}
-          | .UV {UaEqVx, ..} => Option.some UaEqVx
+          | .UV {UaEqVx, ..} => Option.some UaEqVx.1
           | _ => none
 
         let v := .fvar var

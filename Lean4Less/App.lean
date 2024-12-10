@@ -359,7 +359,7 @@ def deconstructAppHEq : AppData EExpr
     let some (tas, sas, taEqsas?, tVars, sVars, f', g') ← deconstructAppHEq' 4 f g fEqg (mkForall #[U.2] U.1) | return none
     let some (tas', sas', taEqsas?', tVars', sVars', a', b') ← deconstructAppHEq' 5 a b aEqb none | return none
     pure (tas ++ tas', sas ++ sas', taEqsas? ++ taEqsas?', tVars ++ tVars', sVars ++ sVars', f'.app a', g'.app b')
-  | .none {g, fEqg, b, aEqb}        => 
+  | .none {g, fEqg, b, aEqb, ..}        => 
     let some (tas, sas, taEqsas?, tVars, sVars, f', g') ← deconstructAppHEq' 6 f g fEqg (mkForall #[U.2] U.1) | return none
     let some (tas', sas', taEqsas?', tVars', sVars', a', b') ← deconstructAppHEq' 7 a b aEqb A | return none
     pure (tas ++ tas', sas ++ sas', taEqsas? ++ taEqsas?', tVars ++ tVars', sVars ++ sVars', f'.app a', g'.app b')
