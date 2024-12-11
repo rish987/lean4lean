@@ -26,10 +26,11 @@ structure TypeChecker.State where
   fvarTypeToReusedNamePrefix : Std.HashMap Expr Name := {}
   inferTypeI : InferCacheP := {}
   inferTypeC : InferCache := {}
-  whnfCoreCache : Std.HashMap PExpr (PExpr × Option EExpr) := {}
-  whnfCache : Std.HashMap (PExpr × Bool) (PExpr × Option EExpr) := {}
-  isDefEqCache : Std.HashMap (PExpr × PExpr) EExpr := Std.HashMap.empty (capacity := 1000)
-  isDefEqAppCache : Std.HashMap (Array PExpr × Array PExpr) (Option (EExpr × Array (Option (PExpr × PExpr × EExpr)))) := {}
+  whnfCoreCache : Std.HashMap PExpr (PExpr × Option (EExpr × LocalDeclE × Option FVarId)) := {}
+  -- whnfCache : Std.HashMap (PExpr × Bool) (PExpr × Option (EExpr × LocalDeclE × Option FVarId)) := {}
+  whnfCache : Std.HashMap (PExpr × Bool) (PExpr × Option (EExpr × LocalDeclE × Option FVarId)) := {}
+  isDefEqCache : Std.HashMap (PExpr × PExpr) (EExpr × LocalDeclE × Option FVarId) := Std.HashMap.empty (capacity := 1000)
+  isDefEqAppCache : Std.HashMap (Array PExpr × Array PExpr) (Option (EExpr × LocalDeclE × Option FVarId × Array (Option (PExpr × PExpr × EExpr)))) := {}
   fvarRegistry : Std.HashMap Name Nat := {} -- for debugging purposes
   initLets : Array LocalDeclE := {}
   fvarsToLets : Std.HashMap FVarId (Array LocalDeclE) := {}
@@ -197,18 +198,18 @@ def mkIdNew (n : Nat) : RecM Name := do
   pure fid
 
 def mkId' (n : Nat) (lctx : LocalContext) (dom : Expr) : RecM Name := do
-  -- let id ← if let some np := (← get).fvarTypeToReusedNamePrefix[dom]? then
-  --   let mut count := 0
-  --   while lctx.findFVar? (Expr.fvar $ .mk (Name.mkNum np count)) |>.isSome do
-  --     count := count + 1
-  --   pure $ Name.mkNum np count
-  -- else
-  --   let np ← mkIdNew n
-  --   modify fun st => { st with fvarTypeToReusedNamePrefix := st.fvarTypeToReusedNamePrefix.insert dom np }
-  --   pure $ Name.mkNum np 0
-  -- modify fun st => { st with fvarRegistry := st.fvarRegistry.insert id n }
-  -- pure id
-  mkIdNew n -- FIXME FIXME need to handle let variables
+  let id ← if let some np := (← get).fvarTypeToReusedNamePrefix[dom]? then
+    let mut count := 0
+    while lctx.findFVar? (Expr.fvar $ .mk (Name.mkNum np count)) |>.isSome do
+      count := count + 1
+    pure $ Name.mkNum np count
+  else
+    let np ← mkIdNew n
+    modify fun st => { st with fvarTypeToReusedNamePrefix := st.fvarTypeToReusedNamePrefix.insert dom np }
+    pure $ Name.mkNum np 0
+  modify fun st => { st with fvarRegistry := st.fvarRegistry.insert id n }
+  pure id
+  -- mkIdNew n -- FIXME FIXME need to handle let variables
 
 def mkId (n : Nat) (dom : Expr) : RecM Name := do
   mkId' n (← getLCtx) dom
@@ -526,78 +527,94 @@ def inferTypePure' (e : PExpr) : RecM PExpr := do -- TODO make more efficient/us
   let eT ← runLeanMinus $ Lean.TypeChecker.inferType e.toExpr
   pure eT.toPExpr
 
+def addLVarToCtx (decl : LocalDeclE) (lastVar? : Option FVarId) (idx? : Option Nat := none) : RecM Unit := do
+  if let some lastVar := lastVar? then
+    let mut fvarsToLets := (← get).fvarsToLets
+    let lets := fvarsToLets.get? lastVar |>.getD #[] |>.push decl
+    fvarsToLets := fvarsToLets.insert lastVar lets
+    let s ← get
+    let idx ← idx?.getDM do
+        let mut i := (← getLCtx).decls.size - 1
+        for v? in (← getLCtx).decls.toList.reverse do
+          if let some v := v? then
+            if v.fvarId == lastVar then
+              return i
+          i := i - 1
+        throw $ .other "could not find variable dependency in context"
+    let newDecls := s.lctx.decls.toArray.insertAt! (idx + 1) decl -- FIXME too inefficient to go back and forth between Array and PersistentArray?
+    modify fun st => { st with fvarsToLets := fvarsToLets, lctx := {st.lctx with decls := newDecls.toPArray', fvarIdToDecl := st.lctx.fvarIdToDecl.insert decl.fvarId decl}}
+  else
+    let s ← get
+    let newDecls := s.lctx.decls.toArray.insertAt! 0 decl
+    modify fun st => { st with initLets := st.initLets.push decl, lctx := {st.lctx with decls := newDecls.toPArray', fvarIdToDecl := st.lctx.fvarIdToDecl.insert decl.fvarId decl}}
+
+def mkLet (t s : PExpr) (p : EExpr) : RecM (EExpr × LocalDeclE × Option (FVarId × Nat)) := do
+  -- let pe := p.toExpr
+  let (u, A) ← getTypeLevel t
+  let B ← inferTypePure 0 s
+  let type := mkAppN (.const `HEq [u]) #[A, t, B, s]
+  -- let typeVars := type.collectFVars
+  let decl := .mk 0 (.mk (← mkIdNew 500)) default type p.usedLets fun ctx => p.toExpr'.run' ctx
+
+  -- if decl.fvarId.name == "_kernel_fresh.460".toName then
+  --   dbg_trace s!"DBG[4]: TypeChecker.lean:543 {(← getLCtx).any fun x => x.fvarId.name == "_kernel_fresh.445".toName}"
+  --   dbg_trace s!"DBG[5]: TypeChecker.lean:543 {p.toExpr.containsFVar' (.mk "_kernel_fresh.445".toName)}"
+
+  -- let pe := p.toExpr
+  let mut lastVar? : Option (FVarId × Nat) := none
+  let mut i := 0
+  let mut fvars := #[]
+  for v? in (← getLCtx).decls.toList do
+    -- dbg_trace s!"DBG[1]: TypeChecker.lean:530 {(← get).nid}"
+    if let some v := v? then
+      fvars := fvars.push v.toExpr
+    else
+      throw $ .other "encountered null context variable"
+  let bvarIdx := type.abstract fvars.reverse |>.looseBVarRange
+  if bvarIdx > 0 then
+    lastVar? := .some ((← getLCtx).decls.get! (bvarIdx - 1) |>.get!.fvarId, bvarIdx - 1)
+  i := (← getLCtx).decls.size - 1
+  for v? in (← getLCtx).decls.toList.reverse do
+    if let some (_, lastIdx) := lastVar? then
+      if lastIdx >= i then
+        break
+    if let some v := v? then
+      let a := p.usedLets.contains v
+      -- if pe.containsFVar' v then
+      --   if not a then
+      --     dbg_trace s!"DBG[50]: TypeChecker.lean:561 {v.fvarId.name}, {p.usedLets.toList.map (·.name)}, {type.containsFVar' v}"
+
+      if a then
+        lastVar? := .some (v, i)
+        break
+    i := i - 1
+  -- if let some (_, origi) := lastVar'? then
+  --   if let some (_, newi) := lastVar? then
+  --     if newi != origi then
+  --       dbg_trace s!"DBG[72]: TypeChecker.lean:592 {(newi, origi)}"
+  -- if (← readThe Context).dbgFIds.size > 0 && decl.fvarId.name == (← readThe Context).dbgFIds[0]! then
+  --   dbg_trace s!"DBG[2]: TypeChecker.lean:544 {lastVar?.map (·.1.name)}"
+
+  addLVarToCtx decl (lastVar?.map (·.1)) (lastVar?.map (·.2))
+  let lv := .lvar {A, B, a := t, b := s, u, v := decl.fvarId}
+  pure (lv, decl, lastVar?)
+
 def checkIsDefEqCache (t s : PExpr) (m : RecB) : RecB := do
-  if ((← get).isDefEqCache.get? (t, s)).isSome || ((← get).isDefEqCache.get? (s, t)).isSome then
-    -- return (true, .some p)
-    let (u, A) ← getTypeLevel t
-    return (true, .some $ .sry {u, A, B := (← inferTypePure 0 s), a := t, b := s}) -- TODO use let variables
-  -- else if let some p := (← get).isDefEqCache.get? (s, t) then
-  --   let (lvl, sType) ← getTypeLevel s
-  --   let tType ← inferTypePure 99 t
-  --   return (true, .some $ p.reverse s t sType tType lvl)
+  if let some (lv, decl, lastVar?) := (← get).isDefEqCache.get? (t, s) then -- TODO let var abstraction optimization
+    if not ((← getLCtx).containsFVar lv) then
+      addLVarToCtx decl lastVar?
+    return (true, .some $ lv)
+  else if let some (lv, decl, lastVar?) := (← get).isDefEqCache.get? (s, t) then
+    if not ((← getLCtx).containsFVar lv) then
+      addLVarToCtx decl lastVar? -- TODO add reversed let variable to context instead?
+    return (true, .some $ .rev lv)
   let (result, p?) ← m
   let newp? ←
     if result then
       if let some p := p? then
-        -- let pe := p.toExpr
-        let (u, A) ← getTypeLevel t
-        let B ← inferTypePure 0 s
-        let type := mkAppN (.const `HEq [u]) #[A, t, B, s]
-        -- let typeVars := type.collectFVars
-        let decl := .mk 0 (.mk (← mkIdNew 500)) default type p.usedLets fun ctx => p.toExpr'.run' ctx
-
-        -- if decl.fvarId.name == "_kernel_fresh.460".toName then
-        --   dbg_trace s!"DBG[4]: TypeChecker.lean:543 {(← getLCtx).any fun x => x.fvarId.name == "_kernel_fresh.445".toName}"
-        --   dbg_trace s!"DBG[5]: TypeChecker.lean:543 {p.toExpr.containsFVar' (.mk "_kernel_fresh.445".toName)}"
-
-        -- let pe := p.toExpr
-        let mut lastVar? : Option (FVarId × Nat) := none
-        let mut i := 0
-        let mut fvars := #[]
-        for v? in (← getLCtx).decls.toList do
-          -- dbg_trace s!"DBG[1]: TypeChecker.lean:530 {(← get).nid}"
-          if let some v := v? then
-            fvars := fvars.push v.toExpr
-          else
-            throw $ .other "encountered null context variable"
-        let bvarIdx := type.abstract fvars.reverse |>.looseBVarRange
-        if bvarIdx > 0 then
-          lastVar? := .some ((← getLCtx).decls.get! (bvarIdx - 1) |>.get!.fvarId, bvarIdx - 1)
-        i := (← getLCtx).decls.size - 1
-        for v? in (← getLCtx).decls.toList.reverse do
-          if let some (_, lastIdx) := lastVar? then
-            if lastIdx >= i then
-              break
-          if let some v := v? then
-            let a := p.usedLets.contains v
-            -- if pe.containsFVar' v then
-            --   if not a then
-            --     dbg_trace s!"DBG[50]: TypeChecker.lean:561 {v.fvarId.name}, {p.usedLets.toList.map (·.name)}, {type.containsFVar' v}"
-
-            if a then
-              lastVar? := .some (v, i)
-              break
-          i := i - 1
-        -- if let some (_, origi) := lastVar'? then
-        --   if let some (_, newi) := lastVar? then
-        --     if newi != origi then
-        --       dbg_trace s!"DBG[72]: TypeChecker.lean:592 {(newi, origi)}"
-        -- if (← readThe Context).dbgFIds.size > 0 && decl.fvarId.name == (← readThe Context).dbgFIds[0]! then
-        --   dbg_trace s!"DBG[2]: TypeChecker.lean:544 {lastVar?.map (·.1.name)}"
-
-        if let some (lastVar, idx) := lastVar? then
-          let mut fvarsToLets := (← get).fvarsToLets
-          let lets := fvarsToLets.get? lastVar |>.getD #[] |>.push decl
-          fvarsToLets := fvarsToLets.insert lastVar lets
-          let s ← get
-          let newDecls := s.lctx.decls.toArray.insertAt! (idx + 1) decl -- FIXME too inefficient to go back and forth between Array and PersistentArray?
-          modify fun st => { st with fvarsToLets := fvarsToLets, lctx := {st.lctx with decls := newDecls.toPArray', fvarIdToDecl := st.lctx.fvarIdToDecl.insert decl.fvarId decl}}
-        else
-          let s ← get
-          let newDecls := s.lctx.decls.toArray.insertAt! 0 decl -- FIXME too inefficient to go back and forth between Array and PersistentArray?
-          modify fun st => { st with initLets := st.initLets.push decl, lctx := {st.lctx with decls := newDecls.toPArray', fvarIdToDecl := st.lctx.fvarIdToDecl.insert decl.fvarId decl}}
-        modify fun st => { st with isDefEqCache := st.isDefEqCache.insert (t, s) p}
-        pure $ .some $ .lvar {A, B, a := t, b := s, u, v := decl.fvarId}
+        let (lv, decl, lastVar?) ← mkLet t s p
+        modify fun st => { st with isDefEqCache := st.isDefEqCache.insert (t, s) (lv, decl, lastVar?.map (·.1))}
+        pure $ .some $ lv
       else
         modify fun st => { st with eqvManager := st.eqvManager.addEquiv t s }
         pure none
@@ -681,11 +698,11 @@ def isDefEqPure (n : Nat) (t s : PExpr) (fuel := 1000) : RecM Bool := do
       dbg_trace s!"isDefEqPure error: {n}, {t}, {s}"
       throw e
 
-def isValidApp (n : Nat) (t : Expr) : RecM Bool := do
+def isValidApp (_n : Nat) (t : Expr) : RecM Bool := do
   try
     _ ← runLeanMinusRecM $ Lean.TypeChecker.Inner.inferType 0 t (inferOnly := false)
     pure true
-  catch e =>
+  catch _e =>
     pure false
 
 def appPrfIrrelHEq (P Q : PExpr) (hPQ : EExpr) (p q : PExpr) : RecM EExpr := do
@@ -818,7 +835,7 @@ def meths : ExtMethods RecM := {
     isDefEqLean := isDefEqLean
     whnf  := whnf
     mkIdNew  := mkIdNew
-    mkId  := fun n d => mkIdNew n
+    mkId  := fun n _ => mkIdNew n
     mkId'  := mkId'
     whnfPure := whnfPure
     mkHRefl := mkHRefl
@@ -852,17 +869,28 @@ def methsA : ExtMethodsA RecM := {
 
 def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default)
   (tfEqsf? : Option (Option EExpr) := none) : RecM (Bool × Option (EExpr × Array (Option (PExpr × PExpr × EExpr)))) := do
+  let t := Lean.mkAppN tf (tArgs.map (·.toExpr)) |>.toPExpr
+  let s := Lean.mkAppN sf (sArgs.map (·.toExpr)) |>.toPExpr
   if let some p? := (← get).isDefEqAppCache.get? (#[tf] ++ tArgs, #[sf] ++ sArgs) then
-    let t := Lean.mkAppN tf (tArgs.map (·.toExpr))
-    let s := Lean.mkAppN sf (sArgs.map (·.toExpr))
-    let (u, A) ← getTypeLevel t.toPExpr
-    if let some p := p? then
-      return (true, .some $ (.sry {u, A, B := (← inferTypePure 0 s.toPExpr), a := t.toPExpr, b := s.toPExpr}, p.2)) -- TODO use let variables
+    if let some (lv, decl, lastVar?, p) := p? then
+      if not ((← getLCtx).containsFVar lv) then
+        addLVarToCtx decl lastVar?
+      return (true, .some $ (lv, p))
     else
-      return (true, none) -- TODO use let variables
+      return (true, none)
+  else if let some p? := (← get).isDefEqAppCache.get? (#[sf] ++ sArgs, #[tf] ++ tArgs) then
+    if let some (lv, decl, lastVar?, p) := p? then
+      if not ((← getLCtx).containsFVar lv) then
+        addLVarToCtx decl lastVar?
+      return (true, .some $ (.rev lv, p.map fun d? => d?.map fun (t, s, p) => (s, t, .rev p)))
+    else
+      return (true, none)
   let (isDefEq, p?) ← App.isDefEqApp'' methsA tf sf tArgs sArgs targsEqsargs? tfEqsf?
   if isDefEq then
-    modify fun st => { st with isDefEqAppCache := st.isDefEqAppCache.insert (#[tf] ++ tArgs, #[sf] ++ sArgs) p? }
+    let cacheData? ← p?.mapM fun (p, d) => do
+      let (lv, decl, lastVar?) ← mkLet t s p
+      pure (lv, decl, lastVar?.map (·.1), d)
+    modify fun st => { st with isDefEqAppCache := st.isDefEqAppCache.insert (#[tf] ++ tArgs, #[sf] ++ sArgs) cacheData? }
   pure (isDefEq, p?)
 
 def isDefEqApp' (t s : PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default)
@@ -886,8 +914,6 @@ def _isDefEqApp (t s : PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr) :=
   checkIsDefEqCache t s do
     let (isDefEq, data?) ← isDefEqApp' t s targsEqsargs? tfEqsf?
     let p? := data?.map (·.1)
-    if let some p := p? then
-      modify fun st => { st with isDefEqCache := st.isDefEqCache.insert (t, s) p }
     pure (isDefEq, p?)
 
 def isDefEqForallOpt' (t s : PExpr) : RecB := do
@@ -1785,10 +1811,10 @@ def reduceRecursor (e : PExpr) (cheapK : Bool) : RecM (Option (PExpr × Option E
   return none
 
 @[inherit_doc whnfCore]
-private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecEE := do
+private def _whnfCore' (_e : Expr) (cheapK := false) (cheapProj := false) : RecEE := do
   -- TODO whnfPure optimization
-  let e := e'.toPExpr
-  match e' with
+  let e := _e.toPExpr
+  match _e with
   | .bvar .. | .sort .. | .mvar .. | .forallE .. | .const .. | .lam .. | .lit .. => return (e, none)
   | .mdata _ e => 
     return ← _whnfCore' e cheapK cheapProj
@@ -1797,24 +1823,29 @@ private def _whnfCore' (e' : Expr) (cheapK := false) (cheapProj := false) : RecE
   if not (← readThe Context).noCache then
     if let some (e', eEqe'?) := (← get).whnfCoreCache.get? e then -- FIXME important to optimize this -- FIXME should this depend on cheapK?
       let eEqe'? ←
-        if eEqe'?.isSome then
-          let (u, A) ← getTypeLevel e
-          pure $ .some $ .sry {u, A, B := (← inferTypePure 0 e'), a := e, b := e'} -- TODO use let variables
+        if let some (lv, decl, lastVar?) := eEqe'? then
+          if not ((← getLCtx).containsFVar lv) then
+            addLVarToCtx decl lastVar?
+          pure $ .some lv
         else
           pure none
       return (e', eEqe'?)
   let rec save r := do
+    let (e', p?) := r
     if !cheapK && !cheapProj then
-      modify fun s => { s with whnfCoreCache := s.whnfCoreCache.insert e r }
-      if cheapK && r.2.isNone then
-        modify fun s => { s with whnfCoreCache := s.whnfCoreCache.insert e r }
+      let cacheData? ← p?.mapM fun p => do
+        let (lv, decl, lastVar?) ← mkLet e e' p
+        pure (lv, decl, lastVar?.map (·.1))
+      modify fun s => { s with whnfCoreCache := s.whnfCoreCache.insert e (e', cacheData?) }
+      -- if cheapK && r.2.isNone then
+      --   modify fun s => { s with whnfCoreCache := s.whnfCoreCache.insert e r }
     pure r
-  let ret ← match e' with
+  let ret ← match _e with
   | .bvar .. | .sort .. | .mvar .. | .forallE .. | .const .. | .lam .. | .lit ..
   | .mdata .. => throw $ .other "unreachable 9"
   | .fvar _ => return ← whnfFVar e cheapK cheapProj
   | .app .. => -- beta-reduce at the head as much as possible, apply any remaining `rargs` to the resulting expression, and re-run `whnfCore`
-    e'.withAppRev fun f0 rargs => do
+    _e.withAppRev fun f0 rargs => do
     let f0 := f0.toPExpr
     -- the head may still be a let variable/binding, projection, or mdata-wrapped expression
     let (f, pf0Eqf?) ← whnfCore 52 f0 cheapK cheapProj
@@ -1900,10 +1931,10 @@ def whnfCore' (e : PExpr) (cheapK := false) (cheapProj := false) : RecEE := do
   pure ret
 
 @[inherit_doc whnf]
-private def _whnf' (e' : Expr) (cheapK := false) : RecEE := do
-  let e := e'.toPExpr
+private def _whnf' (_e : Expr) (cheapK := false) : RecEE := do
+  let e := _e.toPExpr
   -- Do not cache easy cases
-  match e' with
+  match _e with
   | .bvar .. | .sort .. | .mvar .. | .forallE .. | .lit .. => return (e, none)
   | .mdata _ e => return ← _whnf' e (cheapK := cheapK)
   | .fvar id =>
@@ -1914,9 +1945,10 @@ private def _whnf' (e' : Expr) (cheapK := false) : RecEE := do
   if not (← readThe Context).noCache then
     if let some (e', eEqe'?) := (← get).whnfCache.get? (e, cheapK) then
       let eEqe'? ←
-        if eEqe'?.isSome then
-          let (u, A) ← getTypeLevel e
-          pure $ .some $ .sry {u, A, B := (← inferTypePure 0 e'), a := e, b := e'} -- TODO use let variables
+        if let some (lv, decl, lastVar?) := eEqe'? then
+          if not ((← getLCtx).containsFVar lv) then
+            addLVarToCtx decl lastVar?
+          pure $ .some lv
         else
           pure none
       return (e', eEqe'?)
@@ -1931,7 +1963,11 @@ private def _whnf' (e' : Expr) (cheapK := false) : RecEE := do
     let some leru := unfoldDefinition env ler | return (ler, eEqler?)
     loop leru eEqler? fuel
   let r ← loop e none 1000
-  modify fun s => { s with whnfCache := s.whnfCache.insert (e, cheapK) r }
+  let (e', p?) := r
+  let cacheData? ← p?.mapM fun p => do
+    let (lv, decl, lastVar?) ← mkLet e e' p
+    pure (lv, decl, lastVar?.map (·.1))
+  modify fun s => { s with whnfCache := s.whnfCache.insert (e, cheapK) (e', cacheData?) }
   return r
 
 @[inherit_doc whnf]
