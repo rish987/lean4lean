@@ -868,7 +868,7 @@ def methsA : ExtMethodsA RecM := {
   }
 
 def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default)
-  (tfEqsf? : Option (Option EExpr) := none) : RecM (Bool × Option (EExpr × Array (Option (PExpr × PExpr × EExpr)))) := do
+  (tfEqsf? : Option (Option EExpr) := none) (cache := true) : RecM (Bool × Option (EExpr × Array (Option (PExpr × PExpr × EExpr)))) := do
   let t := Lean.mkAppN tf (tArgs.map (·.toExpr)) |>.toPExpr
   let s := Lean.mkAppN sf (sArgs.map (·.toExpr)) |>.toPExpr
   if let some p? := (← get).isDefEqAppCache.get? (#[tf] ++ tArgs, #[sf] ++ sArgs) then
@@ -886,15 +886,30 @@ def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr) (targsEqsargs? : St
     else
       return (true, none)
   let (isDefEq, p?) ← App.isDefEqApp'' methsA tf sf tArgs sArgs targsEqsargs? tfEqsf?
-  if isDefEq then
+  if cache && isDefEq then
     let cacheData? ← p?.mapM fun (p, d) => do
       let (lv, decl, lastVar?) ← mkLet t s p
       pure (lv, decl, lastVar?.map (·.1), d)
     modify fun st => { st with isDefEqAppCache := st.isDefEqAppCache.insert (#[tf] ++ tArgs, #[sf] ++ sArgs) cacheData? }
   pure (isDefEq, p?)
 
+-- def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default)
+--   (tfEqsf? : Option (Option EExpr) := none) : RecM (Bool × Option (EExpr × Array (Option (PExpr × PExpr × EExpr)))) := do
+--   if let some p? := (← get).isDefEqAppCache.get? (#[tf] ++ tArgs, #[sf] ++ sArgs) then
+--     let t := Lean.mkAppN tf (tArgs.map (·.toExpr))
+--     let s := Lean.mkAppN sf (sArgs.map (·.toExpr))
+--     let (u, A) ← getTypeLevel t.toPExpr
+--     if let some p := p? then
+--       return (true, .some $ (.sry {u, A, B := (← inferTypePure 0 s.toPExpr), a := t.toPExpr, b := s.toPExpr}, p.2)) -- TODO use let variables
+--     else
+--       return (true, none) -- TODO use let variables
+--   let (isDefEq, p?) ← App.isDefEqApp'' methsA tf sf tArgs sArgs targsEqsargs? tfEqsf?
+--   if isDefEq then
+--     modify fun st => { st with isDefEqAppCache := st.isDefEqAppCache.insert (#[tf] ++ tArgs, #[sf] ++ sArgs) p? }
+--   pure (isDefEq, p?)
+
 def isDefEqApp' (t s : PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default)
-  (tfEqsf? : Option (Option EExpr) := none) : RecM (Bool × Option (EExpr × Array (Option (PExpr × PExpr × EExpr)))) := do
+  (tfEqsf? : Option (Option EExpr) := none) (cache := true) : RecM (Bool × Option (EExpr × Array (Option (PExpr × PExpr × EExpr)))) := do
   unless t.toExpr.isApp && s.toExpr.isApp do return (false, none)
   t.toExpr.withApp fun tf tArgs =>
   s.toExpr.withApp fun sf sArgs => 
@@ -902,7 +917,7 @@ def isDefEqApp' (t s : PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr) :=
     let sf := sf.toPExpr
     let tArgs := tArgs.map (·.toPExpr)
     let sArgs := sArgs.map (·.toPExpr)
-    isDefEqApp'' tf sf tArgs sArgs targsEqsargs? tfEqsf?
+    isDefEqApp'' tf sf tArgs sArgs targsEqsargs? tfEqsf? cache
 
 
 /--
@@ -912,7 +927,7 @@ their function heads and arguments being defeq.
 def _isDefEqApp (t s : PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default)
   (tfEqsf? : Option (Option EExpr) := none) : RecM (Bool × Option EExpr) := do
   checkIsDefEqCache t s do
-    let (isDefEq, data?) ← isDefEqApp' t s targsEqsargs? tfEqsf?
+    let (isDefEq, data?) ← isDefEqApp' (cache := false) t s targsEqsargs? tfEqsf?
     let p? := data?.map (·.1)
     pure (isDefEq, p?)
 
