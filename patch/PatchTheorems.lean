@@ -29,6 +29,8 @@ theorem forallEqUV' {A : Sort u} {U V : A → Sort v}
   subst this
   rfl
 
+-- axiom eq_of_heq {A : Sort u} {a b : A} (h : HEq a b) : @Eq A a b
+
 theorem eq_of_heq {A : Sort u} {a b : A} (h : HEq a b) : @Eq A a b := -- NOTE: this lemma has been manually translated to Lean-
   -- TODO clean this up
   let_fun this := fun (A B : Sort u) (a : A) (b : B) (hab : HEq a b) =>
@@ -308,6 +310,8 @@ theorem prfIrrelHEqPQ {P Q : Prop} (hPQ : HEq P Q) (p : P) (q : Q) : HEq p q := 
   exact prfIrrelHEq _ _
 
 def castHEq {α β : Sort u} (h : HEq α β) (a : α) : β := cast (eq_of_heq h) a
+
+-- axiom castOrigHEq {α β : Sort u} (h : HEq α β) (a : α) : HEq (castHEq h a) a
 
 def castOrigHEq {α β : Sort u} (h : HEq α β) (a : α) : HEq (castHEq h a) a := by
   have h := eq_of_heq h

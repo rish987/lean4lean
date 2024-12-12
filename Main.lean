@@ -88,7 +88,7 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
   match mod with
     | .anonymous => throw <| IO.userError s!"Could not resolve module: {mod}"
     | m =>
-      let (lemmEnv, success) ← Lean.Elab.runFrontend (include_str "patch" / "PatchTheorems.lean") default default `Patch
+      let (lemmEnv, success) ← Lean.Elab.runFrontend (include_str "patch" / "PatchTheorems.lean") default default `Patch -- TODO how to add PatchTheorems.lean as a lake dependency?
       if not success then
         throw $ IO.userError $ "elab of patching defs failed"
       if let some onlyConsts := onlyConsts? then

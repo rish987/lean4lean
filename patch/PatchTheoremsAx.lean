@@ -7,10 +7,10 @@ namespace L4L
 
 universe u v
 
-axiom prfIrrel {P : Prop} (p q : P) : HEq p q
-axiom prfIrrelHEq {P Q : Prop} (heq : HEq P Q) (p : P) (q : Q) : HEq p q
+axiom prfIrrel {P : Prop} (p q : P) : Eq p q
+axiom prfIrrelHEq {P : Prop} (p q : P) : HEq p q
+axiom prfIrrelHEqPQ {P Q : Prop} (heq : HEq P Q) (p : P) (q : Q) : HEq p q
 
-#print eq_of_heq
 axiom eq_of_heq {α : Sort u} {a a' : α} (h : HEq a a') : Eq a a'
 
 def castHEq (α β : Sort u) (h : HEq α β) (a : α) : β := cast (eq_of_heq h) a
@@ -152,7 +152,7 @@ axiom appHEqABUV' {A B : Sort u} {U : A → Sort v} {V : B → Sort v}
   (hfg : HEq f g) (hab : HEq a b)
   : HEq (f a) (g b)
 
-#print Exists.rec
+-- #print Exists.rec
 
 axiom appAbsHEqABUV' {A B : Sort u} {U : A → Sort v} {V : B → Sort v}
   (hAB : HEq A B) (hUV : (a : A) → (b : B) → HEq a b → HEq (U a) (V b))

@@ -1538,9 +1538,10 @@ theorem or definition), returning its `ConstantInfo` if so.
 -/
 def isDelta (env : Environment) (e : PExpr) : Option ConstantInfo := do
   if let .const c _ := e.toExpr.getAppFn then
-    if let some ci := env.find? c then
-      if ci.hasValue then
-        return ci
+    if c != `L4L.eq_of_heq then -- TODO have to block all of the patch theorems?
+      if let some ci := env.find? c then
+        if ci.hasValue then
+          return ci
   none
 
 /--
