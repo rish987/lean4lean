@@ -93,12 +93,12 @@ def patchTheorem (env : Environment) (v : TheoremVal) (allowAxiomReplace := fals
   if let .some value := value? then
     let v := {v with type, value}
     if type.toExpr.hasFVar || value.toExpr.hasFVar then
-      throw $ .other "fvar in translated term"
+      throw $ .other "fvar in translated theorem type/value"
     return .thmInfo v
   else
     let v := {v with type, isUnsafe := false}
     if type.toExpr.hasFVar then
-      throw $ .other "fvar in translated term"
+      throw $ .other "fvar in translated axiom type"
     return .axiomInfo v
 
 def patchOpaque (env : Environment) (v : OpaqueVal) :

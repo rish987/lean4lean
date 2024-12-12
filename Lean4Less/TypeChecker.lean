@@ -824,7 +824,7 @@ def isDefEqApp (n : Nat) (t s : PExpr) (targsEqsargs? : Std.HashMap Nat (Option 
 def getInitLets : RecM (Array LocalDeclE) := do
   let lets := (← get).initLets
   let mut ret := #[]
-  for l in lets do
+  for l in lets.reverse do
     ret := ret.push l ++ (← getLets 0 l.fvarId)
   pure ret
 

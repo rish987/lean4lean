@@ -251,8 +251,9 @@ def ensureForall (t : PExpr) (lps : List Name) (s := t) : MEE := withReader ({ �
 def maybeCast (p? : Option EExpr) (typLhs typRhs e : PExpr) (lps : List Name) : M PExpr := 
   withReader ({ · with lparams := lps }) (Inner.maybeCast 24 p? typLhs typRhs e).run
 
-def smartCast (typLhs typRhs e : PExpr) (lps : List Name) : M (Bool × PExpr) := 
-  withReader ({ · with lparams := lps }) (Inner.smartCast 25 typLhs typRhs e).run
+def smartCast (typLhs typRhs e : PExpr) (lps : List Name) : M (Bool × PExpr) := do
+  let ret ← withReader ({ · with lparams := lps }) (Inner.smartCast 25 typLhs typRhs e).run
+  pure ret
 
 -- def test' : MetaM String := do
 --   dbg_trace s!"test"
