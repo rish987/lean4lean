@@ -180,10 +180,10 @@ def mkAppEqProof (T S : PExpr) (TEqS? : Option EExpr) (as bs : Array PExpr) (asE
         let bVars := bVars.push bVar
         let Uas := Uas.push Ua
         let Vbs := Vbs.push Vb
-        -- let (defEq, UaEqVb?) ← meth.isDefEq 202 Ua Vb
+        let (true, UaEqVb?) ← meth.isDefEq 202 Ua Vb | throw $ .other "hUV error in isDefEqApp"
         -- let dep := Ua.containsFVar' aVar || Vb.containsFVar' bVar
         -- let UaEqVb? := if d?.isSome && dep then .some $ .sry {u := v.succ, A := (Expr.sort v).toPExpr, B := (Expr.sort v).toPExpr, a := Ua, b := Vb} else none
-        let UaEqVb? := .some $ .sry {u := v.succ, A := (Expr.sort v).toPExpr, B := (Expr.sort v).toPExpr, a := Ua, b := Vb}
+        -- let UaEqVb? := .some $ .sry {u := v.succ, A := (Expr.sort v).toPExpr, B := (Expr.sort v).toPExpr, a := Ua, b := Vb}
         -- assert! defEq
         let UasEqVbs? := UasEqVbs?.push UaEqVb?
         if _h : idx < as.size - 1 then
