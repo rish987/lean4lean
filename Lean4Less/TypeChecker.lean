@@ -592,8 +592,8 @@ def mkLet (t s : PExpr) (p : EExpr) : RecM (EExpr × LocalDeclE × Option (FVarI
   --   if let some (_, newi) := lastVar? then
   --     if newi != origi then
   --       dbg_trace s!"DBG[72]: TypeChecker.lean:592 {(newi, origi)}"
-  -- if (← readThe Context).dbgFIds.size > 0 && decl.fvarId.name == (← readThe Context).dbgFIds[0]! then
-  --   dbg_trace s!"DBG[2]: TypeChecker.lean:544 {lastVar?.map (·.1.name)}"
+  if (← readThe Context).dbgFIds.size > 0 && decl.fvarId.name == (← readThe Context).dbgFIds[0]! then
+    dbg_trace s!"DBG[2]: TypeChecker.lean:544 {lastVar?.map (·.1.name)}"
 
   addLVarToCtx decl (lastVar?.map (·.1)) (lastVar?.map (·.2))
   let lv := .lvar {A, B, a := t, b := s, u, v := decl.fvarId}
@@ -1119,10 +1119,16 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
   let mut ret := (← tlEqtr?.2.mapM (fun (p : EExpr) => do
     let nLams := lamCount e
     pure (← loop nLams e.toExpr tl.toExpr tr.toExpr #[] #[] #[] #[] #[] p).toPExpr)).getD e
-  if not (← readThe Context).underBinder then
-    let initLets ← getInitLets
-    ret := (← getLCtx).mkLambda (initLets.map (Expr.fvar ·.fvarId)) ret |>.toPExpr
   pure $ (tlEqtr?, ret)
+
+def insertInitLets (e : PExpr) : RecM PExpr := do
+  let initLets ← getInitLets
+  -- let n := (.mk "_kernel_fresh.38".toName)
+  -- for v in initLets do
+  --   match v with
+  --   | .mk (fvarId := id) (type := t) (value := v) .. => dbg_trace s!"Y: TypeChecker.lean:1114 {id.name}, {(v {}).containsFVar' n} {t.containsFVar' n}"
+  let ret := (← getLCtx).mkLambda (initLets.map (Expr.fvar ·.fvarId)) e |>.toPExpr
+  pure ret
 
 def smartCast (n : Nat) (tl tr e : PExpr) (p? : Option EExpr := none) : RecM (Bool × PExpr) := do
   let ret ← try

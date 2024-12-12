@@ -184,7 +184,7 @@ Runs `x` with a limit on the recursion depth.
 def RecM.run (x : RecM α) : M α := x (Methods.withFuel 1000)
 
 def dbgFIds : Array Name := #[]
--- def dbgFIds := #["_kernel_fresh.182".toName]
+-- def dbgFIds := #["_kernel_fresh.6".toName]
 
 /--
 With the level context `lps`, infers the type of expression `e` and checks that
@@ -223,6 +223,10 @@ first time, use `check`.
 -/
 def inferType (e : PExpr) (lps : List Name) : M PExpr := do
   let ret ← withReader ({ · with lparams := lps }) $ (Inner.inferTypePure 85 e).run
+  pure ret
+
+def insertInitLets (e : PExpr) : M PExpr := do
+  let ret ← withReader ({ · with }) $ (Inner.insertInitLets e).run
   pure ret
 
 @[inherit_doc isDefEqCore]

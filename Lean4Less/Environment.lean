@@ -19,7 +19,7 @@ def checkConstantVal (env : Environment) (v : ConstantVal) (allowPrimitive := fa
   let type' := type'?.getD v.type.toPExpr
   let (sort, typeTypeEqSort?) ← ensureSort typeType v.levelParams type'
   let type'' ← maybeCast typeTypeEqSort? typeType sort type' v.levelParams
-  pure type''
+  insertInitLets type''
 
 def patchAxiom (env : Environment) (v : AxiomVal) :
     Except KernelException ConstantInfo := do
@@ -46,14 +46,17 @@ def patchDefinition (env : Environment) (v : DefinitionVal) (allowAxiomReplace :
           return .axiomInfo {v with type, isUnsafe := false}
         else
           throw <| .declTypeMismatch env' (.defnDecl v) valueType
+      let value ← insertInitLets value
       if type.toExpr.hasFVar || value.toExpr.hasFVar then
         throw $ .other "fvar in translated term"
       let v := {v with type, value}
       return .defnInfo v
   else
+    let type ← M.run env v.name (safety := .safe) (lctx := {}) do
+      checkConstantVal env v.toConstantVal (← checkPrimitiveDef env v)
+
     M.run env v.name (safety := .safe) (lctx := {}) do
       -- dbg_trace s!"DBG[25]: Environment.lean:49: v.name={v.name}"
-      let type ← checkConstantVal env v.toConstantVal (← checkPrimitiveDef env v)
       checkNoMVarNoFVar env v.name v.value
       -- dbg_trace s!"DBG[34]: Environment.lean:52 (after checkNoMVarNoFVar env v.name v.value)"
       let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
@@ -69,6 +72,7 @@ def patchDefinition (env : Environment) (v : DefinitionVal) (allowAxiomReplace :
           throw <| .declTypeMismatch env (.defnDecl v) valueType
       -- dbg_trace s!"DBG[1]: Methods.lean:202: patch={(Lean.collectFVars default value.toExpr).fvarIds.map fun v => v.name}"
       -- dbg_trace s!"DBG[15]: Environment.lean:65 (after let value ← smartCast valueType type v…)"
+      let value ← insertInitLets value
       let v := {v with type, value}
       if type.toExpr.hasFVar || value.toExpr.hasFVar then
         throw $ .other "fvar in translated term"
@@ -78,17 +82,20 @@ def patchDefinition (env : Environment) (v : DefinitionVal) (allowAxiomReplace :
 def patchTheorem (env : Environment) (v : TheoremVal) (allowAxiomReplace := false) :
     Except KernelException ConstantInfo := do
   -- TODO(Leo): we must add support for handling tasks here
-  let (type, value?) ← M.run env v.name (safety := .safe) (lctx := {}) do
-    let type ← checkConstantVal env v.toConstantVal
+  let type ← M.run env v.name (safety := .safe) (lctx := {}) do
+    checkConstantVal env v.toConstantVal
+
+  let (value?) ← M.run env v.name (safety := .safe) (lctx := {}) do
     checkNoMVarNoFVar env v.name v.value
     let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
     let value' := value'?.getD v.value.toPExpr
     let (true, ret) ← smartCast valueType type value' v.levelParams |
       if allowAxiomReplace then
-        pure (type, none)
+        pure none
       else
         throw <| .declTypeMismatch env (.thmDecl v) valueType
-    pure (type, .some ret)
+    let ret ← insertInitLets ret
+    pure (.some ret)
 
   if let .some value := value? then
     let v := {v with type, value}
@@ -103,13 +110,15 @@ def patchTheorem (env : Environment) (v : TheoremVal) (allowAxiomReplace := fals
 
 def patchOpaque (env : Environment) (v : OpaqueVal) :
     Except KernelException ConstantInfo := do
-  let (type, value) ← M.run env v.name (safety := .safe) (lctx := {}) do
-    let type ← checkConstantVal env v.toConstantVal
+  let type ← M.run env v.name (safety := .safe) (lctx := {}) do
+    checkConstantVal env v.toConstantVal
+  let value ← M.run env v.name (safety := .safe) (lctx := {}) do
     let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
     let value' := value'?.getD v.value.toPExpr
     let (true, ret) ← smartCast valueType type value' v.levelParams |
       throw <| .declTypeMismatch env (.opaqueDecl v) valueType
-    pure (type, ret)
+    let ret ← insertInitLets ret
+    pure ret
   if type.toExpr.hasFVar || value.toExpr.hasFVar then
     throw $ .other "fvar in translated term"
   let v := {v with type, value}
@@ -135,18 +144,20 @@ def patchMutual (env : Environment) (vs : List DefinitionVal) :
     let v' := {v with type}
     env' := add env' (.defnInfo v')
     vs' := vs'.append [v']
-  M.run env' `mutual (safety := v₀.safety) (lctx := {}) do
-    let mut newvs' := #[]
-    for (v', type) in vs'.zip types do
+  let mut newvs' := #[]
+  for (v', type) in vs'.zip types do
+    let newv' ← M.run env' `mutual (safety := v₀.safety) (lctx := {}) do
       checkNoMVarNoFVar env' v'.name v'.value
       let (valueType, value'?) ← TypeChecker.check v'.value v'.levelParams
       let value' := value'?.getD v'.value.toPExpr
       let (true, value) ← smartCast valueType type value' vs[0]!.levelParams |
         throw <| .declTypeMismatch env' (.mutualDefnDecl vs') valueType
+      let value ← insertInitLets value
       if type.toExpr.hasFVar || value.toExpr.hasFVar then
         throw $ .other "fvar in translated term"
-      newvs' := newvs'.append #[{v' with value}]
-    return newvs'.map .defnInfo |>.toList
+      pure {v' with value}
+    newvs' := newvs'.push newv'
+  return newvs'.map .defnInfo |>.toList
 
 /-- Type check given declaration and add it to the environment -/
 def addDecl' (env : Environment) (decl : @& Declaration) (allowAxiomReplace := false) :
