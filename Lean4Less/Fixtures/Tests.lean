@@ -1,4 +1,4 @@
-import patch.PatchTheoremsAx
+import patch.PatchTheorems
 import Lean4Less.Commands
 
 theorem my_eq_of_heq {α : Sort u} {a a' : α} (h : HEq a a') : Eq a a' := eq_of_heq h
@@ -327,7 +327,7 @@ axiom gp : G p
 noncomputable def pushTest : (g : G q) → H q g := fun (g : G p) => H.mk p g
 noncomputable def pushTestIdem : (g : G q) → G q := fun (g : G p) => g
 noncomputable def pushTestIdemApp : (g : G q) → Type := fun (g : G p) => Hq g
-#check_l4l pushTestIdem
+-- #check_l4l pushTestIdem
 
 -- #print BitVec.mul_def
 

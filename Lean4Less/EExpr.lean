@@ -1094,15 +1094,15 @@ def PIData.toExpr (e : PIData EExpr) : EM Expr := match e with
   if (← rev) then
     match extra with
     | .none =>
-      pure $ Lean.mkAppN (.const `L4L.prfIrrel []) #[P, q, p]
+      pure $ Lean.mkAppN (.const `L4L.prfIrrelHEq []) #[P, q, p]
     | .HEq {Q, hPQ, ..} =>
-      pure $ Lean.mkAppN (.const `L4L.prfIrrelHEq []) #[Q, P, (← hPQ.1.toExpr'), q, p]
+      pure $ Lean.mkAppN (.const `L4L.prfIrrelHEqPQ []) #[Q, P, (← hPQ.1.toExpr'), q, p]
   else
     match extra with
     | .none =>
-      pure $ Lean.mkAppN (.const `L4L.prfIrrel []) #[P, p, q]
+      pure $ Lean.mkAppN (.const `L4L.prfIrrelHEq []) #[P, p, q]
     | .HEq {Q, hPQ, ..} =>
-      pure $ Lean.mkAppN (.const `L4L.prfIrrelHEq []) #[P, Q, (← hPQ.1.toExpr'), p, q]
+      pure $ Lean.mkAppN (.const `L4L.prfIrrelHEqPQ []) #[P, Q, (← hPQ.1.toExpr'), p, q]
 
 def FVarDataE.toExpr : FVarDataE → EM Expr
 | {aEqb, bEqa, u, A, B, a, b, ..} => do

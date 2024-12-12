@@ -2,112 +2,318 @@ prelude
 import Init.Prelude
 import Init.Notation
 import Init.Core
+-- import Lean4Less.Commands
 
 namespace L4L
 
 universe u v
 
-theorem forallHEq {A B : Sort u} {U : A → Sort v} {V : B → Sort v}
-  (hAB : A = B) (hUV : (a : A) → (b : B) → HEq a b → HEq (U a) (V b))
-  : ((a : A) → U a) = ((b : B) → V b) :=
-  @Eq.ndrec (Sort u) A
-    (fun {B : Sort u} =>
-      ∀ {V : B → Sort v},
-        (∀ (a : A) (b : B), @HEq A a B b → @HEq (Sort v) (U a) (Sort v) (V b)) →
-          @Eq (Sort (imax u v)) ((a : A) → U a) ((b : B) → V b))
-    (fun {V : A → Sort v} (hUV : ∀ (a b : A), @HEq A a A b → @HEq (Sort v) (U a) (Sort v) (V b)) =>
-      @letFun (@Eq (A → Sort v) U V)
-        (fun (_ : @Eq (A → Sort v) U V) => @Eq (Sort (imax u v)) ((a : A) → U a) ((b : A) → V b))
-        (@funext A (fun (_ : A) => Sort v) U V fun (x : A) => @eq_of_heq (Sort v) (U x) (V x) (hUV x x (@HEq.rfl A x)))
-        fun (this : @Eq (A → Sort v) U V) =>
-        @Eq.ndrec (A → Sort v) U
-          (fun {V : A → Sort v} =>
-            (∀ (a b : A), @HEq A a A b → @HEq (Sort v) (U a) (Sort v) (V b)) →
-              @Eq (Sort (imax u v)) ((a : A) → U a) ((b : A) → V b))
-          (fun (_ : ∀ (a b : A), @HEq A a A b → @HEq (Sort v) (U a) (Sort v) (U b)) =>
-            @Eq.refl (Sort (imax u v)) ((a : A) → U a))
-          V this hUV)
-    B hAB V hUV
+axiom prfIrrel {P : Prop} (p q : P) : Eq p q
 
-axiom prfIrrelHEq (P Q : Prop) (heq : P = Q) (p : Q) (q : P) : HEq p q
+/- --- --- bootstrapping lemmas --- --- -/
 
-theorem appArgHEq {A : Sort u} {U : A → Sort v}
-  (f : (a : A) → U a)
-  {a b : A} (hab : HEq a b)
-  : HEq (f a) (f b) :=
-  @Eq.ndrec A a (fun {b : A} => @HEq (U a) (f a) (U b) (f b)) (@HEq.rfl (U a) (f a)) b (@eq_of_heq A a b hab)
+theorem appArgEq {A : Sort u} {U : Sort v}
+  (f : (a : A) → U)
+  {a b : A} (hab : Eq a b)
+  : Eq (f a) (f b) := by
+  subst hab
+  rfl
 
--- axiom forallHEq {A B : Sort u} {U : A → Sort v} {V : B → Sort v} (hAB : A = B) (hUV : (a : A) → (b : B) → HEq a b → HEq (U a) (V b))
---   : ((a : A) → U a) = ((b : B) → V b)
+theorem forallEqUV' {A : Sort u} {U V : A → Sort v}
+  (hUV : (a : A) → Eq (U a) (V a))
+  : Eq ((a : A) → U a) ((b : A) → V b) := by
+  have : Eq U V := by
+    apply funext
+    intro x
+    exact hUV x
+  subst this
+  rfl
 
-theorem appHEq {A B : Sort u} {U : A → Sort v} {V : B → Sort v}
-  (hAB : A = B) (hUV : (a : A) → (b : B) → HEq a b → HEq (U a) (V b))
+theorem eq_of_heq {A : Sort u} {a b : A} (h : HEq a b) : @Eq A a b := -- NOTE: this lemma has been manually translated to Lean-
+  -- TODO clean this up
+  let_fun this := fun (A B : Sort u) (a : A) (b : B) (hab : HEq a b) =>
+    @HEq.rec A a
+      (@fun (B : Sort u) (b : B) _ =>
+        ∀ (hAB : @Eq (Sort u) A B), @Eq B (@cast A B hAB a) b)
+      (@cast (∀ (hAA : @Eq (Sort u) A A), @Eq A (@cast A A hAA a) (@cast A A hAA a))
+        ((fun (B : Sort u) (b : B) _ =>
+            ∀ (hAB : @Eq (Sort u) A B), @Eq B (@cast A B hAB a) b)
+          A a (@HEq.refl A a))
+        (@L4L.forallEqUV' (@Eq (Sort u) A A)
+          (fun (hAA : @Eq (Sort u) A A) => @Eq A (@cast A A hAA a) (@cast A A hAA a))
+          (fun (hAA : @Eq (Sort u) A A) => @Eq A (@cast A A hAA a) a) fun (hAA : @Eq (Sort u) A A) =>
+          let p :=
+            @L4L.appArgEq (@Eq (Sort u) A A)
+              A
+              (@Eq.rec (Sort u) A (fun (B : Sort u) _ => B) a A) hAA (@Eq.refl (Sort u) A)
+              (@L4L.prfIrrel (@Eq (Sort u) A A) hAA (@Eq.refl (Sort u) A));
+          @L4L.appArgEq A Prop (@Eq A (@cast A A hAA a)) (@cast A A hAA a) a p)
+        fun (hAA : @Eq (Sort u) A A) => @rfl A (@cast A A hAA a))
+      B b hab;
+  this A A a b h (@rfl (Sort u) A)
+
+-- #check_off L4L.eq_of_heq
+
+/- --- --- congruence lemmas --- --- -/
+
+--- forall ---
+
+theorem forallHEqABUV' {A B : Sort u} {U : A → Sort v} {V : B → Sort v}
+  (hAB : HEq A B) (hUV : (a : A) → (b : B) → HEq a b → HEq (U a) (V b))
+  : HEq ((a : A) → U a) ((b : B) → V b) := by
+  have h := eq_of_heq hAB -- TODO define a macro for this
+  subst h
+  have : Eq U V := by
+    apply funext
+    intro x
+    exact eq_of_heq $ hUV x x HEq.rfl
+  subst this
+  rfl
+
+theorem forallHEqABUV {A B : Sort u} {U V : Sort v}
+  (hAB : HEq A B) (hUV : HEq U V)
+  : HEq ((a : A) → U) ((b : B) → V) := by
+  apply forallHEqABUV' hAB fun _ _ _ => hUV
+
+theorem forallHEqUV {A : Sort u} {U V : Sort v}
+  (hUV : HEq U V)
+  : HEq ((a : A) → U) ((b : A) → V) := by
+  apply forallHEqABUV HEq.rfl hUV
+
+theorem forallHEqUV' {A : Sort u} {U V : A → Sort v}
+  (hUV : (a : A) → HEq (U a) (V a))
+  : HEq ((a : A) → U a) ((b : A) → V b) := by
+  refine forallHEqABUV' HEq.rfl fun a b hab => ?_
+  have h := eq_of_heq hab
+  subst h
+  exact hUV a
+
+theorem forallHEqAB {A B : Sort u} {U : Sort v} (hAB : HEq A B)
+  : HEq ((a : A) → U) ((b : B) → U) := by
+  apply forallHEqABUV hAB HEq.rfl
+
+--- lambda ---
+
+theorem lambdaHEqABUV' {A B : Sort u} {U : A → Sort v} {V : B → Sort v}
+  (f : (a : A) → U a) (g : (b : B) → V b)
+  (hAB : HEq A B) (hfg : (a : A) → (b : B) → HEq a b → HEq (f a) (g b))
+  : HEq (fun a => f a) (fun b => g b) := by
+  have h := eq_of_heq hAB
+  subst h
+  have : Eq U V := by
+    apply funext
+    intro x
+    exact type_eq_of_heq (hfg x x (@HEq.rfl A x))
+  subst this
+  apply heq_of_eq
+  apply funext
+  intro x
+  apply eq_of_heq
+  apply hfg
+  rfl
+
+theorem lambdaHEqABUV {A B : Sort u} {U V : Sort v}
+  (f : (a : A) → U) (g : (b : B) → V)
+  (hAB : HEq A B) (hfg : (a : A) → (b : B) → HEq a b → HEq (f a) (g b))
+  : HEq (fun a => f a) (fun b => g b) := by
+  apply lambdaHEqABUV' _ _ hAB hfg
+
+theorem lambdaHEqUV' {A : Sort u} {U V : A → Sort v}
+  {f : (a : A) → U a} {g : (b : A) → V b}
+  (hfg : (a : A) → HEq (f a) (g a))
+  : HEq (fun a => f a) (fun b => g b) := by
+  apply lambdaHEqABUV' _ _ HEq.rfl
+  intro a b hab
+  have h := eq_of_heq hab
+  subst h
+  exact hfg a
+
+theorem lambdaHEqUV {A : Sort u} {U V : Sort v}
+  {f : (a : A) → U} {g : (b : A) → V}
+  (hfg : (a : A) → HEq (f a) (g a))
+  : HEq (fun a => f a) (fun b => g b) := by
+  apply lambdaHEqUV' hfg
+
+theorem lambdaHEq' {A : Sort u} {U : A → Sort v}
+  {f g : (a : A) → U a}
+  (hfg : (a : A) → HEq (f a) (g a))
+  : HEq (fun a => f a) (fun b => g b) := by
+  apply lambdaHEqUV' hfg
+
+theorem lambdaHEq {A : Sort u} {U : Sort v}
+  {f g : (a : A) → U}
+  (hfg : (a : A) → HEq (f a) (g a))
+  : HEq (fun a => f a) (fun b => g b) := by
+  apply lambdaHEq' hfg
+
+--- application --- 
+
+theorem appHEqABUV' {A B : Sort u} {U : A → Sort v} {V : B → Sort v}
+  (hAB : HEq A B) (hUV : (a : A) → (b : B) → HEq a b → HEq (U a) (V b))
   {f : (a : A) → U a} {g : (b : B) → V b} {a : A} {b : B}
   (hfg : HEq f g) (hab : HEq a b)
-  : HEq (f a) (g b) :=
-  @Eq.ndrec (Sort u) A
-    (fun {B : Sort u} =>
-      ∀ {V : B → Sort v},
-        (∀ (a : A) (b : B), @HEq A a B b → @HEq (Sort v) (U a) (Sort v) (V b)) →
-          ∀ {g : (b : B) → V b} {b : B},
-            @HEq ((a : A) → U a) f ((b : B) → V b) g → @HEq A a B b → @HEq (U a) (f a) (V b) (g b))
-    (fun {V : A → Sort v} (hUV : ∀ (a b : A), @HEq A a A b → @HEq (Sort v) (U a) (Sort v) (V b)) {g : (b : A) → V b}
-        {b : A} (hfg : @HEq ((a : A) → U a) f ((b : A) → V b) g) (hab : @HEq A a A b) =>
-      @letFun (@Eq (A → Sort v) U V) (fun (_ : @Eq (A → Sort v) U V) => @HEq (U a) (f a) (V b) (g b))
-        (@funext A (fun (_ : A) => Sort v) U V fun (x : A) => @eq_of_heq (Sort v) (U x) (V x) (hUV x x (@HEq.rfl A x)))
-        fun (this : @Eq (A → Sort v) U V) =>
-        @Eq.ndrec (A → Sort v) U
-          (fun {V : A → Sort v} =>
-            (∀ (a b : A), @HEq A a A b → @HEq (Sort v) (U a) (Sort v) (V b)) →
-              ∀ {g : (b : A) → V b}, @HEq ((a : A) → U a) f ((b : A) → V b) g → @HEq (U a) (f a) (V b) (g b))
-          (fun (_ : ∀ (a b : A), @HEq A a A b → @HEq (Sort v) (U a) (Sort v) (U b)) {g : (b : A) → U b}
-              (hfg : @HEq ((a : A) → U a) f ((b : A) → U b) g) =>
-            @Eq.ndrec A a (fun {b : A} => @HEq (U a) (f a) (U b) (g b))
-              (@Eq.ndrec ((a : A) → U a) f (fun {g : (b : A) → U b} => @HEq (U a) (f a) (U a) (g a))
-                (@HEq.rfl (U a) (f a)) g (@eq_of_heq ((a : A) → U a) f g hfg))
-              b (@eq_of_heq A a b hab))
-          V this hUV g hfg)
-    B hAB V hUV g b hfg hab
+  : HEq (f a) (g b) := by
+  have h := eq_of_heq hAB
+  subst h
+  have : Eq U V := by
+    apply funext
+    intro x
+    exact eq_of_heq $ hUV x x HEq.rfl
+  subst this
+  have h := (eq_of_heq hfg)
+  subst h
+  have h := (eq_of_heq hab)
+  subst h
+  rfl
+
+theorem appHEqABUV {A B : Sort u} {U V : Sort v}
+  (hAB : HEq A B) (hUV : HEq U V)
+  {f : (a : A) → U} {g : (b : B) → V} {a : A} {b : B}
+  (hfg : HEq f g) (hab : HEq a b)
+  : HEq (f a) (g b) := by
+  apply appHEqABUV' hAB (fun _ _ _ => hUV) hfg hab
+
+theorem appHEqUV' {A : Sort u} {U V : A → Sort v}
+  (hUV : (a : A) → HEq (U a) (V a))
+  {f : (a : A) → U a} {g : (b : A) → V b} {a : A} {b : A}
+  (hfg : HEq f g) (hab : HEq a b)
+  : HEq (f a) (g b) := by
+  refine appHEqABUV' HEq.rfl (fun a b hab => ?_) hfg hab
+  have h := eq_of_heq hab
+  subst h
+  exact hUV a
+
+theorem appHEqUV {A : Sort u} {U V : Sort v}
+  (hUV : HEq U V)
+  {f : (a : A) → U} {g : (b : A) → V} {a : A} {b : A}
+  (hfg : HEq f g) (hab : HEq a b)
+  : HEq (f a) (g b) := by
+  apply appHEqUV' (fun _ => hUV) hfg hab
+
+theorem appHEqAB {A B : Sort u} {U : Sort v}
+  (hAB : HEq A B)
+  {f : (a : A) → U} {g : (b : B) → U} {a : A} {b : B}
+  (hfg : HEq f g) (hab : HEq a b)
+  : HEq (f a) (g b) := by
+  apply appHEqABUV hAB HEq.rfl hfg hab
+
+theorem appFunHEqUV' {A : Sort u} {U V : A → Sort v}
+  (hUV : (a : A) → HEq (U a) (V a))
+  {f : (a : A) → U a} {g : (b : A) → V b} (a : A)
+  (hfg : HEq f g)
+  : HEq (f a) (g a) := by
+  apply appHEqUV' hUV hfg HEq.rfl
+
+theorem appFunHEqUV {A : Sort u} {U V : Sort v}
+  (hUV : HEq U V)
+  {f : (a : A) → U} {g : (b : A) → V} (a : A)
+  (hfg : HEq f g)
+  : HEq (f a) (g a) := by
+  apply appHEqUV hUV hfg HEq.rfl
+
+theorem appHEq' {A : Sort u} {U : A → Sort v}
+  {f g : (a : A) → U a} {a b : A}
+  (hfg : HEq f g) (hab : HEq a b)
+  : HEq (f a) (g b) := by
+  apply appHEqUV' (fun _ => HEq.rfl) hfg hab
+
+theorem appHEq {A : Sort u} {U : Sort v}
+  {f g : (a : A) → U} {a b : A}
+  (hfg : HEq f g) (hab : HEq a b)
+  : HEq (f a) (g b) := by
+  apply appHEq' hfg hab
+
+theorem appFunHEq' {A : Sort u} {U : A → Sort v}
+  {f g : (a : A) → U a} (a : A)
+  (hfg : HEq f g)
+  : HEq (f a) (g a) := by
+  apply appHEq' hfg HEq.rfl
+
+theorem appFunHEq {A : Sort u} {U : Sort v}
+  {f g : (a : A) → U} (a : A)
+  (hfg : HEq f g)
+  : HEq (f a) (g a) := by
+  apply appFunHEq' a hfg
+
+theorem appArgHEq' {A : Sort u} {U : A → Sort v}
+  (f : (a : A) → U a)
+  {a b : A} (hab : HEq a b)
+  : HEq (f a) (f b) := by
+  apply appHEq' HEq.rfl hab
+
+theorem appArgHEq {A : Sort u} {U : Sort v}
+  (f : (a : A) → U)
+  {a b : A} (hab : HEq a b)
+  : HEq (f a) (f b) := by
+  apply appArgHEq' f hab
 
 theorem appHEqBinNatFn {N : Type} {T : Type}
   {f : N → N → T} {a1 a2 : N} {b1 b2 : N}
   (ha : HEq a1 a2)
   (hb : HEq b1 b2)
-  : HEq (f a1 b1) (f a2 b2) :=
-  @Eq.ndrec N a1 (fun {a2 : N} => @HEq T (f a1 b1) T (f a2 b2))
-    (@Eq.ndrec N b1 (fun {b2 : N} => @HEq T (f a1 b1) T (f a1 b2)) (@HEq.rfl T (f a1 b1)) b2
-      (@eq_of_heq N b1 b2 hb))
-    a2 (@eq_of_heq N a1 a2 ha)
+  : HEq (f a1 b1) (f a2 b2) := by
+  apply appHEq
+  apply appArgHEq
+  assumption
+  assumption
 
-theorem lambdaHEq {A B : Sort u} {U : A → Sort v} {V : B → Sort v}
-  (f : (a : A) → U a) (g : (b : B) → V b)
-  (hAB : A = B) (hfg : (a : A) → (b : B) → HEq a b → HEq (f a) (g b))
-  : HEq (fun a => f a) (fun b => g b) :=
-  @Eq.ndrec (Sort u) A
-    (fun {B : Sort u} =>
-      ∀ {V : B → Sort v} (g : (b : B) → V b),
-        (∀ (a : A) (b : B), @HEq A a B b → @HEq (U a) (f a) (V b) (g b)) →
-          @HEq ((a : A) → U a) (fun (a : A) => f a) ((b : B) → V b) fun (b : B) => g b)
-    (fun {V : A → Sort v} (g : (b : A) → V b) (hfg : ∀ (a b : A), @HEq A a A b → @HEq (U a) (f a) (V b) (g b)) =>
-      @letFun (@Eq (A → Sort v) U V)
-        (fun (_ : @Eq (A → Sort v) U V) =>
-          @HEq ((a : A) → U a) (fun (a : A) => f a) ((b : A) → V b) fun (b : A) => g b)
-        (@funext A (fun (_ : A) => Sort v) U V fun (x : A) =>
-          @type_eq_of_heq (U x) (V x) (f x) (g x) (hfg x x (@HEq.rfl A x)))
-        fun (hUV : @Eq (A → Sort v) U V) =>
-        @Eq.ndrec (A → Sort v) U
-          (fun {V : A → Sort v} =>
-            ∀ (g : (b : A) → V b),
-              (∀ (a b : A), @HEq A a A b → @HEq (U a) (f a) (V b) (g b)) →
-                @HEq ((a : A) → U a) (fun (a : A) => f a) ((b : A) → V b) fun (b : A) => g b)
-          (fun (g : (b : A) → U b) (hfg : ∀ (a b : A), @HEq A a A b → @HEq (U a) (f a) (U b) (g b)) =>
-            @letFun (@Eq ((a : A) → U a) f g)
-              (fun (_ : @Eq ((a : A) → U a) f g) =>
-                @HEq ((a : A) → U a) (fun (a : A) => f a) ((b : A) → U b) fun (b : A) => g b)
-              (@funext A (fun (x : A) => U x) f g fun (a : A) => @eq_of_heq (U a) (f a) (g a) (hfg a a (@HEq.rfl A a)))
-              fun (this : @Eq ((a : A) → U a) f g) =>
-              @heq_of_eq ((a : A) → U a) (fun (a : A) => f a) (fun (b : A) => g b) this)
-          V hUV g hfg)
-    B hAB V g hfg
+/- --- --- patching constants --- --- -/
+
+-- axiom forallEqABUV' {A B : Sort u} {U : A → Sort v} {V : B → Sort v}
+--   (hAB : Eq A B) (hUV : (a : A) → (b : B) → HEq a b → Eq (U a) (V b))
+--   : Eq ((a : A) → U a) ((b : B) → V b)
+
+-- axiom forallEqAB {A B : Sort u} {U : Sort v}
+--   (hAB : Eq A B)
+--   : Eq ((a : A) → U) ((b : B) → U)
+
+-- axiom appFunEq {A : Sort u} {U : Sort v}
+--   {f g : (a : A) → U} (a : A)
+--   (hfg : Eq f g)
+--   : Eq (f a) (g a)
+
+-- axiom appFunEq' {A : Sort u} {U : A → Sort v}
+--   {f g : (a : A) → U a} (a : A)
+--   (hfg : Eq f g)
+--   : Eq (f a) (g a)
+
+-- axiom appEq {A : Sort u} {U : Sort v}
+--   {f g : A → U} {a b : A}
+--   (hfg : Eq f g) (hab : Eq a b)
+--   : Eq (f a) (g b)
+
+-- axiom appEqAB {A B : Sort u} {U : Sort v}
+--   (hAB : Eq A B)
+--   {f : (a : A) → U} {g : (b : B) → U} {a : A} {b : B}
+--   (hfg : HEq f g) (hab : HEq a b)
+--   : Eq (f a) (g b)
+
+-- axiom lambdaEq {A : Sort u} {U : Sort v}
+--   (f g : (a : A) → U)
+--   (hfg : (a : A) → Eq (f a) (g a))
+--   : Eq (fun a => f a) (fun b => g b)
+
+-- axiom lambdaEq' {A : Sort u} {U : A → Sort v}
+--   (f g : (a : A) → U a)
+--   (hfg : (a : A) → Eq (f a) (g a))
+--   : Eq (fun a => f a) (fun b => g b)
+
+theorem prfIrrelHEq {P : Prop} (p q : P) : HEq p q := by
+  apply heq_of_eq
+  exact prfIrrel _ _
+
+theorem prfIrrelHEqPQ {P Q : Prop} (hPQ : HEq P Q) (p : P) (q : Q) : HEq p q := by
+  have h := eq_of_heq hPQ
+  subst h
+  exact prfIrrelHEq _ _
+
+def castHEq {α β : Sort u} (h : HEq α β) (a : α) : β := cast (eq_of_heq h) a
+
+def castOrigHEq {α β : Sort u} (h : HEq α β) (a : α) : HEq (castHEq h a) a := by
+  have h := eq_of_heq h
+  subst h
+  rfl
+
+def HEqRefl (_n : Nat) {α : Sort u} (a : α) : HEq a a := HEq.refl a
 
 end L4L

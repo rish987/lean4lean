@@ -51,8 +51,9 @@ def patchConsts : Array Name := #[
 `Eq,
 `Eq.refl,
 
-`L4L.prfIrrelHEq,
 `L4L.prfIrrel,
+`L4L.prfIrrelHEq,
+`L4L.prfIrrelHEqPQ,
 
 `L4L.castOrigHEq,
 
