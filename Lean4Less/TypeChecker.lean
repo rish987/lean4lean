@@ -40,18 +40,6 @@ structure TypeChecker.State where
   leanMinusState : Lean.TypeChecker.State := {}
   failure : Std.HashSet (Expr × Expr) := {}
 
-inductive CallData where
-|  isDefEqCore : PExpr → PExpr → CallData
-|  isDefEqApp (t s : PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr)) (tfEqsf? : Option (Option EExpr)) : CallData
-|  isDefEqCorePure : PExpr → PExpr → CallData
-|  quickIsDefEq : PExpr → PExpr → Bool → CallData
-|  whnfCore (e : PExpr) (cheapK : Bool) (cheapProj : Bool) : CallData
-|  whnf (e : PExpr) (cheapK : Bool) : CallData
-|  whnfPure (e : PExpr) : CallData
-|  inferType (e : Expr) (dbg : Bool) : CallData
-|  inferTypePure (e : PExpr) : CallData
-deriving Inhabited
-
 instance : ToString CallData where
 toString
 | .isDefEqCore t s     => s!"isDefEqCore ({t}) ({s})"
@@ -87,28 +75,6 @@ def CallDataT : CallData → Type
 | .inferType ..       => PExpr × Option PExpr
 | .inferTypePure ..   => PExpr
 
-structure TypeChecker.Context where
-  env : Environment
-  pure : Bool := false -- (for debugging purposes)
-  forallOpt : Bool := true -- (for debugging purposes)
-  const : Name -- (for debugging purposes)
-  /--
-  Mapping from free variables to proofs of their equality,
-  introduced by isDefEqLambda.
-  -/
-  eqFVars : Std.HashMap (FVarId × FVarId) FVarDataE := {}
-  safety : DefinitionSafety := .safe
-  cheapK := false
-  callId : Nat := 0
-  noCache : Bool := false
-  L4LTrace : Bool := false
-  L4LTraceOverride : Bool := false
-  dbgCallId : Option Nat := none
-  callStack : Array (Nat × Nat × (Option CallData)) := #[]
-  lparams : List Name := []
-  dbgFIds : Array Name := #[]
-  underBinder : Bool := false
-
 namespace TypeChecker
 
 abbrev M := ReaderT Context <| StateT State <| Except KernelException
@@ -117,9 +83,9 @@ abbrev MEE := M (PExpr × Option EExpr)
 abbrev MB := M (Bool × Option EExpr)
 abbrev MLB := M (LBool × Option EExpr)
 
-def M.run (env : Environment) (const : Name) (safety : DefinitionSafety := .safe) (lctx : LocalContext := {})
+def M.run (env : Environment) (const : Name) (safety : DefinitionSafety := .safe) (lctx : LocalContext := {}) (opts : TypeCheckerOpts := {})
     (x : M α) : Except KernelException α :=
-  x { env, safety, const } |>.run' {lctx}
+  x { env, safety, const, opts } |>.run' {lctx}
 
 instance : MonadEnv M where
   getEnv := return (← read).env
@@ -270,14 +236,16 @@ def withNewLetVars (n : Nat) (vars : Array (Name × Expr × Expr)) (m : Array Lo
 
 def runLeanMinus (M : Lean.TypeChecker.M T) : RecM T := do
   let trace := (← readThe Context).L4LTraceOverride || ((← readThe Context).L4LTrace && (← shouldTrace))
-  let (ret, newState) ← Lean.TypeChecker.M.run (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := false, proofIrrelevance := false}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams)
+  let opts := (← readThe Context).opts
+  let (ret, newState) ← Lean.TypeChecker.M.run (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := not opts.kLikeReduction, proofIrrelevance := not opts.proofIrrelevance}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams)
     (nid := (← get).nid) (fvarTypeToReusedNamePrefix := (← get).fvarTypeToReusedNamePrefix) (state := (← get).leanMinusState) (trace := trace) M
   modify fun s => {s with leanMinusState := newState, nid := newState.nid, fvarTypeToReusedNamePrefix := newState.fvarTypeToReusedNamePrefix}
   pure ret
 
 def runLeanMinusRecM (M : Lean.TypeChecker.RecM T) : RecM T := do
   let trace := (← readThe Context).L4LTraceOverride || ((← readThe Context).L4LTrace && (← shouldTrace))
-  let (ret, newState) ← Lean.TypeChecker.M.run (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := false, proofIrrelevance := false}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams)
+  let opts := (← readThe Context).opts
+  let (ret, newState) ← Lean.TypeChecker.M.run (← getEnv) (safety := (← readThe Context).safety) (opts := {kLikeReduction := not opts.kLikeReduction, proofIrrelevance := not opts.proofIrrelevance}) (lctx := ← getLCtx) (lparams := (← readThe Context).lparams)
     (nid := (← get).nid) (fvarTypeToReusedNamePrefix := (← get).fvarTypeToReusedNamePrefix) (state := (← get).leanMinusState) (trace := trace)
     M.run
   modify fun s => {s with leanMinusState := newState, nid := newState.nid, fvarTypeToReusedNamePrefix := newState.fvarTypeToReusedNamePrefix}
@@ -495,21 +463,26 @@ def quickIsDefEq (n : Nat) (t s : PExpr) (useHash : Bool := false) : RecLB := fu
 def isDefEqLean (t s : Expr) (fuel := 1000) : RecM Bool := do
   runLeanRecM $ Lean.TypeChecker.isDefEq t s fuel
 
+def _root_.Lean.TypeChecker.Data.usedM : TypeChecker.Data → RecM Bool
+| {usedProofIrrelevance, usedKLikeReduction, usedFVarEq, ..} => do
+  let opts := (← readThe Context).opts
+  pure $ (opts.proofIrrelevance && usedProofIrrelevance) || (opts.kLikeReduction && usedKLikeReduction) || usedFVarEq
+
 def isDefEqArgsLean (t s : Expr) : RecM (Bool × Bool) := do
   let (ret, s) ← runLeanRecM' $ Lean.TypeChecker.Inner.isDefEqArgs t s
-  pure (ret, s.data.used)
+  pure (ret, ← s.data.usedM)
 
 def isDefEqAppLean (t s : Expr) : RecM (Bool × Bool) := do
   let (ret, s) ← runLeanRecM' $ Lean.TypeChecker.Inner.isDefEqApp t s
-  pure (ret, s.data.used)
+  pure (ret, ← s.data.usedM)
 
 def usesPrfIrrel' (t s : Expr) (fuel := 1000) : RecM (Bool × Bool) := do
   let (ret, s) ← runLeanRecM' $ Lean.TypeChecker.isDefEq t s fuel
-  pure (ret, s.data.used)
+  pure (ret, ← s.data.usedM)
 
 def usesPrfIrrel (t s : Expr) (fuel := 1000) : RecM (Bool × Bool) := do
   let (defEq, s) ← runLeanRecM' $ Lean.TypeChecker.isDefEq t s fuel
-  pure $ (defEq, s.data.used)
+  pure (defEq, ← s.data.usedM)
 
 def inferTypeLean (n : Nat) (t : Expr) : RecM Expr := do
   dbg_wrap (55000 + n) $ runLeanRecM $ Lean.TypeChecker.Inner.inferType 0 t (inferOnly := false)
@@ -1280,18 +1253,6 @@ def inferApp (e : PExpr) : RecM PExpr := do
       j := i
   return fType.toExpr.instantiateRevRange j args.size args |>.toPExpr
 
-def markUsed (n : Nat) (fvars : Array Expr) (b : Expr) (used : Array Bool) : Array Bool := Id.run do
-  if !b.hasFVar then return used
-  (·.2) <$> StateT.run (s := used) do
-    b.forEachV' fun x => do
-      if !x.hasFVar then return false
-      if let .fvar name := x then
-        for i in [:n] do
-          if fvars[i]!.fvarId! == name then
-            modify (·.set! i true)
-            return false
-      return true
-
 /--
 Infers the type of let-expression `e`.
 -/
@@ -2013,7 +1974,11 @@ def isDefEqProofIrrel (t s : PExpr) : RecLB := do
   let sType ← inferTypePure 60 s
   let (ret, pt?) ← isDefEq 61 tType sType
   if ret == .true then
-    let tEqs? ← isDefEqProofIrrel' t s tType sType pt? 1
+    let tEqs? ←
+      if (← readThe Context).opts.proofIrrelevance then
+        isDefEqProofIrrel' t s tType sType pt? 1
+      else
+        pure none
     pure (.true, tEqs?)
   else
     pure (.undef, none)

@@ -92,6 +92,45 @@ structure ExtMethods (m : Type → Type u) where
   withNewFVar : Nat → Name → PExpr → BinderInfo → (LocalDecl → m α) → m α
   getLets : Nat → FVarId → m (Array LocalDeclE)
 
+structure TypeCheckerOpts where
+  proofIrrelevance := true
+  kLikeReduction := true
+
+inductive CallData where
+|  isDefEqCore : PExpr → PExpr → CallData
+|  isDefEqApp (t s : PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr)) (tfEqsf? : Option (Option EExpr)) : CallData
+|  isDefEqCorePure : PExpr → PExpr → CallData
+|  quickIsDefEq : PExpr → PExpr → Bool → CallData
+|  whnfCore (e : PExpr) (cheapK : Bool) (cheapProj : Bool) : CallData
+|  whnf (e : PExpr) (cheapK : Bool) : CallData
+|  whnfPure (e : PExpr) : CallData
+|  inferType (e : Expr) (dbg : Bool) : CallData
+|  inferTypePure (e : PExpr) : CallData
+deriving Inhabited
+
+structure TypeChecker.Context : Type where
+  opts : TypeCheckerOpts := {}
+  env : Environment
+  pure : Bool := false -- (for debugging purposes)
+  forallOpt : Bool := true -- (for debugging purposes)
+  const : Name -- (for debugging purposes)
+  /--
+  Mapping from free variables to proofs of their equality,
+  introduced by isDefEqLambda.
+  -/
+  eqFVars : Std.HashMap (FVarId × FVarId) FVarDataE := {}
+  safety : DefinitionSafety := .safe
+  cheapK := false
+  callId : Nat := 0
+  noCache : Bool := false
+  L4LTrace : Bool := false
+  L4LTraceOverride : Bool := false
+  dbgCallId : Option Nat := none
+  callStack : Array (Nat × Nat × (Option CallData)) := #[]
+  lparams : List Name := []
+  dbgFIds : Array Name := #[]
+  underBinder : Bool := false
+
 structure ExtMethodsR (m : Type → Type u) extends ExtMethods m where
   isDefEqApp' : PExpr → PExpr → Std.HashMap Nat (Option EExpr) → m (Bool × Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))
   smartCast : Nat → PExpr → PExpr → PExpr → m (Bool × PExpr)
@@ -142,7 +181,7 @@ def replaceParams (meth : ExtMethodsR m) (fType : Expr) (params : Array Expr) (n
 @[inline] def withLCtx [MonadWithReaderOf LocalContext m] (lctx : LocalContext) (x : m α) : m α :=
   withReader (fun _ => lctx) x
 
-@[inline] def rctx [MonadReaderOf Context m] : m Context := (readThe Context)
+-- @[inline] def rctx [MonadReaderOf Context m] : m Context := (readThe Context)
 
 @[inline] def withEqFVar [MonadWithReaderOf (Std.HashMap (FVarId × FVarId) FVarDataE) m] (idt ids : FVarId) (eq : FVarDataE) (x : m α) : m α :=
   withReader (fun l => l.insert (idt, ids) eq) x

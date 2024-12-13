@@ -9,7 +9,7 @@ open Lean4Less.TypeChecker
 
 section
 
-variable [Monad m] [MonadExcept KernelException M] (env : Environment)
+variable [Monad m] [MonadReaderOf Context m] [MonadExcept KernelException M] (env : Environment)
   (meth : ExtMethodsR m)
 
 def getFirstCtor (dName : Name) : Option Name := do
@@ -48,7 +48,11 @@ def toCtorWhenK (rval : RecursorVal) (e : PExpr) : m (PExpr × Option (EExpr)) :
   let appType ← meth.inferTypePure 104 newCtorApp
   -- check that the indices of types of `e` and `newCtorApp` match
   let (true, pt?) ← meth.isDefEq 105 type appType | return (e, none)
-  let prf? ← meth.isDefEqProofIrrel' e newCtorApp type appType pt?
+  let prf? ←
+    if (← readThe Context).opts.kLikeReduction then
+      meth.isDefEqProofIrrel' e newCtorApp type appType pt?
+    else
+      pure none
 
   return (newCtorApp, prf?)
 

@@ -8,6 +8,7 @@ import Cli
 import Lean.Util.FoldConsts
 import Lean4Less.Environment
 import Lean4Less.Fixtures.Tests -- FIXME should use separate fixtures dir
+import Lean4Less.Fixtures.Dummy
 import Lean4Less.Replay
 import Lean4Less.Commands
 
@@ -85,6 +86,9 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
     onlys.as! (Array String)
   let cachedPath? := p.flag? "cached" |>.map fun sp => 
     System.FilePath.mk $ sp.as! String
+  let pi : Bool := p.hasFlag "proof-irrel"
+  let klr : Bool := p.hasFlag "klike-red"
+  let opts : Lean4Less.TypeCheckerOpts := {proofIrrelevance := pi, kLikeReduction := klr}
   match mod with
     | .anonymous => throw <| IO.userError s!"Could not resolve module: {mod}"
     | m =>
@@ -96,7 +100,7 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
           let mut env := env
           for (_, c) in lemmEnv.constants do
             env := add' env c
-          _ ← Lean4Less.checkL4L (onlyConsts.map (·.toName)) env (printProgress := true) (printOutput := p.hasFlag "print")
+          _ ← Lean4Less.checkL4L (onlyConsts.map (·.toName)) env (printProgress := true) (printOutput := p.hasFlag "print") (opts := opts)
       else
         let outDir := ((← IO.Process.getCurrentDir).join "out")
         if (← outDir.pathExists) && not cachedPath?.isSome then
@@ -111,7 +115,7 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
 
         IO.println s!">>init module"
         let patchConsts ← getDepConstsEnv lemmEnv Lean4Less.patchConsts
-        let env ← replay Lean4Less.addDecl {newConstants := patchConsts, opts := {}} (← mkEmptyEnvironment) (printProgress := true) (op := "patch")
+        let env ← replay (Lean4Less.addDecl (opts := opts)) {newConstants := patchConsts, opts := {}} (← mkEmptyEnvironment) (printProgress := true) (op := "patch")
         mkMod #[] env patchPreludeModName
 
         let (_, s) ← ForEachModuleM.run env do
@@ -145,7 +149,7 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
               else
                 pure $ acc
             IO.println s!">>{dn} module [{(← get).count}/{numMods}]"
-            let env ← replay Lean4Less.addDecl {newConstants := newConstants, opts := {}} (← get).env (printProgress := true) (op := "patch")
+            let env ← replay (Lean4Less.addDecl (opts := opts)) {newConstants := newConstants, opts := {}} (← get).env (printProgress := true) (op := "patch")
             let imports := if dn == `Init.Prelude then
                 #[{module := `Init.PatchPrelude}] ++ d.imports
               else
@@ -154,7 +158,7 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
             mkMod imports env dn
             modify fun s => {s with env}
         let env := s.env
-        replayFromEnv Lean4Lean.addDecl m env.toMap₁ (op := "typecheck") (opts := {proofIrrelevance := false, kLikeReduction := false})
+        replayFromEnv Lean4Lean.addDecl m env.toMap₁ (op := "typecheck") (opts := {proofIrrelevance := not opts.proofIrrelevance, kLikeReduction := not opts.kLikeReduction})
         -- forEachModule' (imports := #[m]) (init := env) fun e dn d => do
         --   -- let newConstants := d.constNames.zip d.constants |>.foldl (init := default) fun acc (n, ci) => acc.insert n ci
         --
@@ -174,7 +178,8 @@ unsafe def transCmd : Cmd := `[Cli|
     -- w, write;               "Also write translation of specified constants (with dependencies) to file (relevant only with '-p')."
     o, only : Array String; "Only translate the specified constants and their dependencies."
     p, print; "Print translated constant specified by --only ."
-    a, appopt : Bool; "Optimize application case"
+    pi, "proof-irrel"; "eliminate proof irrelevance"
+    klr, "klike-red"; "eliminate klike reduction"
     c, cached : String; "Use cached library translation files from specified directory."
 
   ARGS:

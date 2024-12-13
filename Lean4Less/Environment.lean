@@ -21,24 +21,24 @@ def checkConstantVal (env : Environment) (v : ConstantVal) (allowPrimitive := fa
   let type'' ← maybeCast typeTypeEqSort? typeType sort type' v.levelParams
   insertInitLets type''
 
-def patchAxiom (env : Environment) (v : AxiomVal) :
+def patchAxiom (env : Environment) (v : AxiomVal) (opts : TypeCheckerOpts) :
     Except KernelException ConstantInfo := do
-  let type ← (checkConstantVal env v.toConstantVal).run env v.name
+  let type ← (checkConstantVal env v.toConstantVal).run env v.name (opts := opts)
     (safety := if v.isUnsafe then .unsafe else .safe)
   if type.toExpr.hasFVar then
     throw $ .other "fvar in translated term"
   let v := {v with type}
   return .axiomInfo v
 
-def patchDefinition (env : Environment) (v : DefinitionVal) (allowAxiomReplace := false) :
+def patchDefinition (env : Environment) (v : DefinitionVal) (allowAxiomReplace := false) (opts : TypeCheckerOpts) :
     Except KernelException ConstantInfo := do
   if let .unsafe := v.safety then
     -- Meta definition can be recursive.
     -- So, we check the header, add, and then type check the body.
-    let type ← (checkConstantVal env v.toConstantVal).run env v.name (safety := .unsafe)
+    let type ← (checkConstantVal env v.toConstantVal).run env v.name (safety := .unsafe) (opts := opts)
     let env' := add env (.defnInfo {v with type})
     checkNoMVarNoFVar env' v.name v.value
-    M.run env' v.name (safety := .unsafe) (lctx := {}) do
+    M.run env' v.name (safety := .unsafe) (lctx := {}) opts do
       let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
       let value' := value'?.getD v.value.toPExpr
       let (true, value) ← smartCast valueType type value' v.levelParams |
@@ -52,10 +52,10 @@ def patchDefinition (env : Environment) (v : DefinitionVal) (allowAxiomReplace :
       let v := {v with type, value}
       return .defnInfo v
   else
-    let type ← M.run env v.name (safety := .safe) (lctx := {}) do
+    let type ← M.run env v.name (safety := .safe) (lctx := {}) opts do
       checkConstantVal env v.toConstantVal (← checkPrimitiveDef env v)
 
-    M.run env v.name (safety := .safe) (lctx := {}) do
+    M.run env v.name (safety := .safe) (lctx := {}) opts do
       -- dbg_trace s!"DBG[25]: Environment.lean:49: v.name={v.name}"
       checkNoMVarNoFVar env v.name v.value
       -- dbg_trace s!"DBG[34]: Environment.lean:52 (after checkNoMVarNoFVar env v.name v.value)"
@@ -79,13 +79,13 @@ def patchDefinition (env : Environment) (v : DefinitionVal) (allowAxiomReplace :
       -- dbg_trace s!"DBG[35]: Environment.lean:64 (after let v := v with type, value)"
       return (.defnInfo v)
 
-def patchTheorem (env : Environment) (v : TheoremVal) (allowAxiomReplace := false) :
+def patchTheorem (env : Environment) (v : TheoremVal) (allowAxiomReplace := false) (opts : TypeCheckerOpts) :
     Except KernelException ConstantInfo := do
   -- TODO(Leo): we must add support for handling tasks here
-  let type ← M.run env v.name (safety := .safe) (lctx := {}) do
+  let type ← M.run env v.name (safety := .safe) (lctx := {}) (opts := opts) do
     checkConstantVal env v.toConstantVal
 
-  let (value?) ← M.run env v.name (safety := .safe) (lctx := {}) do
+  let (value?) ← M.run env v.name (safety := .safe) (lctx := {}) opts do
     checkNoMVarNoFVar env v.name v.value
     let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
     let value' := value'?.getD v.value.toPExpr
@@ -108,11 +108,11 @@ def patchTheorem (env : Environment) (v : TheoremVal) (allowAxiomReplace := fals
       throw $ .other "fvar in translated axiom type"
     return .axiomInfo v
 
-def patchOpaque (env : Environment) (v : OpaqueVal) :
+def patchOpaque (env : Environment) (v : OpaqueVal) (opts : TypeCheckerOpts) :
     Except KernelException ConstantInfo := do
-  let type ← M.run env v.name (safety := .safe) (lctx := {}) do
+  let type ← M.run env v.name (safety := .safe) (lctx := {}) opts do
     checkConstantVal env v.toConstantVal
-  let value ← M.run env v.name (safety := .safe) (lctx := {}) do
+  let value ← M.run env v.name (safety := .safe) (lctx := {}) opts do
     let (valueType, value'?) ← TypeChecker.check v.value v.levelParams
     let value' := value'?.getD v.value.toPExpr
     let (true, ret) ← smartCast valueType type value' v.levelParams |
@@ -124,12 +124,12 @@ def patchOpaque (env : Environment) (v : OpaqueVal) :
   let v := {v with type, value}
   return .opaqueInfo v
 
-def patchMutual (env : Environment) (vs : List DefinitionVal) :
+def patchMutual (env : Environment) (vs : List DefinitionVal) (opts : TypeCheckerOpts) :
     Except KernelException (List ConstantInfo) := do
   let v₀ :: _ := vs | throw <| .other "invalid empty mutual definition"
   if let .safe := v₀.safety then
     throw <| .other "invalid mutual definition, declaration is not tagged as unsafe/partial"
-  let types ← M.run env `mutual (safety := v₀.safety) (lctx := {}) do
+  let types ← M.run env `mutual (safety := v₀.safety) (lctx := {}) opts do
     let mut types := []
     for v in vs do
       if v.safety != v₀.safety then
@@ -146,7 +146,7 @@ def patchMutual (env : Environment) (vs : List DefinitionVal) :
     vs' := vs'.append [v']
   let mut newvs' := #[]
   for (v', type) in vs'.zip types do
-    let newv' ← M.run env' `mutual (safety := v₀.safety) (lctx := {}) do
+    let newv' ← M.run env' `mutual (safety := v₀.safety) (lctx := {}) opts do
       checkNoMVarNoFVar env' v'.name v'.value
       let (valueType, value'?) ← TypeChecker.check v'.value v'.levelParams
       let value' := value'?.getD v'.value.toPExpr
@@ -160,26 +160,26 @@ def patchMutual (env : Environment) (vs : List DefinitionVal) :
   return newvs'.map .defnInfo |>.toList
 
 /-- Type check given declaration and add it to the environment -/
-def addDecl' (env : Environment) (decl : @& Declaration) (allowAxiomReplace := false) :
+def addDecl' (env : Environment) (decl : @& Declaration) (opts : TypeCheckerOpts := {}) (allowAxiomReplace := false) :
     Except KernelException Environment := do
   match decl with
   | .axiomDecl v =>
-    let v ← patchAxiom env v
+    let v ← patchAxiom env v opts
     return add env v
   | .defnDecl v =>
-    let v ← patchDefinition env v allowAxiomReplace
+    let v ← patchDefinition env v allowAxiomReplace opts
     return add env v
   | .thmDecl v =>
-    let v ← patchTheorem env v allowAxiomReplace
+    let v ← patchTheorem env v allowAxiomReplace opts
     return add env v
   | .opaqueDecl v =>
-    let v ← patchOpaque env v
+    let v ← patchOpaque env v opts
     return add env v
   | .mutualDefnDecl vs =>
-    let vs ← patchMutual env vs
+    let vs ← patchMutual env vs opts
     return vs.foldl (init := env) (fun env v => add env v)
   | .quotDecl =>
     addQuot env
   | .inductDecl lparams nparams types isUnsafe =>
-    let allowPrimitive ← checkPrimitiveInductive env lparams nparams types isUnsafe
+    let allowPrimitive ← checkPrimitiveInductive env lparams nparams types isUnsafe opts
     addInductive env lparams nparams types isUnsafe allowPrimitive -- TODO handle any possible patching in inductive type declarations (low priority)
