@@ -49,7 +49,7 @@ def toCtorWhenK (rval : RecursorVal) (e : PExpr) : m (PExpr × Option (EExpr)) :
   -- check that the indices of types of `e` and `newCtorApp` match
   let (true, pt?) ← meth.isDefEq 105 type appType | return (e, none)
   let prf? ←
-    if (← readThe Context).opts.kLikeReduction then
+    if (← readThe Context).opts.kLikeReduction || pt?.isSome then
       meth.isDefEqProofIrrel' e newCtorApp type appType pt?
     else
       pure none
