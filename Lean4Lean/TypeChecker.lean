@@ -15,6 +15,7 @@ abbrev InferCache := ExprMap Expr
 structure TypeChecker.Data where
 usedProofIrrelevance : Bool := false
 usedKLikeReduction : Bool := false
+numSorries : Nat := 0
 usedFVarEq : Bool := false
 maxRecursionDepth : Nat := 0
 
@@ -120,6 +121,7 @@ def mkId (dom : Expr) : M Name := do
     let np ← mkNewId
     modify fun st => { st with fvarTypeToReusedNamePrefix := st.fvarTypeToReusedNamePrefix.insert dom np }
     pure $ Name.mkNum np 0
+  -- mkNewId
 
 structure Methods where
   isDefEqCore : Nat → Expr → Expr → M Bool
@@ -140,7 +142,14 @@ def traceM (msg : String) : M Unit := do
 def shouldTrace : M Bool := do
   pure $ (← readThe Context).trace && (← readThe Context).callStack.any (·.2.1 == (← readThe Context).dbgCallId)
 
+def shouldTTrace : M Bool := do
+  pure $ (← readThe Context).callId == (← readThe Context).dbgCallId
+
 def trace (msg : String) : RecM Unit := do
+  if ← shouldTrace then
+    dbg_trace msg
+
+def ttrace (msg : String) : RecM Unit := do
   if ← shouldTrace then
     dbg_trace msg
 
@@ -175,6 +184,9 @@ def whnf (n : Nat) (e : Expr) : RecM Expr := fun m => m.whnf n e
 
 @[inline] def withDbg [MonadWithReaderOf Context m] (i : Nat) (x : m α) : m α :=
   withReader (fun l => {l with dbg := i}) x
+
+@[inline] def withNoPI [MonadWithReaderOf Context m] (x : m α) : m α :=
+  withReader (fun l => {l with opts := {l.opts with proofIrrelevance := false}}) x
 
 @[inline] def rctx [MonadReaderOf Context m] : m Context := (readThe Context)
 
@@ -421,7 +433,10 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
       if !inferOnly then
         checkLevel (← readThe Context) l
       pure <| .sort (.succ l)
-    | .const c ls => inferConstant (← readThe Context) c ls inferOnly
+    | .const c ls =>
+      if c == ``sorryAx && not inferOnly then
+        modify fun s => {s with data := {s.data with numSorries := s.data.numSorries + 1}} -- FIXME some better syntax for this?
+      inferConstant (← readThe Context) c ls inferOnly
     | .lam .. => inferLambda e inferOnly
     | .forallE .. => inferForall e inferOnly
     | .app f a =>
@@ -438,7 +453,7 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
 
         -- trace s!"{(← rctx).callId}, {← callStackToStr}, {e.getAppArgs.size}, {e.getAppFn} \n\n{dType}\n\n{aType}"
         if !(← isDefEq 54 dType aType) then
-          -- dbg_trace s!"DBG[1]: TypeChecker.lean:418 \n{dType}\n\n{aType}"
+          -- dbg_trace s!"DBG[1]: TypeChecker.lean:418 \n{← whnf 0 dType}\n\n{← whnf 0 aType}\n\n{a}\n\n {e}"
           throw <| .appTypeMismatch (← getEnv) (← getLCtx) e fType aType
         -- trace s!"{(← rctx).callId}"
         pure <| fType.bindingBody!.instantiate1 a
@@ -458,7 +473,7 @@ def reduceRecursor (e : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) :
   if env.header.quotInit then
     if let some r ← quotReduceRec e (whnf 21) then
       return r
-  let whnf' e := if cheapRec then whnfCore 72 e cheapRec cheapProj else whnf 22 e
+  let whnf' n e := if cheapRec then whnfCore (2000 + n) e cheapRec cheapProj else whnf (1000 + n) e
   if let some (r, usedKLikeReduction) ← inductiveReduceRec env e whnf' atrace (inferType 23) (inferType 23 (inferOnly := false)) (isDefEq 55) (← readThe Context).opts.kLikeReduction then
     if usedKLikeReduction then
       modify fun s => {s with data := {s.data with usedKLikeReduction := true}}

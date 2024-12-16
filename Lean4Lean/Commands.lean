@@ -13,7 +13,7 @@ def getDepConstsEnv (env : Environment) (consts : Array Name) : IO $ Std.HashMap
   let mut (_, {map := map, ..}) ← ((Deps.namedConstDeps consts).toIO { options := default, fileName := "", fileMap := default } {env} {env})
   pure map
 
-def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn : Declaration → M Unit) (initConsts : Array Name := #[]) (printErr := false) (opts : TypeCheckerOpts := {}) (op : String := "typecheck") (printProgress := false) : IO (Lean.NameSet × Environment) := do
+def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn : Declaration → M Unit) (initConsts : Array Name := #[]) (printErr := false) (opts : TypeCheckerOpts := {}) (op : String := "typecheck") (printProgress := false) (interactive : Bool := false) : IO (Lean.NameSet × Environment) := do
   let mut onlyConstsToTrans : Lean.NameSet := default
 
   -- constants that should be skipped on account of already having been typechecked
@@ -38,9 +38,13 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn :
         for skipConst in skippedConsts do
           map := map.erase skipConst
 
-        let rp := replay addDeclFn {newConstants := map.erase const, opts := {}} modEnv (printProgress := printProgress)
+        let rp := do
+          let env ← replay addDeclFn {newConstants := map.erase const, opts := {}} modEnv (printProgress := printProgress)
+          -- _ ← replay Lean4Lean.addDecl {newConstants := ← getDepConstsEnv modEnv #[const], opts := {proofIrrelevance := false, kLikeReduction := false}} env (printProgress := printProgress)
+          -- unsafe replayFromEnv Lean4Lean.addDecl modEnv.mainModule modEnv.toMap₁ (op := "typecheck") (opts := {proofIrrelevance := false, kLikeReduction := false}) (printProgress := false)
+          pure env
 
-        if not (initConsts.contains const) && consts.size == 1 && const != `temp then
+        if (not interactive) && (not (initConsts.contains const)) && consts.size == 1 && const != `temp then
           let outName := (const.toString) ++ s!"_{opts.proofIrrelevance}_{opts.kLikeReduction}.olean"
           let outDir := ((← IO.Process.getCurrentDir).join "saved")
           IO.FS.createDirAll outDir

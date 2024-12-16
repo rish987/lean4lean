@@ -68,6 +68,7 @@ structure Context where
 structure Data where
 prfIrrelUses := 0
 kLikeRedUses := 0
+numSorries := 0
 constsToData : Std.HashMap Name TypeChecker.Data := default
 
 structure State where
@@ -138,6 +139,7 @@ def addDecl (d : Declaration) (verbose := false) (allowAxiomReplace := false) : 
       if verbose then
         println s!"{d.name} used proof irrelevance"
       modify fun s => {s with data := {s.data with prfIrrelUses := s.data.prfIrrelUses + 1}}
+    modify fun s => {s with data := {s.data with numSorries := s.data.numSorries + data.numSorries}}
 
     match d with
     | .axiomDecl d
@@ -353,6 +355,7 @@ def replay (ctx : Context) (env : Environment) (decl : Option Name := none) (pri
     IO.println s!"{numToCheck} total constants typechecked"
     IO.println s!"-- {s.data.prfIrrelUses} used proof irrelevance"
     IO.println s!"-- {s.data.kLikeRedUses} used k-like reduction"
+    IO.println s!"-- {s.data.numSorries} sorries encountered"
     -- if let some onlyConsts := onlyConsts? then
     --   for const in onlyConsts do
     --     IO.println s!"-- {const} data: "
@@ -381,9 +384,9 @@ unsafe def replayFromImports (module : Name) (verbose := false) (compare := fals
   region.free
 
 unsafe def replayFromInit'' (module : Name) (initEnv : Environment) (newConstants : Std.HashMap Name ConstantInfo) (f : Environment → IO Unit) (op : String := "typecheck")
-    (verbose := false) (compare := false) (decl : Option Name := none) (opts : TypeCheckerOpts := {}) : IO Unit := do
+    (verbose := false) (compare := false) (decl : Option Name := none) (opts : TypeCheckerOpts := {}) (printProgress := true) : IO Unit := do
     let ctx := { newConstants, verbose, compare, opts }
-    let env ← replay addDeclFn ctx (initEnv.setMainModule module) (op := op) (decl := decl) (printProgress := true)
+    let env ← replay addDeclFn ctx (initEnv.setMainModule module) (op := op) (decl := decl) (printProgress := printProgress)
     f env
 
 unsafe def replayFromInit' (module : Name) (initEnv : Environment) (f : Environment → IO Unit) (op : String := "typecheck")
@@ -412,9 +415,9 @@ unsafe def replayFromInit' (module : Name) (initEnv : Environment) (f : Environm
     replayFromInit'' addDeclFn module (← mkEmptyEnvironment) newConstants f (op := op) (decl := decl) (verbose := verbose) (compare := compare) (opts := opts)
 
 unsafe def replayFromEnv (module : Name) (initEnv : Environment) (op : String := "typecheck")
-    (verbose := false) (compare := false) (decl : Option Name := none) (opts : TypeCheckerOpts := {}) : IO Unit := do
+    (verbose := false) (compare := false) (decl : Option Name := none) (opts : TypeCheckerOpts := {}) (printProgress := true) : IO Unit := do
   let mut newConstants := initEnv.constants.map₁
-  replayFromInit'' addDeclFn module (← mkEmptyEnvironment) newConstants (fun _ => pure ()) (op := op) (decl := decl) (verbose := verbose) (compare := compare) (opts := opts)
+  replayFromInit'' addDeclFn module (← mkEmptyEnvironment) newConstants (fun _ => pure ()) (op := op) (decl := decl) (verbose := verbose) (compare := compare) (opts := opts) (printProgress := printProgress)
 
 unsafe def replayFromInit (module : Name) (initEnv : Environment) (op : String := "typecheck")
     (verbose := false) (compare := false) (decl : Option Name := none) (opts : TypeCheckerOpts := {}) : IO Unit := do

@@ -18,6 +18,7 @@ def checkConstantVal (env : Environment) (v : ConstantVal) (allowPrimitive := fa
 
 def addAxiom (env : Environment) (v : AxiomVal) (opts : TypeCheckerOpts := {}) :
     Except KernelException (Environment × Data) := do
+  dbg_trace s!"\nAxiom encountered: {v.name}"
   let (_, s) ← (checkConstantVal env v.toConstantVal).run env
     (safety := if v.isUnsafe then .unsafe else .safe) (opts := opts)
   return (add env (.axiomInfo v), s.data)
