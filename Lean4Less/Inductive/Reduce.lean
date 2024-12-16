@@ -50,6 +50,7 @@ def toCtorWhenK (rval : RecursorVal) (e : PExpr) : m (PExpr × Option (EExpr)) :
   let (true, pt?) ← meth.isDefEq 105 type appType | return (e, none)
   let prf? ←
     if (← readThe Context).opts.kLikeReduction || pt?.isSome then
+      -- TODO TODO TODO make sure that proof irrelevance is defined as a theorem if opts.proofIrrelevance = false
       meth.isDefEqProofIrrel' e newCtorApp type appType pt?
     else
       pure none

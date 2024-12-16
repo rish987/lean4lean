@@ -572,7 +572,7 @@ def mkLet (t s : PExpr) (p : EExpr) : RecM (EExpr × LocalDeclE × Option (FVarI
   let lv := .lvar {A, B, a := t, b := s, u, v := decl.fvarId}
   pure (lv, decl, lastVar?)
 
-def checkIsDefEqCache (t s : PExpr) (m : RecB) : RecB := do
+def checkIsDefEqCache (_n : Nat) (t s : PExpr) (m : RecB) : RecB := do
   if let some (lv, decl, lastVar?) := (← get).isDefEqCache.get? (t, s) then -- TODO let var abstraction optimization
     if not ((← getLCtx).containsFVar lv) then
       addLVarToCtx decl lastVar?
@@ -584,6 +584,8 @@ def checkIsDefEqCache (t s : PExpr) (m : RecB) : RecB := do
   let (result, p?) ← m
   let newp? ←
     if result then
+      if let some p := (← get).isDefEqCache.get? (t, s) then
+        return (result, p.1)
       if let some p := p? then
         let (lv, decl, lastVar?) ← mkLet t s p
         modify fun st => { st with isDefEqCache := st.isDefEqCache.insert (t, s) (lv, decl, lastVar?.map (·.1))}
@@ -597,7 +599,7 @@ def checkIsDefEqCache (t s : PExpr) (m : RecB) : RecB := do
 
 @[inherit_doc isDefEqCore]
 def isDefEq (n : Nat) (t s : PExpr) : RecB := do
-  checkIsDefEqCache t s do
+  checkIsDefEqCache n t s do
     isDefEqCore n t s
 
 def reduceRecursorLean (t : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) := do
@@ -899,7 +901,7 @@ their function heads and arguments being defeq.
 -/
 def _isDefEqApp (t s : PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default)
   (tfEqsf? : Option (Option EExpr) := none) : RecM (Bool × Option EExpr) := do
-  checkIsDefEqCache t s do
+  checkIsDefEqCache 0 t s do
     let (isDefEq, data?) ← isDefEqApp' (cache := false) t s targsEqsargs? tfEqsf?
     let p? := data?.map (·.1)
     pure (isDefEq, p?)
