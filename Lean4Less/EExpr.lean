@@ -9,10 +9,37 @@ instance : Coe LocalDecl FVarId where
 instance : ToString FVarIdSet where
 toString s := toString $ s.toArray.map (·.1)
 
-namespace Lean4Less
+@[inline] def mkBinding' (isLambda : Bool) (lctx : LocalContext) (letCounts : Std.HashMap FVarId Nat) (xs : Array Expr) (b : Expr) : Expr :=
+  let b := b.abstract xs
+  xs.size.foldRev (init := b) fun i b =>
+    let x := xs[i]!
+    match lctx.findFVar? x with
+    | some (.cdecl _ _ n ty bi _)  =>
+      let ty := ty.abstractRange i xs;
+      if isLambda then
+        Lean.mkLambda n bi ty b
+      else
+        Lean.mkForall n bi ty b
+    | some (.ldecl _ id n ty val nonDep _) =>
+      if b.hasLooseBVar 0 then
+        if letCounts.get! id > 1 then
+          let ty  := ty.abstractRange i xs
+          let val := val.abstractRange i xs
+          mkLet n ty val b nonDep
+        else
+          let val := val.abstractRange i xs
+          b.instantiate1 val
+      else
+        b.lowerLooseBVars 1 1
+    | none => panic! "unknown free variable"
 
-def mkLambda (vars : Array LocalDecl) (b : Expr) : PExpr := LocalContext.mkLambda (vars.foldl (init := default) fun lctx decl => lctx.addDecl decl) (vars.map (·.toExpr)) b |>.toPExpr
-def mkForall (vars : Array LocalDecl) (b : Expr) : PExpr := LocalContext.mkForall (vars.foldl (init := default) fun lctx decl => lctx.addDecl decl) (vars.map (·.toExpr)) b |>.toPExpr
+def _root_.Lean.LocalContext.mkLambda' (lctx : LocalContext) (letCounts : Std.HashMap FVarId Nat) (xs : Array Expr) (b : Expr) : Expr :=
+  mkBinding' true lctx letCounts xs b
+
+def _root_.Lean.LocalContext.mkForall' (lctx : LocalContext) (letCounts : Std.HashMap FVarId Nat) (xs : Array Expr) (b : Expr) : Expr :=
+  mkBinding' false lctx letCounts xs b
+
+namespace Lean4Less
 
 /--
   Optimized version of Lean.Expr.containsFVar, assuming no bound vars in `e`.
@@ -22,29 +49,6 @@ def _root_.Lean.Expr.containsFVar' (e : Expr) (fv : FVarId) : Bool :=
 
 def PExpr.containsFVar' (e : PExpr) (fv : LocalDecl) : Bool := -- optimized version of Lean.Expr.containsFVar
   e.toExpr.containsFVar' fv.fvarId
-
-def getMaybeDepLemmaApp (Uas : Array PExpr) (as : Array LocalDecl) : Array PExpr × Bool :=
-  let dep := Uas.zip as |>.foldl (init := false) fun acc (Ua, a) =>
-    Ua.toExpr.containsFVar' a.fvarId || acc
-  let ret := Uas.zip as |>.map fun (Ua, a) =>
-    if dep then
-      mkLambda #[a] Ua
-    else
-      Ua
-  (ret, dep)
-
-def getMaybeDepLemmaApp1 (U : PExpr × LocalDecl) : (PExpr × Bool) :=
-  let (Ua, a) := U
-  match getMaybeDepLemmaApp #[Ua] #[a] with
-  | (#[U], dep) => (U, dep)
-  | _ => unreachable!
-
-def getMaybeDepLemmaApp2 (U V : (PExpr × LocalDecl)) : (PExpr × PExpr × Bool) :=
-  let (Ua, a) := U
-  let (Vb, b) := V
-  match getMaybeDepLemmaApp #[Ua, Vb] #[a, b] with
-  | (#[U, V], dep) => (U, V, dep)
-  | _ => unreachable!
 
 instance : Hashable LocalDecl where
 hash l := hash (l.toExpr, l.type)
@@ -57,6 +61,7 @@ structure EContext where
   rev : Bool := false
   ctorStack : Array (Name × Array Name) := #[]
   reversedFvars : Std.HashSet FVarId := {}
+  letCounts : Std.HashMap FVarId Nat 
 
 structure LocalDeclE where
 (index : Nat) (fvarId : FVarId) (userName : Name) (type : Expr) (usedLets : FVarIdSet) (value : EContext → Expr)
@@ -67,8 +72,8 @@ inductive LocalDecl' where
 | l : LocalDecl → LocalDecl'
 deriving Inhabited
 
-instance : Coe LocalDeclE LocalDecl where
-coe l := .ldecl l.index l.fvarId l.userName l.type (l.value {}) false default -- TODO investigate use of `LocalDeclKind` field
+def LocalDeclE.toLocalDecl (l : LocalDeclE) (letCounts : Std.HashMap FVarId Nat) : LocalDecl := 
+.ldecl l.index l.fvarId l.userName l.type (l.value {letCounts}) false default -- TODO investigate use of `LocalDeclKind` field
 
 -- FIXME should I really be doing this?
 instance : Coe (Array LocalDeclE) FVarIdSet where
@@ -482,10 +487,10 @@ structure EState where -- TODO why is this needed for dbg_trace to show up?
 
 abbrev EM := ReaderT EContext <| StateT EState <| Id
 
-def EM.run (dbg : Bool := false) (x : EM α) : α :=
-  (StateT.run (x { dbg }) {}).1
+def EM.run (letCounts : Std.HashMap FVarId Nat) (dbg : Bool := false) (x : EM α) : α :=
+  (StateT.run (x { dbg, letCounts }) {}).1
 
-def EM.run' (ctx : EContext := {}) (x : EM α) : α :=
+def EM.run' (ctx : EContext) (x : EM α) : α :=
   (StateT.run (x ctx) {}).1
 
 def withRev (rev : Bool) (x : EM α) : EM α :=
@@ -869,21 +874,48 @@ def expandLets (vars : Array (LocalDecl × (Array LocalDeclE))) : EM (Array Loca
       ret := ret.push (.ldecl 0 l.fvarId l.userName l.type (l.value (← read)) false default)
   pure ret
 
+def mkLambda (vars : Array LocalDecl) (b : Expr) : EM PExpr := do
+  pure $ LocalContext.mkLambda' (vars.foldl (init := default) fun lctx decl => lctx.addDecl decl) (← read).letCounts (vars.map (·.toExpr)) b |>.toPExpr
+def mkForall (vars : Array LocalDecl) (b : Expr) : PExpr := LocalContext.mkForall (vars.foldl (init := default) fun lctx decl => lctx.addDecl decl) (vars.map (·.toExpr)) b |>.toPExpr
+
+def getMaybeDepLemmaApp (Uas : Array PExpr) (as : Array LocalDecl) : EM $ Array PExpr × Bool := do
+  let dep := Uas.zip as |>.foldl (init := false) fun acc (Ua, a) =>
+    Ua.toExpr.containsFVar' a.fvarId || acc
+  let ret ← Uas.zip as |>.mapM fun (Ua, a) => do
+    if dep then
+      mkLambda #[a] Ua
+    else
+      pure Ua
+  pure (ret, dep)
+
+def getMaybeDepLemmaApp1 (U : PExpr × LocalDecl) : EM (PExpr × Bool) := do
+  let (Ua, a) := U
+  match ← getMaybeDepLemmaApp #[Ua] #[a] with
+  | (#[U], dep) => pure (U, dep)
+  | _ => unreachable!
+
+def getMaybeDepLemmaApp2 (U V : (PExpr × LocalDecl)) : EM (PExpr × PExpr × Bool) := do
+  let (Ua, a) := U
+  let (Vb, b) := V
+  match ← getMaybeDepLemmaApp #[Ua, Vb] #[a, b] with
+  | (#[U, V], dep) => pure (U, V, dep)
+  | _ => unreachable!
+
 mutual
 def HUVData.toExprDep' (e : HUVData EExpr) : EM Expr := match e with -- FIXME why can't I use a single function here?
 | {a, UaEqVb, extra, alets, ..} => do
   let ret ← if (← rev) then withReversedFVars (alets.map (·.fvarId)) do
     match extra with
       | .some {b, vaEqb, blets, ..} => withReversedFVars (#[vaEqb.aEqb.fvarId] ++ blets.map (·.fvarId) ++ vaEqb.lets.map (·.fvarId)) do
-        pure $ mkLambda (← expandLets #[(b, blets), (a, alets), (vaEqb.bEqa, vaEqb.lets)]) (← UaEqVb.1.toExpr')
+        mkLambda (← expandLets #[(b, blets), (a, alets), (vaEqb.bEqa, vaEqb.lets)]) (← UaEqVb.1.toExpr')
       | .none =>
-        pure $ mkLambda (← expandLets #[(a, alets)]) (← UaEqVb.1.toExpr')
+        mkLambda (← expandLets #[(a, alets)]) (← UaEqVb.1.toExpr')
   else
     match extra with
       | .some {b, vaEqb, blets, ..} =>
-        pure $ mkLambda (← expandLets #[(a, alets), (b, blets), (vaEqb.aEqb, vaEqb.lets)]) (← UaEqVb.1.toExpr')
+        mkLambda (← expandLets #[(a, alets), (b, blets), (vaEqb.aEqb, vaEqb.lets)]) (← UaEqVb.1.toExpr')
       | .none => 
-        pure $ mkLambda (← expandLets #[(a, alets)]) (← UaEqVb.1.toExpr')
+        mkLambda (← expandLets #[(a, alets)]) (← UaEqVb.1.toExpr')
   pure ret
 
 def HUVData.toExpr' (e : HUVData EExpr) : EM Expr := match e with
@@ -904,40 +936,40 @@ def LamData.toExpr (e : LamData EExpr) : EM Expr := match e with
   if (← rev) then withReversedFVars (alets.map (·.fvarId)) do
     let hfg ← match extra with
     | .ABUV {b, vaEqb, blets, ..} .. => withReversedFVars (#[vaEqb.aEqb.fvarId] ++ blets.map (·.fvarId) ++ vaEqb.lets.map (·.fvarId)) do
-      pure $ mkLambda (← expandLets #[(b, blets), (a, alets), (vaEqb.bEqa, vaEqb.lets)]) (← faEqgx.1.toExpr')
+      mkLambda (← expandLets #[(b, blets), (a, alets), (vaEqb.bEqa, vaEqb.lets)]) (← faEqgx.1.toExpr')
     | .UV ..
-    | .none => pure $ mkLambda (← expandLets #[(a, alets)]) (← faEqgx.1.toExpr')
+    | .none => mkLambda (← expandLets #[(a, alets)]) (← faEqgx.1.toExpr')
 
     let (args, dep) ← match extra with
     | .ABUV {B, hAB, ..} {V} =>
-        let (U, V, dep) := getMaybeDepLemmaApp2 U V
+        let (U, V, dep) ← getMaybeDepLemmaApp2 U V
         pure $ (#[B.toExpr, A, V, U, g, f, (← hAB.1.toExpr'), hfg], dep)
     | .UV {V} => 
-        let (U, V, dep) := getMaybeDepLemmaApp2 U V
+        let (U, V, dep) ← getMaybeDepLemmaApp2 U V
         pure (#[A.toExpr, V, U, g, f, hfg], dep)
     | .none => 
-        let (U, dep) := getMaybeDepLemmaApp1 U
+        let (U, dep) ← getMaybeDepLemmaApp1 U
         pure (#[A.toExpr, U, g, f, hfg], dep)
     let n := extra.lemmaName dep
     pure $ Lean.mkAppN (.const n [u, v]) args
   else
     let hfg ← match extra with
     | .ABUV {b, vaEqb, blets, ..} .. =>
-      pure $ mkLambda (← expandLets #[(a, alets), (b, blets), (vaEqb.aEqb, vaEqb.lets)]) (← faEqgx.1.toExpr')
+      mkLambda (← expandLets #[(a, alets), (b, blets), (vaEqb.aEqb, vaEqb.lets)]) (← faEqgx.1.toExpr')
     | .UV ..
-    | .none => pure $ mkLambda (← expandLets #[(a, alets)]) (← faEqgx.1.toExpr')
+    | .none => mkLambda (← expandLets #[(a, alets)]) (← faEqgx.1.toExpr')
 
     let (args, dep, U) ← match extra with
     | .ABUV {B, hAB, b, ..} {V} =>
-        let (U, V, dep) := getMaybeDepLemmaApp2 U V
+        let (U, V, dep) ← getMaybeDepLemmaApp2 U V
         -- if dbgFIds.any (· == a.fvarId.name) then
         --   dbg_trace s!"DBG[0]: {a.fvarId.name}, {b.fvarId.name}, {dep}, {Lean.collectFVars default V |>.fvarIds.map (·.name)}"
         pure $ (#[A.toExpr, B, U, V, f, g, (← hAB.1.toExpr'), hfg], dep, V)
     | .UV {V} => 
-        let (U, V, dep) := getMaybeDepLemmaApp2 U V
+        let (U, V, dep) ← getMaybeDepLemmaApp2 U V
         pure (#[A.toExpr, U, V, f, g, hfg], dep, U)
     | .none => 
-        let (U, dep) := getMaybeDepLemmaApp1 U
+        let (U, dep) ← getMaybeDepLemmaApp1 U
         pure (#[A.toExpr, U, f, g, hfg], dep, U)
 
     let n := extra.lemmaName dep
@@ -953,25 +985,25 @@ if dep then name.toString ++ "'" |>.toName else name
 def ForallData.toExpr (e : ForallData EExpr) : EM Expr := match e with
 | {u, v, A, U, a, extra, alets, ..} => do
 
-  let (U, V?, dep) :=
+  let (U, V?, dep) ← do
     match extra with
     | .ABUV {V, ..}
     | .UV {V, ..} =>
-      let (U, V, dep) := getMaybeDepLemmaApp2 U V
-      (U, V, dep)
+      let (U, V, dep) ← getMaybeDepLemmaApp2 U V
+      pure (U, V, dep)
     | .AB {..} => 
-      let (U, dep) := getMaybeDepLemmaApp1 U
+      let (U, dep) ← getMaybeDepLemmaApp1 U
       assert! not dep
-      (U, default, dep)
+      pure (U, default, dep)
 
   let (args, dep) ← if (← rev) then
     let hUV dep := do withReversedFVars (alets.map (·.fvarId)) do
       if dep then
         match extra with
         | .ABUV {b, vaEqb, UaEqVx, blets, ..} => withReversedFVars (#[vaEqb.aEqb.fvarId] ++ blets.map (·.fvarId) ++ vaEqb.lets.map (·.fvarId)) do
-          pure $ mkLambda (← expandLets #[(b, blets), (a, alets), (vaEqb.bEqa, vaEqb.lets)]) (← UaEqVx.1.toExpr')
+          mkLambda (← expandLets #[(b, blets), (a, alets), (vaEqb.bEqa, vaEqb.lets)]) (← UaEqVx.1.toExpr')
         | .UV {UaEqVx, ..} =>
-          pure $ mkLambda (← expandLets #[(a, alets)]) (← UaEqVx.1.toExpr')
+          mkLambda (← expandLets #[(a, alets)]) (← UaEqVx.1.toExpr')
         | _ => unreachable!
       else
         match extra with
@@ -993,9 +1025,9 @@ def ForallData.toExpr (e : ForallData EExpr) : EM Expr := match e with
       if dep then
         match extra with
         | .ABUV {b, vaEqb, UaEqVx, blets, ..} =>
-          pure $ mkLambda (← expandLets #[(a, alets), (b, blets), (vaEqb.aEqb, vaEqb.lets)]) (← UaEqVx.1.toExpr')
+          mkLambda (← expandLets #[(a, alets), (b, blets), (vaEqb.aEqb, vaEqb.lets)]) (← UaEqVx.1.toExpr')
         | .UV {UaEqVx, ..} =>
-          pure $ mkLambda (← expandLets #[(a, alets)]) (← UaEqVx.1.toExpr')
+          mkLambda (← expandLets #[(a, alets)]) (← UaEqVx.1.toExpr')
         | _ => unreachable!
       else
         match extra with
@@ -1032,48 +1064,48 @@ def AppData.toExpr (e : AppData EExpr) : EM Expr := match e with
   let (args, dep) ← if (← rev) then
     match extra with
     | .ABUV {B, hAB, V, hUV, g, fEqg, b, aEqb, ..} =>
-      let (U, V, dep) := getMaybeDepLemmaApp2 U V
+      let (U, V, dep) ← getMaybeDepLemmaApp2 U V
       pure (#[B.toExpr, A, V, U, (← hAB.1.toExpr'), (← if dep then do hUV.toExprDep' else hUV.toExpr'), g, f, b, a, (← fEqg.1.toExpr'), (← aEqb.1.toExpr')], dep)
     | .UV {V, hUV, g, fEqg, b, aEqb, ..} => 
-      let (U, V, dep) := getMaybeDepLemmaApp2 U V
+      let (U, V, dep) ← getMaybeDepLemmaApp2 U V
       pure (#[A.toExpr, V, U, (← if dep then hUV.toExprDep' else hUV.toExpr'), g, f, b, a, (← fEqg.1.toExpr'), (← aEqb.1.toExpr')], dep)
     | .UVFun {V, hUV, g, fEqg, ..} => 
-      let (U, V, dep) := getMaybeDepLemmaApp2 U V
+      let (U, V, dep) ← getMaybeDepLemmaApp2 U V
       pure (#[A.toExpr, V, U, (← if dep then hUV.toExprDep' else hUV.toExpr'), g, f, a, (← fEqg.1.toExpr')], dep)
     | .AB {B, hAB, g, fEqg, b, aEqb, ..} => 
       let U := U.1
       pure (#[B.toExpr, A, U, (← hAB.1.toExpr'), g, f, b, a, (← fEqg.1.toExpr'), (← aEqb.1.toExpr')], false)
     | .none {g, fEqg, b, aEqb, ..} => -- TODO fails to show termination if doing nested match?
-      let (U, dep) := getMaybeDepLemmaApp1 U
+      let (U, dep) ← getMaybeDepLemmaApp1 U
       pure (#[A.toExpr, U, g, f, b, a, (← fEqg.1.toExpr'), (← aEqb.1.toExpr')], dep)
     | .Fun {g, fEqg, ..} =>
-      let (U, dep) := getMaybeDepLemmaApp1 U
+      let (U, dep) ← getMaybeDepLemmaApp1 U
       pure (#[A.toExpr, U, g, f, a, (← fEqg.1.toExpr')], dep)
     | .Arg {b, aEqb, ..} =>
-      let (U, dep) := getMaybeDepLemmaApp1 U
+      let (U, dep) ← getMaybeDepLemmaApp1 U
       pure (#[A.toExpr, U, f, b, a, (← aEqb.1.toExpr')], dep)
   else
     match extra with
     | .ABUV {B, hAB, V, hUV, g, fEqg, b, aEqb, ..} =>
-      let (U, V, dep) := getMaybeDepLemmaApp2 U V
+      let (U, V, dep) ← getMaybeDepLemmaApp2 U V
       pure (#[A.toExpr, B, U, V, (← hAB.1.toExpr'), (← if dep then do hUV.toExprDep' else hUV.toExpr'), f, g, a, b, (← fEqg.1.toExpr'), (← aEqb.1.toExpr')], dep)
     | .UV {V, hUV, g, fEqg, b, aEqb, ..} => 
-      let (U, V, dep) := getMaybeDepLemmaApp2 U V
+      let (U, V, dep) ← getMaybeDepLemmaApp2 U V
       pure (#[A.toExpr, U, V, (← if dep then hUV.toExprDep' else hUV.toExpr'), f, g, a, b, (← fEqg.1.toExpr'), (← aEqb.1.toExpr')], dep)
     | .UVFun {V, hUV, g, fEqg, ..} => 
-      let (U, V, dep) := getMaybeDepLemmaApp2 U V
+      let (U, V, dep) ← getMaybeDepLemmaApp2 U V
       pure (#[A.toExpr, U, V, (← if dep then hUV.toExprDep' else hUV.toExpr'), f, g, a, (← fEqg.1.toExpr')], dep)
     | .AB {B, hAB, g, fEqg, b, aEqb, ..} => 
       let U := U.1
       pure (#[A.toExpr, B, U, (← hAB.1.toExpr'), f, g, a, b, (← fEqg.1.toExpr'), (← aEqb.1.toExpr')], false)
     | .none {g, fEqg, b, aEqb, ..} => -- TODO fails to show termination if doing nested match?
-      let (U, dep) := getMaybeDepLemmaApp1 U
+      let (U, dep) ← getMaybeDepLemmaApp1 U
       pure (#[A.toExpr, U, f, g, a, b, (← fEqg.1.toExpr'), (← aEqb.1.toExpr')], dep)
     | .Fun {g, fEqg, ..} =>
-      let (U, dep) := getMaybeDepLemmaApp1 U
+      let (U, dep) ← getMaybeDepLemmaApp1 U
       pure (#[A.toExpr, U, f, g, a, (← fEqg.1.toExpr')], dep)
     | .Arg {b, aEqb, ..} =>
-      let (U, dep) := getMaybeDepLemmaApp1 U
+      let (U, dep) ← getMaybeDepLemmaApp1 U
       pure (#[A.toExpr, U, f, a, b, (← aEqb.1.toExpr')], dep)
   let n := extra.lemmaName dep
   pure $ Lean.mkAppN (.const n [u, v]) args
@@ -1193,32 +1225,32 @@ def EExpr.toExpr' (e : EExpr) : EM Expr :=
 
 end
 
-def EExpr.toExpr (e : EExpr) (dbg := false) : Expr := Id.run $ do
+def EExpr.toExpr (letCounts : Std.HashMap FVarId Nat) (e : EExpr) (dbg := false) : Expr := Id.run $ do
   -- dbg_trace s!"DBG[1]: EExpr.lean:1066 (after def EExpr.toExpr (e : EExpr) (dbg := fal…)"
-  let ret ← e.toExpr'.run dbg
+  let ret ← e.toExpr'.run letCounts dbg
   -- dbg_trace s!"DBG[2]: EExpr.lean:1068 (after let ret ← e.toExpr.run dbg)"
   pure ret
 
 namespace EExpr
 
-def toPExpr (e : EExpr) : PExpr := .mk e.toExpr
+def toPExpr (letCounts : Std.HashMap FVarId Nat) (e : EExpr) : PExpr := .mk (e.toExpr letCounts)
 
-instance : BEq EExpr where
-beq x y := x.toExpr == y.toExpr
+-- instance : BEq EExpr where
+-- beq x y := x.toExpr == y.toExpr
 
 end EExpr
 
 instance : ToString EExpr where
-toString e := toString $ e.toExpr
+toString e := toString $ e.toExpr default
 
 -- def EExpr.instantiateRev (e : EExpr) (subst : Array EExpr) : EExpr :=
 --   e.toExpr.instantiateRev (subst.map (·.toExpr)) |>.toEExpr
 
 instance : ToString (Option EExpr) where
-toString e? := toString $ e?.map (·.toExpr)
+toString e? := toString $ e?.map (·.toExpr default)
 
 -- instance : Coe EExpr Expr := ⟨toExpr⟩
-instance : Coe EExpr PExpr := ⟨(EExpr.toPExpr)⟩
+-- instance : Coe EExpr PExpr := ⟨(EExpr.toPExpr default)⟩
 
 structure BinderData where
 name : Name
