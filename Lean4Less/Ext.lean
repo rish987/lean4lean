@@ -91,6 +91,7 @@ structure ExtMethods (m : Type → Type u) where
   getTrace : Bool → m String
   withNewFVar : Nat → Name → PExpr → BinderInfo → (LocalDecl → m α) → m α
   getLets : Nat → FVarId → m (Array LocalDeclE)
+  checkExprCache (e : PExpr) (T? : Option PExpr := none) : m PExpr
 
 structure TypeCheckerOpts where
   proofIrrelevance := true

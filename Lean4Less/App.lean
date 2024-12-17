@@ -21,7 +21,7 @@ variable [Monad m] [MonadLCtx m] [MonadExcept KernelException m] [MonadNameGener
 
 namespace App
 
-def mkAppEqProof? (aVars bVars : Array LocalDecl) (us vs : Array Level) (Uas Vbs : Array PExpr) (UasEqVbs? : Array (Option EExpr))(ds? : Array (Option (LocalDecl × LocalDecl × EExpr))) (as bs : Array PExpr) (asEqbs? : Array (Option EExpr)) (f g : PExpr) (fEqg? : Option EExpr := none)
+def mkAppEqProof? (aVars bVars : Array LocalDecl) (us vs : Array Level) (Uas Vbs : Array PExpr) (UasEqVbs? : Array (Option EExpr))(ds? : Array (Option (LocalDecl × LocalDecl × EExpr))) (as bs : Array PExpr) (asEqbs? : Array (Option EExpr)) (f g : PExpr) (usedLets' : FVarIdSet) (fEqg? : Option EExpr := none)
 : m (Option EExpr) := do
   let mut fEqg? := fEqg?
   let mut f := f
@@ -98,14 +98,14 @@ def mkAppEqProof? (aVars bVars : Array LocalDecl) (us vs : Array Level) (Uas Vbs
             pure $ .AB {B, hAB, g, fEqg, b, aEqb}
         else
           elseCase
-        pure $ .some $ .app {u, v, A, U, f, a, extra}
+        pure $ .some $ .app {u, v, A, U, f, a, extra, usedLets'}
       else
         pure none
     f := f.toExpr.app a |>.toPExpr
     g := g.toExpr.app b |>.toPExpr
   pure fEqg?
 
-def mkAppEqProof (TLam SLam : PExpr) (TVarLams SVarLams : Array ((Array Nat) × Name × BinderInfo × PExpr)) (TEqS? : Option EExpr) (as bs : Array PExpr) (asEqbs? : Array (Option EExpr)) (f g : PExpr) (fEqg? : Option EExpr := none) : m (Option EExpr) := do
+def mkAppEqProof (TLam SLam : PExpr) (TVarLams SVarLams : Array ((Array Nat) × Name × BinderInfo × PExpr)) (TEqS? : Option EExpr) (as bs : Array PExpr) (asEqbs? : Array (Option EExpr)) (f g : PExpr) (usedLets' : FVarIdSet) (fEqg? : Option EExpr := none) : m (Option EExpr) := do
   let rec loop idx aVars bVars Uas Vbs UasEqVbs? ds? us vs : m (Option EExpr) := do
     -- try
     --   let fType ← meth.inferTypePure 2071 (Lean.mkAppN f.toExpr (as[:idx].toArray.map (·.toExpr))).toPExpr -- sanity check TODO remove
@@ -209,7 +209,7 @@ def mkAppEqProof (TLam SLam : PExpr) (TVarLams SVarLams : Array ((Array Nat) × 
         if _h : idx < as.size - 1 then
           loop (idx + 1) aVars bVars Uas Vbs UasEqVbs? ds? us vs
         else
-          let ret ← mkAppEqProof? meth aVars bVars us vs Uas Vbs UasEqVbs? ds? as bs asEqbs? f g fEqg?
+          let ret ← mkAppEqProof? meth aVars bVars us vs Uas Vbs UasEqVbs? ds? as bs asEqbs? f g usedLets' fEqg?
           pure ret
 
       if let some AEqB := AEqB? then 
@@ -412,8 +412,11 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
       let sBodArgs' := sBodArgs[:sBodArgs.size - sEtaVars].toArray
       let tf' := tLCtx.mkLambda (tVars'.map (.fvar ·.1)) (Lean.mkAppN tBodFun (tBodArgs'.map (·.toExpr)))
       let sf' := sLCtx.mkLambda (sVars'.map (.fvar ·.1)) (Lean.mkAppN sBodFun (sBodArgs'.map (·.toExpr)))
-      let tfTypeLam := tLCtx.mkLambda (tVars.map (.fvar ·.1)) tBodT
-      let sfTypeLam := sLCtx.mkLambda (sVars.map (.fvar ·.1)) sBodT
+      let mut usedLets' : FVarIdSet := default
+      let tfTypeLam ← meth.checkExprCache (tLCtx.mkLambda (tVars.map (.fvar ·.1)) tBodT).toPExpr
+      usedLets' := usedLets'.insert tfTypeLam.toExpr.fvarId!
+      let sfTypeLam ← meth.checkExprCache (sLCtx.mkLambda (sVars.map (.fvar ·.1)) sBodT).toPExpr
+      usedLets' := usedLets'.insert sfTypeLam.toExpr.fvarId!
       -- let (tfType', sfType') ← meth.alignForAll tArgs.size tfType sfType -- TODO how to put .toPExpr directly on matched vars?
       -- let (defEq, p?) ← meth.isDefEqForall tfType.toPExpr sfType.toPExpr tVars.size fun tfTypeEqsfType? => do
       --   let ret ← mkAppEqProof meth tfType.toPExpr sfType.toPExpr tfTypeEqsfType? tArgs' sArgs' taEqsas' tf'.toPExpr sf'.toPExpr
@@ -453,15 +456,17 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
               depVars := depVars.push prevVar
               depVarIdxs := depVarIdxs.push di
             di := di + 1
-          let lam := (lctx.mkLambda (depVars.map (.fvar ·.1)) type)
-          ret := ret.push (depVarIdxs, n, default, lam.toPExpr)
+          let lam ← meth.checkExprCache (lctx.mkLambda (depVars.map (.fvar ·.1)) type).toPExpr
+          ret := ret.push (depVarIdxs, n, default, lam)
           i := i + 1
         pure ret
 
       let tVarLams ← getVarLams tVars tLCtx
       let sVarLams ← getVarLams sVars sLCtx
+      for (_, _, _, lam) in tVarLams ++ sVarLams do
+        usedLets' := usedLets'.insert lam.toExpr.fvarId!
 
-      let p? ← mkAppEqProof meth tfTypeLam.toPExpr sfTypeLam.toPExpr tVarLams sVarLams none tArgs' sArgs' taEqsas' tf'.toPExpr sf'.toPExpr
+      let p? ← mkAppEqProof meth tfTypeLam sfTypeLam tVarLams sVarLams none tArgs' sArgs' taEqsas' tf'.toPExpr sf'.toPExpr usedLets'
       pure p?
     else
       pure none

@@ -62,6 +62,11 @@ structure LocalDeclE where
 (index : Nat) (fvarId : FVarId) (userName : Name) (type : Expr) (usedLets : FVarIdSet) (value : EContext → Expr)
 deriving Inhabited
 
+inductive LocalDecl' where
+| e : LocalDeclE → LocalDecl'
+| l : LocalDecl → LocalDecl'
+deriving Inhabited
+
 instance : Coe LocalDeclE LocalDecl where
 coe l := .ldecl l.index l.fvarId l.userName l.type (l.value {}) false default -- TODO investigate use of `LocalDeclKind` field
 
@@ -314,7 +319,8 @@ U     : PExpr × LocalDecl -- TODO mae fvar arg optional
 f     : PExpr
 a     : PExpr
 extra : AppDataExtra EExpr
-usedLets := extra.usedLets
+usedLets' : FVarIdSet := default
+usedLets := usedLets'.union extra.usedLets
 deriving Inhabited
 
 
