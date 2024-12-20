@@ -11,7 +11,7 @@ toString s := toString $ s.toArray.map (·.1)
 
 @[inline] def mkBinding' (isLambda : Bool) (lctx : LocalContext) (letCounts : Std.HashMap FVarId Nat) (xs : Array Expr) (b : Expr) : Expr :=
   let b := b.abstract xs
-  xs.size.foldRev (init := b) fun i b =>
+  let ret := xs.size.foldRev (init := b) fun i b =>
     let x := xs[i]!
     match lctx.findFVar? x with
     | some (.cdecl _ _ n ty bi _)  =>
@@ -22,16 +22,17 @@ toString s := toString $ s.toArray.map (·.1)
         Lean.mkForall n bi ty b
     | some (.ldecl _ id n ty val nonDep _) =>
       if b.hasLooseBVar 0 then
-        if letCounts.get! id > 1 then
-          let ty  := ty.abstractRange i xs
-          let val := val.abstractRange i xs
-          mkLet n ty val b nonDep
-        else
+        -- if letCounts.get! id > 1 then
+        --   let ty  := ty.abstractRange i xs
+        --   let val := val.abstractRange i xs
+        --   mkLet n ty val b nonDep
+        -- else
           let val := val.abstractRange i xs
           b.instantiate1 val
       else
         b.lowerLooseBVars 1 1
     | none => panic! "unknown free variable"
+  ret
 
 def _root_.Lean.LocalContext.mkLambda' (lctx : LocalContext) (letCounts : Std.HashMap FVarId Nat) (xs : Array Expr) (b : Expr) : Expr :=
   mkBinding' true lctx letCounts xs b

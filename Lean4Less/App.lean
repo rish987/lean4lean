@@ -413,10 +413,10 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
       let tf' := tLCtx.mkLambda (tVars'.map (.fvar ·.1)) (Lean.mkAppN tBodFun (tBodArgs'.map (·.toExpr)))
       let sf' := sLCtx.mkLambda (sVars'.map (.fvar ·.1)) (Lean.mkAppN sBodFun (sBodArgs'.map (·.toExpr)))
       let mut usedLets' : FVarIdSet := default
-      let tfTypeLam ← meth.checkExprCache (tLCtx.mkLambda (tVars.map (.fvar ·.1)) tBodT).toPExpr
-      usedLets' := usedLets'.insert tfTypeLam.toExpr.fvarId!
-      let sfTypeLam ← meth.checkExprCache (sLCtx.mkLambda (sVars.map (.fvar ·.1)) sBodT).toPExpr
-      usedLets' := usedLets'.insert sfTypeLam.toExpr.fvarId!
+      let tfTypeLam := (tLCtx.mkLambda (tVars.map (.fvar ·.1)) tBodT).toPExpr
+      -- usedLets' := usedLets'.insert tfTypeLam.toExpr.fvarId!
+      let sfTypeLam := (sLCtx.mkLambda (sVars.map (.fvar ·.1)) sBodT).toPExpr
+      -- usedLets' := usedLets'.insert sfTypeLam.toExpr.fvarId!
       -- let (tfType', sfType') ← meth.alignForAll tArgs.size tfType sfType -- TODO how to put .toPExpr directly on matched vars?
       -- let (defEq, p?) ← meth.isDefEqForall tfType.toPExpr sfType.toPExpr tVars.size fun tfTypeEqsfType? => do
       --   let ret ← mkAppEqProof meth tfType.toPExpr sfType.toPExpr tfTypeEqsfType? tArgs' sArgs' taEqsas' tf'.toPExpr sf'.toPExpr
@@ -456,15 +456,15 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
               depVars := depVars.push prevVar
               depVarIdxs := depVarIdxs.push di
             di := di + 1
-          let lam ← meth.checkExprCache (lctx.mkLambda (depVars.map (.fvar ·.1)) type).toPExpr
+          let lam := (lctx.mkLambda (depVars.map (.fvar ·.1)) type).toPExpr
           ret := ret.push (depVarIdxs, n, default, lam)
           i := i + 1
         pure ret
 
       let tVarLams ← getVarLams tVars tLCtx
       let sVarLams ← getVarLams sVars sLCtx
-      for (_, _, _, lam) in tVarLams ++ sVarLams do
-        usedLets' := usedLets'.insert lam.toExpr.fvarId!
+      -- for (_, _, _, lam) in tVarLams ++ sVarLams do
+      --   usedLets' := usedLets'.insert lam.toExpr.fvarId!
 
       let p? ← mkAppEqProof meth tfTypeLam sfTypeLam tVarLams sVarLams none tArgs' sArgs' taEqsas' tf'.toPExpr sf'.toPExpr usedLets'
       pure p?
