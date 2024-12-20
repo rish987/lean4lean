@@ -70,7 +70,10 @@ def patchDefinition (env : Environment) (v : DefinitionVal) (allowAxiomReplace :
           return .axiomInfo {v with type, isUnsafe := false}
         else
           throw <| .declTypeMismatch env (.defnDecl v) valueType
-      -- dbg_trace s!"DBG[1]: Methods.lean:202: patch={(Lean.collectFVars default value.toExpr).fvarIds.map fun v => v.name}"
+      -- dbg_trace s!"DBG[0]: Methods.lean:202: patch={(Lean.collectFVars default type.toExpr).fvarIds.map fun v => v.name}"
+      -- dbg_trace s!"DBG[1]: Methods.lean:202: patch={(Lean.collectFVars default value'.toExpr).fvarIds.map fun v => v.name}"
+      -- dbg_trace s!"DBG[2]: Methods.lean:202: patch={(Lean.collectFVars default valueType.toExpr).fvarIds.map fun v => v.name}"
+      -- dbg_trace s!"DBG[3]: Methods.lean:202: patch={← (Lean.collectFVars default value.toExpr).fvarIds.mapM fun v => do pure (v.name, (← get).fvarRegistry.get? v.name)}"
       -- dbg_trace s!"DBG[15]: Environment.lean:65 (after let value ← smartCast valueType type v…)"
       let value ← insertInitLets value
       let v := {v with type, value}

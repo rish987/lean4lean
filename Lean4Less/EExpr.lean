@@ -11,7 +11,7 @@ toString s := toString $ s.toArray.map (·.1)
 
 @[inline] def mkBinding' (isLambda : Bool) (lctx : LocalContext) (letCounts : Std.HashMap FVarId Nat) (xs : Array Expr) (b : Expr) : Expr :=
   let b := b.abstract xs
-  xs.size.foldRev (init := b) fun i b =>
+  let ret := xs.size.foldRev (init := b) fun i b =>
     let x := xs[i]!
     match lctx.findFVar? x with
     | some (.cdecl _ _ n ty bi _)  =>
@@ -32,6 +32,26 @@ toString s := toString $ s.toArray.map (·.1)
       else
         b.lowerLooseBVars 1 1
     | none => panic! "unknown free variable"
+  ret
+
+-- @[inline] def mkBinding' (isLambda : Bool) (lctx : LocalContext) (xs : Array Expr) (b : Expr) : Expr :=
+--   let b := b.abstract xs
+--   xs.size.foldRev (init := b) fun i b =>
+--     let x := xs[i]!
+--     match lctx.findFVar? x with
+--     | some (.cdecl _ _ n ty bi _)  =>
+--       let ty := ty.abstractRange i xs;
+--       if isLambda then
+--         Lean.mkLambda n bi ty b
+--       else
+--         Lean.mkForall n bi ty b
+--     | some (.ldecl _ _ n ty val nonDep _) =>
+--       if b.hasLooseBVar 0 then
+--         let val := val.abstractRange i xs
+--         b.instantiate1 val
+--       else
+--         b.lowerLooseBVars 1 1
+--     | none => panic! "unknown free variable"
 
 def _root_.Lean.LocalContext.mkLambda' (lctx : LocalContext) (letCounts : Std.HashMap FVarId Nat) (xs : Array Expr) (b : Expr) : Expr :=
   mkBinding' true lctx letCounts xs b
@@ -865,17 +885,34 @@ def _root_.Lean.LocalDecl.replaceFVar (fvar val : PExpr) (var : LocalDecl) : Loc
 -- -- | .rev _ _ _ _ _ e => e
 --
 -- end
--- 
-def expandLets (vars : Array (LocalDecl × (Array LocalDeclE))) : EM (Array LocalDecl) := do
+
+def expandLets' (lets : Array LocalDeclE) (e : Expr) : EM Expr := do
   let mut ret := #[]
-  for (d, lets) in vars do
-    ret := ret.push d
-    for l in lets do
-      ret := ret.push (.ldecl 0 l.fvarId l.userName l.type (l.value (← read)) false default)
+  let mut prevLetVars := #[]
+  for l in lets do
+    ret := ret.push $ (l.value (← read)).replaceFVars prevLetVars ret
+    prevLetVars := prevLetVars.push (.fvar l.fvarId)
+  pure $ e.replaceFVars prevLetVars ret
+
+def expandLets (lets : Array LocalDeclE) (e : Expr) : Expr := Id.run $ do
+  (expandLets' lets e).run {}
+
+def expandLetsForall (lctx : LocalContext) (fvars : Array Expr) (lets : Array (Array LocalDeclE)) (e : Expr) : Expr := Id.run $ do
+  let mut ret := e
+  for (fv, ls) in fvars.zip lets |>.reverse do
+    ret := lctx.mkForall #[fv] (expandLets ls ret) |>.toPExpr
   pure ret
+
+def expandLetsLambda (lctx : LocalContext) (fvars : Array Expr) (lets : Array (Array LocalDeclE)) (e : Expr) : Expr := Id.run $ do
+  let mut ret := e
+  for (fv, ls) in fvars.zip lets |>.reverse do
+    ret := lctx.mkLambda #[fv] (expandLets ls ret) |>.toPExpr
+  pure ret
+  -- (expandLets' lets e).run {}
 
 def mkLambda (vars : Array LocalDecl) (b : Expr) : EM PExpr := do
   pure $ LocalContext.mkLambda' (vars.foldl (init := default) fun lctx decl => lctx.addDecl decl) (← read).letCounts (vars.map (·.toExpr)) b |>.toPExpr
+
 def mkForall (vars : Array LocalDecl) (b : Expr) : PExpr := LocalContext.mkForall (vars.foldl (init := default) fun lctx decl => lctx.addDecl decl) (vars.map (·.toExpr)) b |>.toPExpr
 
 def getMaybeDepLemmaApp (Uas : Array PExpr) (as : Array LocalDecl) : EM $ Array PExpr × Bool := do
@@ -907,15 +944,20 @@ def HUVData.toExprDep' (e : HUVData EExpr) : EM Expr := match e with -- FIXME wh
   let ret ← if (← rev) then withReversedFVars (alets.map (·.fvarId)) do
     match extra with
       | .some {b, vaEqb, blets, ..} => withReversedFVars (#[vaEqb.aEqb.fvarId] ++ blets.map (·.fvarId) ++ vaEqb.lets.map (·.fvarId)) do
-        mkLambda (← expandLets #[(b, blets), (a, alets), (vaEqb.bEqa, vaEqb.lets)]) (← UaEqVb.1.toExpr')
+        let h ← expandLets' (alets ++ blets ++ vaEqb.lets) (← UaEqVb.1.toExpr')
+        -- mkLambda (← expandLets #[(b, blets), (a, alets), (vaEqb.bEqa, vaEqb.lets)]) (← UaEqVb.1.toExpr') -- TODO fix let variable ordering (should be same as context order)
+        mkLambda #[b, a, vaEqb.bEqa] h
       | .none =>
-        mkLambda (← expandLets #[(a, alets)]) (← UaEqVb.1.toExpr')
+        let h ← expandLets' alets (← UaEqVb.1.toExpr')
+        mkLambda #[a] h
   else
     match extra with
       | .some {b, vaEqb, blets, ..} =>
-        mkLambda (← expandLets #[(a, alets), (b, blets), (vaEqb.aEqb, vaEqb.lets)]) (← UaEqVb.1.toExpr')
+        let h ← expandLets' (alets ++ blets ++ vaEqb.lets) (← UaEqVb.1.toExpr')
+        mkLambda #[a, b, vaEqb.aEqb] h
       | .none => 
-        mkLambda (← expandLets #[(a, alets)]) (← UaEqVb.1.toExpr')
+        let h ← expandLets' alets (← UaEqVb.1.toExpr')
+        mkLambda #[a] h
   pure ret
 
 def HUVData.toExpr' (e : HUVData EExpr) : EM Expr := match e with
@@ -936,9 +978,12 @@ def LamData.toExpr (e : LamData EExpr) : EM Expr := match e with
   if (← rev) then withReversedFVars (alets.map (·.fvarId)) do
     let hfg ← match extra with
     | .ABUV {b, vaEqb, blets, ..} .. => withReversedFVars (#[vaEqb.aEqb.fvarId] ++ blets.map (·.fvarId) ++ vaEqb.lets.map (·.fvarId)) do
-      mkLambda (← expandLets #[(b, blets), (a, alets), (vaEqb.bEqa, vaEqb.lets)]) (← faEqgx.1.toExpr')
+      let h ← expandLets' (alets ++ blets ++ vaEqb.lets) (← faEqgx.1.toExpr')
+      mkLambda #[b, a, vaEqb.bEqa] h
     | .UV ..
-    | .none => mkLambda (← expandLets #[(a, alets)]) (← faEqgx.1.toExpr')
+    | .none =>
+      let h ← expandLets' alets (← faEqgx.1.toExpr')
+      mkLambda #[a] h
 
     let (args, dep) ← match extra with
     | .ABUV {B, hAB, ..} {V} =>
@@ -955,9 +1000,12 @@ def LamData.toExpr (e : LamData EExpr) : EM Expr := match e with
   else
     let hfg ← match extra with
     | .ABUV {b, vaEqb, blets, ..} .. =>
-      mkLambda (← expandLets #[(a, alets), (b, blets), (vaEqb.aEqb, vaEqb.lets)]) (← faEqgx.1.toExpr')
+      let h ← expandLets' (alets ++ blets ++ vaEqb.lets) (← faEqgx.1.toExpr')
+      mkLambda #[a, b, vaEqb.aEqb] h
     | .UV ..
-    | .none => mkLambda (← expandLets #[(a, alets)]) (← faEqgx.1.toExpr')
+    | .none =>
+      let h ← expandLets' alets (← faEqgx.1.toExpr')
+      mkLambda #[a] h
 
     let (args, dep, U) ← match extra with
     | .ABUV {B, hAB, b, ..} {V} =>
@@ -1001,9 +1049,12 @@ def ForallData.toExpr (e : ForallData EExpr) : EM Expr := match e with
       if dep then
         match extra with
         | .ABUV {b, vaEqb, UaEqVx, blets, ..} => withReversedFVars (#[vaEqb.aEqb.fvarId] ++ blets.map (·.fvarId) ++ vaEqb.lets.map (·.fvarId)) do
-          mkLambda (← expandLets #[(b, blets), (a, alets), (vaEqb.bEqa, vaEqb.lets)]) (← UaEqVx.1.toExpr')
+          let h ← expandLets' (alets ++ blets ++ vaEqb.lets) (← UaEqVx.1.toExpr')
+          -- mkLambda (← expandLets #[(b, blets), (a, alets), (vaEqb.bEqa, vaEqb.lets)]) (← UaEqVb.1.toExpr') -- TODO fix let variable ordering (should be same as context order)
+          mkLambda #[b, a, vaEqb.bEqa] h
         | .UV {UaEqVx, ..} =>
-          mkLambda (← expandLets #[(a, alets)]) (← UaEqVx.1.toExpr')
+          let h ← expandLets' alets (← UaEqVx.1.toExpr')
+          mkLambda #[a] h
         | _ => unreachable!
       else
         match extra with
@@ -1025,9 +1076,11 @@ def ForallData.toExpr (e : ForallData EExpr) : EM Expr := match e with
       if dep then
         match extra with
         | .ABUV {b, vaEqb, UaEqVx, blets, ..} =>
-          mkLambda (← expandLets #[(a, alets), (b, blets), (vaEqb.aEqb, vaEqb.lets)]) (← UaEqVx.1.toExpr')
+          let h ← expandLets' (alets ++ blets ++ vaEqb.lets) (← UaEqVx.1.toExpr')
+          mkLambda #[a, b, vaEqb.aEqb] h
         | .UV {UaEqVx, ..} =>
-          mkLambda (← expandLets #[(a, alets)]) (← UaEqVx.1.toExpr')
+          let h ← expandLets' alets (← UaEqVx.1.toExpr')
+          mkLambda #[a] h
         | _ => unreachable!
       else
         match extra with
