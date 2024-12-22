@@ -533,7 +533,7 @@ def addLVarToCtx (decl : LocalDeclE) (lastVar? : Option FVarId) (idx? : Option N
 def mkLetE (t s : PExpr) (p : EExpr) : RecM (EExpr × LocalDeclE × Option (FVarId × Nat)) := do
   -- let pe := p.toExpr
   let (u, A) ← getTypeLevel t
-  let B ← inferTypePure 0 s
+  let B ← inferTypePure 55503 s
   let type := mkAppN (.const `HEq [u]) #[A, t, B, s]
   -- let typeVars := type.collectFVars
   let decl := .mk 0 (.mk (← mkIdNew 500)) default type p.usedLets fun ctx => p.toExpr'.run' ctx
@@ -1104,12 +1104,14 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
           if let some (UaEqVx : EExpr) := UaEqVx? then
             loop remLams' b tbl tbr lamVars prfVars prfVals letVars letVals UaEqVx
           else
-            let ret := (← getLCtx).mkLambda' (← letUseCount) lamVars b
+            -- let ret := (← getLCtx).mkLambda' (← letUseCount) lamVars b
+            let ret := (← getLCtx).mkLambda lamVars b
 
             pure ret
     | _, _, _, _, _ =>
       let cast ← mkCast' `L4L.castHEq tl tr p e (prfVars ++ letVars) (prfVals ++ letVals)
-      let ret := (← getLCtx).mkLambda' (← letUseCount) lamVars cast
+      -- let ret := (← getLCtx).mkLambda' (← letUseCount) lamVars cast
+      let ret := (← getLCtx).mkLambda lamVars cast
       pure ret
   termination_by remLams -- TODO why doesn't structural recursion on `p` work here?
 
@@ -1151,7 +1153,9 @@ def insertInitLets (e : PExpr) : RecM PExpr := do
   -- for v in initLets do
   --   match v with
   --   | .mk (fvarId := id) (type := t) (value := v) .. => dbg_trace s!"Y: TypeChecker.lean:1114 {id.name}, {(v {}).containsFVar' n} {t.containsFVar' n}"
-  let ret := (← getLCtx).mkLambda' (← letUseCount) (initLets.map (Expr.fvar ·.fvarId)) e |>.toPExpr
+
+  -- let ret := (← getLCtx).mkLambda' (← letUseCount) (initLets.map (Expr.fvar ·.fvarId)) e |>.toPExpr
+  let ret := (← getLCtx).mkLambda (initLets.map (Expr.fvar ·.fvarId)) e |>.toPExpr
   pure ret
 
 def smartCast (n : Nat) (tl tr e : PExpr) (p? : Option EExpr := none) : RecM (Bool × PExpr) := do
@@ -1229,14 +1233,16 @@ def inferLambda (e : Expr) (dbg := false) : RecPE := loop #[] false e where
       newfvars := newfvars.push fvar ++ (lets.map (Expr.fvar ·.fvarId))
     let patch ←
       if domPatched || e'?.isSome then do
-        let ret := ((← getLCtx).mkLambda' (← letUseCount) newfvars e').toPExpr
+        -- let ret := ((← getLCtx).mkLambda' (← letUseCount) newfvars e').toPExpr
+        let ret := ((← getLCtx).mkLambda newfvars e').toPExpr
         -- ttrace s!"DBG[2]: TypeChecker.lean:1067: ret={ret.toExpr.containsFVar' (.mk "_kernel_fresh.503".toName)} {← callId}"
         pure $ some ret
       else 
         pure none
 
     -- TODO only return .some if any of the fvars had domains that were patched, or if e'? := some e'
-    return (( (← getLCtx).mkForall' (← letUseCount) newfvars r').toPExpr, patch)
+    -- return (( (← getLCtx).mkForall' (← letUseCount) newfvars r').toPExpr, patch)
+    return (( (← getLCtx).mkForall newfvars r').toPExpr, patch)
 
 /--
 Infers the type of for-all expression `e`.
@@ -1277,7 +1283,8 @@ def inferForall (e : Expr) : RecPE := do
           for fvar in fvars do
             let lets : Array LocalDeclE ← getLets 2 fvar.fvarId!
             newfvars := newfvars.push fvar ++ (lets.map (Expr.fvar ·.fvarId))
-          let ret := ((← getLCtx).mkForall' (← letUseCount) newfvars e').toPExpr
+          -- let ret := ((← getLCtx).mkForall' (← letUseCount) newfvars e').toPExpr
+          let ret := ((← getLCtx).mkForall newfvars e').toPExpr
           -- dbg_trace s!"DBG[15]: TypeChecker.lean:1139 (after let ret := {ret.toExpr.containsFVar' (.mk "_kernel_fresh.37".toName)}"
           pure $ .some ret
         else
@@ -1337,10 +1344,12 @@ def inferLet (e : Expr) : RecPE := do
         newfvars := newfvars.push fvar ++ (lets.map (Expr.fvar ·.fvarId))
       let patch? ←
         if typePatched || e'?.isSome then do
-          pure $ .some $ (← getLCtx).mkForall' (← letUseCount) newfvars e' |>.toPExpr -- TODO TODO
+          -- pure $ .some $ (← getLCtx).mkForall' (← letUseCount) newfvars e' |>.toPExpr -- TODO TODO
+          pure $ .some $ (← getLCtx).mkForall newfvars e' |>.toPExpr -- TODO TODO
         else
           pure none
-      return ((← getLCtx).mkForall' (← letUseCount) newfvars r |>.toPExpr, patch?)
+      -- return ((← getLCtx).mkForall' (← letUseCount) newfvars r |>.toPExpr, patch?)
+      return ((← getLCtx).mkForall newfvars r |>.toPExpr, patch?)
 
 /--
 Checks if the type of `e` is definitionally equal to `Prop`.

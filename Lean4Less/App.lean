@@ -77,10 +77,10 @@ def mkAppEqProof? (aVars bVars : Array LocalDecl) (us vs : Array Level) (Uas Vbs
           let B := bVar.type.toPExpr
 
           let some fEqg := fEqg? | do
-            assert! (← meth.isDefEqPure 0 A B)
+            assert! (← meth.isDefEqPure 55501 A B)
             elseCase
           let some aEqb := aEqb? |
-            assert! (← meth.isDefEqPure 0 A B)
+            assert! (← meth.isDefEqPure 55502 A B)
             elseCase
 
           -- Ua and Vb may still contain references to a and b despite being
@@ -427,7 +427,7 @@ def isDefEqAppOpt''' (tf sf : PExpr) (tArgs sArgs : Array PExpr)
       --   let T := tLCtx.mkForall (tVars[sBodArgs.size - sEtaVars:].toArray.map (.fvar ·.1)) tBodT
       --   if not (← meth.isDefEqPure 209 T.toPExpr iT) then
       if tBodFunEqsBodFun?.isSome then -- FIXME need to handle this case?
-        assert! (← meth.isDefEqPure 0 tf'.toPExpr sf'.toPExpr)
+        assert! (← meth.isDefEqPure 55500 tf'.toPExpr sf'.toPExpr)
 
       let getVarLams vars lctx := do
         let mut ret := #[]
