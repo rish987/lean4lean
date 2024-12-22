@@ -1105,7 +1105,7 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
             loop remLams' b tbl tbr lamVars prfVars prfVals letVars letVals UaEqVx
           else
             -- let ret := (← getLCtx).mkLambda' (← letUseCount) lamVars b
-            let ret := (← getLCtx).mkLambda lamVars b
+            let ret := (← getLCtx).mkLambda lamVars (b.replaceFVars (prfVars ++ letVars) (prfVals ++ letVals))
 
             pure ret
     | _, _, _, _, _ =>
