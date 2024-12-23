@@ -530,13 +530,13 @@ def addLVarToCtx (decl : LocalDeclE) (lastVar? : Option FVarId) (idx? : Option N
     let newDecls := s.lctx.decls.toArray.insertAt! 0 decl'
     modify fun st => { st with initLets := st.initLets.push decl, lctx := {st.lctx with decls := newDecls.toPArray', fvarIdToDecl := st.lctx.fvarIdToDecl.insert decl.fvarId decl'}}
 
-def mkLetE (t s : PExpr) (p : EExpr) : RecM (EExpr × LocalDeclE × Option (FVarId × Nat)) := do
+def mkLetE (t s : PExpr) (p : EExpr) (n := 0) : RecM (EExpr × LocalDeclE × Option (FVarId × Nat)) := do
   -- let pe := p.toExpr
   let (u, A) ← getTypeLevel t
   let B ← inferTypePure 55503 s
   let type := mkAppN (.const `HEq [u]) #[A, t, B, s]
   -- let typeVars := type.collectFVars
-  let decl := .mk 0 (.mk (← mkIdNew 500)) default type p.usedLets fun ctx => p.toExpr'.run' ctx
+  let decl := .mk 0 (.mk (← mkIdNew (500 + n))) default type p.usedLets fun ctx => p.toExpr'.run' ctx
 
   -- if decl.fvarId.name == "_kernel_fresh.460".toName then
   --   dbg_trace s!"DBG[4]: TypeChecker.lean:543 {(← getLCtx).any fun x => x.fvarId.name == "_kernel_fresh.445".toName}"
@@ -623,7 +623,7 @@ def checkIsDefEqCache (_n : Nat) (t s : PExpr) (m : RecB) : RecB := do
       if let some p := (← get).isDefEqCache.get? (t, s) then
         return (result, p.1)
       if let some p := p? then
-        let (lv, decl, lastVar?) ← mkLetE t s p
+        let (lv, decl, lastVar?) ← mkLetE t s p _n
         modify fun st => { st with isDefEqCache := st.isDefEqCache.insert (t, s) (lv, decl, lastVar?.map (·.1))}
         pure $ .some $ lv
       else
@@ -912,7 +912,7 @@ def isDefEqApp'' (tf sf : PExpr) (tArgs sArgs : Array PExpr) (targsEqsargs? : St
   let (isDefEq, p?) ← App.isDefEqApp'' methsA tf sf tArgs sArgs targsEqsargs? tfEqsf?
   if cache && isDefEq then
     let cacheData? ← p?.mapM fun (p, d) => do
-      let (lv, decl, lastVar?) ← mkLetE t s p
+      let (lv, decl, lastVar?) ← mkLetE t s p 102
       pure (lv, decl, lastVar?.map (·.1), d)
     modify fun st => { st with isDefEqAppCache := st.isDefEqAppCache.insert (#[tf] ++ tArgs, #[sf] ++ sArgs) cacheData? }
   pure (isDefEq, p?)
@@ -1231,11 +1231,11 @@ def inferLambda (e : Expr) (dbg := false) : RecPE := loop #[] false e where
     let mut lets := #[]
     for fvar in fvars do
       let lets' : Array LocalDeclE ← getLets 1 fvar.fvarId!
-      lets := lets ++ lets'
+      lets := lets.push lets'
     let patch ←
       if domPatched || e'?.isSome then do
         -- let ret := ((← getLCtx).mkLambda' (← letUseCount) newfvars e').toPExpr
-        let ret := ((← getLCtx).mkLambda fvars (expandLets lets e')).toPExpr
+        let ret := (expandLetsLambda (← getLCtx) fvars lets e').toPExpr
         -- ttrace s!"DBG[2]: TypeChecker.lean:1067: ret={ret.toExpr.containsFVar' (.mk "_kernel_fresh.503".toName)} {← callId}"
         pure $ some ret
       else 
@@ -1243,7 +1243,7 @@ def inferLambda (e : Expr) (dbg := false) : RecPE := loop #[] false e where
 
     -- TODO only return .some if any of the fvars had domains that were patched, or if e'? := some e'
     -- return (( (← getLCtx).mkForall' (← letUseCount) newfvars r').toPExpr, patch)
-    return (( (← getLCtx).mkForall fvars (expandLets lets r')).toPExpr, patch)
+    return ((expandLetsForall (← getLCtx) fvars lets r').toPExpr, patch)
 
 /--
 Infers the type of for-all expression `e`.
@@ -1284,9 +1284,9 @@ def inferForall (e : Expr) : RecPE := do
           let mut lets := #[]
           for fvar in fvars do
             let lets' : Array LocalDeclE ← getLets 1 fvar.fvarId!
-            lets := lets ++ lets'
+            lets := lets.push lets'
           -- let ret := ((← getLCtx).mkForall' (← letUseCount) newfvars e').toPExpr
-          let ret := ((← getLCtx).mkForall fvars (expandLets lets e')).toPExpr
+          let ret := (expandLetsForall (← getLCtx) fvars lets e').toPExpr
           -- dbg_trace s!"DBG[15]: TypeChecker.lean:1139 (after let ret := {ret.toExpr.containsFVar' (.mk "_kernel_fresh.37".toName)}"
           pure $ .some ret
         else
@@ -1344,15 +1344,17 @@ def inferLet (e : Expr) : RecPE := do
       let mut lets := #[]
       for fvar in fvars do
         let lets' : Array LocalDeclE ← getLets 1 fvar.fvarId!
-        lets := lets ++ lets'
+        lets := lets.push lets'
       let patch? ←
         if typePatched || e'?.isSome then do
+          -- if lets.any fun l => l.fvarId.name == "_kernel_fresh.61".toName then
+          --   dbg_trace s!"DBG[6]: TypeChecker.lean:1347 {fvars}"
           -- pure $ .some $ (← getLCtx).mkForall' (← letUseCount) newfvars e' |>.toPExpr -- TODO TODO
-          pure $ .some $ (← getLCtx).mkForall fvars (expandLets lets e') |>.toPExpr -- TODO TODO
+          pure $ .some $ (expandLetsForall (← getLCtx) fvars lets e') |>.toPExpr -- TODO TODO
         else
           pure none
       -- return ((← getLCtx).mkForall' (← letUseCount) newfvars r |>.toPExpr, patch?)
-      return ((← getLCtx).mkForall fvars (expandLets lets r) |>.toPExpr, patch?)
+      return ((expandLetsForall (← getLCtx) fvars lets r) |>.toPExpr, patch?)
 
 /--
 Checks if the type of `e` is definitionally equal to `Prop`.
@@ -2011,7 +2013,7 @@ private def _whnf' (_e : Expr) (cheapK := false) : RecEE := do
   let r ← loop e none 1000
   let (e', p?) := r
   let cacheData? ← p?.mapM fun p => do
-    let (lv, decl, lastVar?) ← mkLetE e e' p
+    let (lv, decl, lastVar?) ← mkLetE e e' p 101
     pure (lv, decl, lastVar?.map (·.1))
   modify fun s => { s with whnfCache := s.whnfCache.insert (e, cheapK) (e', cacheData?) }
   return r

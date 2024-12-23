@@ -897,6 +897,19 @@ def expandLets' (lets : Array LocalDeclE) (e : Expr) : EM Expr := do
 def expandLets (lets : Array LocalDeclE) (e : Expr) : Expr := Id.run $ do
   (expandLets' lets e).run {}
 
+def expandLetsForall (lctx : LocalContext) (fvars : Array Expr) (lets : Array (Array LocalDeclE)) (e : Expr) : Expr := Id.run $ do
+  let mut ret := e
+  for (fv, ls) in fvars.zip lets |>.reverse do
+    ret := lctx.mkForall #[fv] (expandLets ls ret) |>.toPExpr
+  pure ret
+
+def expandLetsLambda (lctx : LocalContext) (fvars : Array Expr) (lets : Array (Array LocalDeclE)) (e : Expr) : Expr := Id.run $ do
+  let mut ret := e
+  for (fv, ls) in fvars.zip lets |>.reverse do
+    ret := lctx.mkLambda #[fv] (expandLets ls ret) |>.toPExpr
+  pure ret
+  -- (expandLets' lets e).run {}
+
 def mkLambda (vars : Array LocalDecl) (b : Expr) : EM PExpr := do
   pure $ LocalContext.mkLambda' (vars.foldl (init := default) fun lctx decl => lctx.addDecl decl) (← read).letCounts (vars.map (·.toExpr)) b |>.toPExpr
 
