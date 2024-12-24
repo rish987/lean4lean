@@ -1,6 +1,9 @@
 import Lean.Structure
+import Lean
 import Lean4Lean.Expr
 import Lean4Less.EExpr
+import Lean4Lean.EquivManager
+import Lean4Lean.TypeChecker
 
 namespace Lean4Less
 open Lean
@@ -108,6 +111,32 @@ inductive CallData where
 |  inferType (e : Expr) (dbg : Bool) : CallData
 |  inferTypePure (e : PExpr) : CallData
 deriving Inhabited
+
+abbrev InferCache := Std.HashMap Expr (PExpr × Option PExpr)
+abbrev InferCacheP := Std.HashMap Expr (PExpr)
+
+structure TypeChecker.State where
+  nid : Nat := 0
+  fvarTypeToReusedNamePrefix : Std.HashMap Expr Name := {}
+  inferTypeI : InferCacheP := {}
+  inferTypeC : InferCache := {}
+  whnfCoreCache : Std.HashMap PExpr (PExpr × Option (EExpr × LocalDeclE × Option FVarId)) := {}
+  -- whnfCache : Std.HashMap (PExpr × Bool) (PExpr × Option (EExpr × LocalDeclE × Option FVarId)) := {}
+  whnfCache : Std.HashMap (PExpr × Bool) (PExpr × Option (EExpr × LocalDeclE × Option FVarId)) := {}
+  isDefEqCache : Std.HashMap (PExpr × PExpr) (EExpr × LocalDeclE × Option FVarId) := Std.HashMap.empty
+  isDefEqAppCache : Std.HashMap (Array PExpr × Array PExpr) (Option (EExpr × LocalDeclE × Option FVarId × Array (Option (PExpr × PExpr × EExpr)))) := {}
+  exprCache : Std.HashMap PExpr (LocalDeclE × Option FVarId) := Std.HashMap.empty
+  letUseCount : Std.HashMap FVarId Nat := Std.HashMap.empty
+  toUnexp : Std.HashMap PExpr PExpr := Std.HashMap.empty
+  fvarRegistry : Std.HashMap Name Nat := {} -- for debugging purposes
+  initLets : Array LocalDeclE := {}
+  fvarsToLets : Std.HashMap FVarId (Array LocalDeclE) := {}
+  eqvManager : EquivManager := {}
+  lctx : LocalContext := {}
+  numCalls : Nat := 0
+  leanMinusState : Lean.TypeChecker.State := {}
+  failure : Std.HashSet (Expr × Expr) := {}
+
 
 structure TypeChecker.Context : Type where
   opts : TypeCheckerOpts := {}

@@ -80,6 +80,7 @@ structure EContext where
   dbg : Bool := false -- (for debugging purposes)
   rev : Bool := false
   ctorStack : Array (Name × Array Name) := #[]
+  toUnexp : Std.HashMap PExpr PExpr
   reversedFvars : Std.HashSet FVarId := {}
   letCounts : Std.HashMap FVarId Nat 
 
@@ -92,8 +93,8 @@ inductive LocalDecl' where
 | l : LocalDecl → LocalDecl'
 deriving Inhabited
 
-def LocalDeclE.toLocalDecl (l : LocalDeclE) (letCounts : Std.HashMap FVarId Nat) : LocalDecl := 
-.ldecl l.index l.fvarId l.userName l.type (l.value {letCounts}) false default -- TODO investigate use of `LocalDeclKind` field
+def LocalDeclE.toLocalDecl (l : LocalDeclE) (letCounts : Std.HashMap FVarId Nat) (toUnexp : Std.HashMap PExpr PExpr) : LocalDecl := 
+.ldecl l.index l.fvarId l.userName l.type (l.value {letCounts, toUnexp}) false default -- TODO investigate use of `LocalDeclKind` field
 
 -- FIXME should I really be doing this?
 instance : Coe (Array LocalDeclE) FVarIdSet where
@@ -507,8 +508,8 @@ structure EState where -- TODO why is this needed for dbg_trace to show up?
 
 abbrev EM := ReaderT EContext <| StateT EState <| Id
 
-def EM.run (letCounts : Std.HashMap FVarId Nat) (dbg : Bool := false) (x : EM α) : α :=
-  (StateT.run (x { dbg, letCounts }) {}).1
+def EM.run (letCounts : Std.HashMap FVarId Nat) (toUnexp : Std.HashMap PExpr PExpr) (dbg : Bool := false) (x : EM α) : α :=
+  (StateT.run (x { dbg, letCounts, toUnexp }) {}).1
 
 def EM.run' (ctx : EContext) (x : EM α) : α :=
   (StateT.run (x ctx) {}).1
@@ -894,19 +895,19 @@ def expandLets' (lets : Array LocalDeclE) (e : Expr) : EM Expr := do
     prevLetVars := prevLetVars.push (.fvar l.fvarId)
   pure $ e.replaceFVars prevLetVars ret
 
-def expandLets (lets : Array LocalDeclE) (e : Expr) : Expr := Id.run $ do
-  (expandLets' lets e).run {}
+def expandLets (toUnexp : Std.HashMap PExpr PExpr) (lets : Array LocalDeclE) (e : Expr) : Expr := Id.run $ do
+  (expandLets' lets e).run {} toUnexp
 
-def expandLetsForall (lctx : LocalContext) (fvars : Array Expr) (lets : Array (Array LocalDeclE)) (e : Expr) : Expr := Id.run $ do
+def expandLetsForall (lctx : LocalContext) (toUnexp : Std.HashMap PExpr PExpr) (fvars : Array Expr) (lets : Array (Array LocalDeclE)) (e : Expr) : Expr := Id.run $ do
   let mut ret := e
   for (fv, ls) in fvars.zip lets |>.reverse do
-    ret := lctx.mkForall #[fv] (expandLets ls ret) |>.toPExpr
+    ret := lctx.mkForall #[fv] (expandLets toUnexp ls ret) |>.toPExpr
   pure ret
 
-def expandLetsLambda (lctx : LocalContext) (fvars : Array Expr) (lets : Array (Array LocalDeclE)) (e : Expr) : Expr := Id.run $ do
+def expandLetsLambda (toUnexp : Std.HashMap PExpr PExpr) (lctx : LocalContext) (fvars : Array Expr) (lets : Array (Array LocalDeclE)) (e : Expr) : Expr := Id.run $ do
   let mut ret := e
   for (fv, ls) in fvars.zip lets |>.reverse do
-    ret := lctx.mkLambda #[fv] (expandLets ls ret) |>.toPExpr
+    ret := lctx.mkLambda #[fv] (expandLets toUnexp ls ret) |>.toPExpr
   pure ret
   -- (expandLets' lets e).run {}
 
@@ -914,6 +915,12 @@ def mkLambda (vars : Array LocalDecl) (b : Expr) : EM PExpr := do
   pure $ LocalContext.mkLambda' (vars.foldl (init := default) fun lctx decl => lctx.addDecl decl) (← read).letCounts (vars.map (·.toExpr)) b |>.toPExpr
 
 def mkForall (vars : Array LocalDecl) (b : Expr) : PExpr := LocalContext.mkForall (vars.foldl (init := default) fun lctx decl => lctx.addDecl decl) (vars.map (·.toExpr)) b |>.toPExpr
+
+def mkAppNE (f : Expr) (args : Array Expr) : EM Expr := do
+  let toUnexp := (← read).toUnexp
+  let unexpArgs := args.map fun e =>
+    (toUnexp.get? e.toPExpr |>.getD e.toPExpr)
+  pure $ Lean.mkAppN f (unexpArgs.map (·.toExpr))
 
 def getMaybeDepLemmaApp (Uas : Array PExpr) (as : Array LocalDecl) : EM $ Array PExpr × Bool := do
   let dep := Uas.zip as |>.foldl (init := false) fun acc (Ua, a) =>
@@ -996,7 +1003,7 @@ def LamData.toExpr (e : LamData EExpr) : EM Expr := match e with
         let (U, dep) ← getMaybeDepLemmaApp1 U
         pure (#[A.toExpr, U, g, f, hfg], dep)
     let n := extra.lemmaName dep
-    pure $ Lean.mkAppN (.const n [u, v]) args
+    mkAppNE (.const n [u, v]) args
   else
     let hfg ← match extra with
     | .ABUV {b, vaEqb, blets, ..} .. =>
@@ -1021,7 +1028,7 @@ def LamData.toExpr (e : LamData EExpr) : EM Expr := match e with
         pure (#[A.toExpr, U, f, g, hfg], dep, U)
 
     let n := extra.lemmaName dep
-    pure $ Lean.mkAppN (.const n [u, v]) args
+    mkAppNE (.const n [u, v]) args
 
 def ForallDataExtra.lemmaName (dep : Bool) (d : ForallDataExtra EExpr) : Name :=
 let name := match d with
@@ -1099,7 +1106,7 @@ def ForallData.toExpr (e : ForallData EExpr) : EM Expr := match e with
       pure (#[A.toExpr, B.toExpr, U, (← hAB.1.toExpr')], dep)
 
   let n := extra.lemmaName dep
-  pure $ Lean.mkAppN (.const n [u, v]) args
+  mkAppNE (.const n [u, v]) args
 
 def AppDataExtra.lemmaName (dep : Bool) (d : AppDataExtra EExpr) : Name :=
 let name := match d with
@@ -1161,39 +1168,39 @@ def AppData.toExpr (e : AppData EExpr) : EM Expr := match e with
       let (U, dep) ← getMaybeDepLemmaApp1 U
       pure (#[A.toExpr, U, f, a, b, (← aEqb.1.toExpr')], dep)
   let n := extra.lemmaName dep
-  pure $ Lean.mkAppN (.const n [u, v]) args
+  mkAppNE (.const n [u, v]) args
 
 def TransData.toExpr (e : TransData EExpr) : EM Expr := match e with
 | {u, A, B, C, a, b, c, aEqb, bEqc, ..} => do
   if (← rev) then
-    pure $ Lean.mkAppN (.const `HEq.trans [u]) #[C, B, A, c, b, a, (← bEqc.1.toExpr'), (← aEqb.1.toExpr') ]
+    mkAppNE (.const `HEq.trans [u]) #[C, B, A, c, b, a, (← bEqc.1.toExpr'), (← aEqb.1.toExpr') ]
   else
-    pure $ Lean.mkAppN (.const `HEq.trans [u]) #[A, B, C, a, b, c, (← aEqb.1.toExpr'), (← bEqc.1.toExpr')]
+    mkAppNE (.const `HEq.trans [u]) #[A, B, C, a, b, c, (← aEqb.1.toExpr'), (← bEqc.1.toExpr')]
 
 -- def SymmData.toExpr (e : SymmData EExpr) : EM Expr := do match e with
 -- | {u, A, B, a, b, aEqb} =>
 --   if (← rev) then
 --     swapRev aEqb.toExpr'
 --   else
---     pure $ Lean.mkAppN (.const `HEq.symm [u]) #[A, B, a, b, (← aEqb.toExpr')]
+--     pure $ Lean.mkAppNE (.const `HEq.symm [u]) #[A, B, a, b, (← aEqb.toExpr')]
 
 def ReflData.toExpr : ReflData → EM Expr
-| {u, A, a, n} => pure $ Lean.mkAppN (.const `L4L.HEqRefl [u]) #[.lit (.natVal n), A, a]
+| {u, A, a, n} => mkAppNE (.const `L4L.HEqRefl [u]) #[.lit (.natVal n), A, a]
 
 def PIData.toExpr (e : PIData EExpr) : EM Expr := match e with
 | {P, p, q, extra, ..} => do
   if (← rev) then
     match extra with
     | .none =>
-      pure $ Lean.mkAppN (.const `L4L.prfIrrelHEq []) #[P, q, p]
+      mkAppNE (.const `L4L.prfIrrelHEq []) #[P, q, p]
     | .HEq {Q, hPQ, ..} =>
-      pure $ Lean.mkAppN (.const `L4L.prfIrrelHEqPQ []) #[Q, P, (← hPQ.1.toExpr'), q, p]
+      mkAppNE (.const `L4L.prfIrrelHEqPQ []) #[Q, P, (← hPQ.1.toExpr'), q, p]
   else
     match extra with
     | .none =>
-      pure $ Lean.mkAppN (.const `L4L.prfIrrelHEq []) #[P, p, q]
+      mkAppNE (.const `L4L.prfIrrelHEq []) #[P, p, q]
     | .HEq {Q, hPQ, ..} =>
-      pure $ Lean.mkAppN (.const `L4L.prfIrrelHEqPQ []) #[P, Q, (← hPQ.1.toExpr'), p, q]
+      mkAppNE (.const `L4L.prfIrrelHEqPQ []) #[P, Q, (← hPQ.1.toExpr'), p, q]
 
 def FVarDataE.toExpr : FVarDataE → EM Expr
 | {aEqb, bEqa, u, A, B, a, b, ..} => do
@@ -1201,10 +1208,10 @@ def FVarDataE.toExpr : FVarDataE → EM Expr
     if (← read).reversedFvars.contains aEqb then
       pure bEqa.toExpr
     else
-      pure $ Lean.mkAppN (.const `HEq.symm [u]) #[A, B, a, b, aEqb.toExpr]
+      mkAppNE (.const `HEq.symm [u]) #[A, B, a, b, aEqb.toExpr]
   else
     if (← read).reversedFvars.contains aEqb then
-      pure $ Lean.mkAppN (.const `HEq.symm [u]) #[B, A, b, a, bEqa.toExpr]
+      mkAppNE (.const `HEq.symm [u]) #[B, A, b, a, bEqa.toExpr]
     else
       pure aEqb.toExpr
 
@@ -1214,19 +1221,19 @@ def LVarDataE.toExpr : LVarDataE → EM Expr
     if (← read).reversedFvars.contains v then
       pure $ .fvar v
     else
-      pure $ Lean.mkAppN (.const `HEq.symm [u]) #[A, B, a, b, .fvar v]
+      mkAppNE (.const `HEq.symm [u]) #[A, B, a, b, .fvar v]
   else
     if (← read).reversedFvars.contains v then
-      pure $ Lean.mkAppN (.const `HEq.symm [u]) #[B, A, b, a, .fvar v]
+      mkAppNE (.const `HEq.symm [u]) #[B, A, b, a, .fvar v]
     else
       pure $ .fvar v
 
 def SorryData.toExpr : SorryData → EM Expr
 | {u, A, a, B, b} => do
   if (← rev) then
-    pure $ Lean.mkAppN (.const `sorryAx [0]) #[Lean.mkAppN (.const ``HEq [u]) #[B, b, A, a], .const `Bool.false []]
+    mkAppNE (.const `sorryAx [0]) #[← mkAppNE (.const ``HEq [u]) #[B, b, A, a], .const `Bool.false []]
   else
-    pure $ Lean.mkAppN (.const `sorryAx [0]) #[Lean.mkAppN (.const ``HEq [u]) #[A, a, B, b], .const `Bool.false []]
+    mkAppNE (.const `sorryAx [0]) #[← mkAppNE (.const ``HEq [u]) #[A, a, B, b], .const `Bool.false []]
 
 def EExpr.ctorName : EExpr → Name 
   | .lam .. => `lam
@@ -1278,15 +1285,15 @@ def EExpr.toExpr' (e : EExpr) : EM Expr :=
 
 end
 
-def EExpr.toExpr (letCounts : Std.HashMap FVarId Nat) (e : EExpr) (dbg := false) : Expr := Id.run $ do
+def EExpr.toExpr (toUnexp : Std.HashMap PExpr PExpr) (letCounts : Std.HashMap FVarId Nat) (e : EExpr) (dbg := false) : Expr := Id.run $ do
   -- dbg_trace s!"DBG[1]: EExpr.lean:1066 (after def EExpr.toExpr (e : EExpr) (dbg := fal…)"
-  let ret ← e.toExpr'.run letCounts dbg
+  let ret ← e.toExpr'.run letCounts toUnexp dbg
   -- dbg_trace s!"DBG[2]: EExpr.lean:1068 (after let ret ← e.toExpr.run dbg)"
   pure ret
 
 namespace EExpr
 
-def toPExpr (letCounts : Std.HashMap FVarId Nat) (e : EExpr) : PExpr := .mk (e.toExpr letCounts)
+def toPExpr (toUnexp : Std.HashMap PExpr PExpr) (letCounts : Std.HashMap FVarId Nat) (e : EExpr) : PExpr := .mk (e.toExpr toUnexp letCounts)
 
 -- instance : BEq EExpr where
 -- beq x y := x.toExpr == y.toExpr
@@ -1294,13 +1301,13 @@ def toPExpr (letCounts : Std.HashMap FVarId Nat) (e : EExpr) : PExpr := .mk (e.t
 end EExpr
 
 instance : ToString EExpr where
-toString e := toString $ e.toExpr default
+toString e := toString $ e.toExpr default default
 
 -- def EExpr.instantiateRev (e : EExpr) (subst : Array EExpr) : EExpr :=
 --   e.toExpr.instantiateRev (subst.map (·.toExpr)) |>.toEExpr
 
 instance : ToString (Option EExpr) where
-toString e? := toString $ e?.map (·.toExpr default)
+toString e? := toString $ e?.map (·.toExpr default default)
 
 -- instance : Coe EExpr Expr := ⟨toExpr⟩
 -- instance : Coe EExpr PExpr := ⟨(EExpr.toPExpr default)⟩

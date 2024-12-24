@@ -9,8 +9,14 @@ open Lean4Less.TypeChecker
 
 section
 
-variable [Monad m] [MonadReaderOf Context m] [MonadExcept KernelException M] (env : Environment)
+variable [Monad m] [MonadReaderOf Context m] [MonadStateOf State m] [MonadExcept KernelException M] (env : Environment)
   (meth : ExtMethodsR m)
+
+def mkAppN (f : Expr) (args : Array Expr) : m PExpr := do
+  let toUnexp := (← get).toUnexp
+  let unexpArgs := args.map fun e =>
+    (toUnexp.get? e.toPExpr |>.getD e.toPExpr)
+  pure $ (Lean.mkAppN f (unexpArgs.map (·.toExpr))).toPExpr
 
 def getFirstCtor (dName : Name) : Option Name := do
   let some (.inductInfo info) := env.find? dName | none
@@ -197,9 +203,9 @@ def inductiveReduceRec [Monad m] [MonadLCtx m] [MonadExcept KernelException m] [
 
   if map.values.any (·.isSome) then
     let remArgs := recArgs[majorIdx + 1:].toArray
-    let eNewMajor' := mkAppN recFn newRecArgs[:majorIdx + 1] |>.toPExpr
+    let eNewMajor' ← mkAppN recFn newRecArgs[:majorIdx + 1]
     let eNewMajorType' := (← meth.inferTypePure 121 eNewMajor')
-    let e' := (mkAppN recFn recArgs[:majorIdx + 1]) |>.toPExpr
+    let e' ← mkAppN recFn recArgs[:majorIdx + 1]
     let eType' := (← meth.inferTypePure 129 e')
     -- dbg_trace s!"DBG[3]: Reduce.lean:198 (after let eType := (← meth.inferTypeLean 129…) {← meth.getTrace true}"
     -- _ ← meth.inferTypeCheck eNewMajor'
@@ -212,8 +218,8 @@ def inductiveReduceRec [Monad m] [MonadLCtx m] [MonadExcept KernelException m] [
       map := map.insert idx remArgNewEqRemArg?
       idx := idx + 1
 
-    let eNewMajor := Lean.mkAppN eNewMajor' remArgsNew |>.toPExpr
-    let newe := Lean.mkAppN rhs remArgsNew |>.toPExpr
+    let eNewMajor ← mkAppN eNewMajor' remArgsNew
+    let newe ← mkAppN rhs remArgsNew
     -- _ ← meth.inferTypePure 7000 newe.toPExpr -- sanity check TODO remove
     let (.true, eEqeNewMajor?) ← meth.isDefEqApp 2 e eNewMajor map | unreachable!
 

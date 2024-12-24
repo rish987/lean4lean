@@ -3,12 +3,10 @@ import Lean4Less.EExpr
 
 import Lean4Lean.Environment
 import Lean4Lean.ForEachExprV
-import Lean4Lean.EquivManager
 import Lean4Lean.Declaration
 import Lean4Lean.Level
 import Lean4Lean.Util
 import Lean4Lean.Instantiate
-import Lean4Lean.TypeChecker
 
 import Lean4Less.App
 
@@ -17,30 +15,6 @@ import Lean4Less.App
 
 namespace Lean4Less
 open Lean
-
-abbrev InferCache := Std.HashMap Expr (PExpr × Option PExpr)
-abbrev InferCacheP := Std.HashMap Expr (PExpr)
-
-structure TypeChecker.State where
-  nid : Nat := 0
-  fvarTypeToReusedNamePrefix : Std.HashMap Expr Name := {}
-  inferTypeI : InferCacheP := {}
-  inferTypeC : InferCache := {}
-  whnfCoreCache : Std.HashMap PExpr (PExpr × Option (EExpr × LocalDeclE × Option FVarId)) := {}
-  -- whnfCache : Std.HashMap (PExpr × Bool) (PExpr × Option (EExpr × LocalDeclE × Option FVarId)) := {}
-  whnfCache : Std.HashMap (PExpr × Bool) (PExpr × Option (EExpr × LocalDeclE × Option FVarId)) := {}
-  isDefEqCache : Std.HashMap (PExpr × PExpr) (EExpr × LocalDeclE × Option FVarId) := Std.HashMap.empty
-  isDefEqAppCache : Std.HashMap (Array PExpr × Array PExpr) (Option (EExpr × LocalDeclE × Option FVarId × Array (Option (PExpr × PExpr × EExpr)))) := {}
-  exprCache : Std.HashMap PExpr (LocalDeclE × Option FVarId) := Std.HashMap.empty
-  letUseCount : Std.HashMap FVarId Nat := Std.HashMap.empty
-  fvarRegistry : Std.HashMap Name Nat := {} -- for debugging purposes
-  initLets : Array LocalDeclE := {}
-  fvarsToLets : Std.HashMap FVarId (Array LocalDeclE) := {}
-  eqvManager : EquivManager := {}
-  lctx : LocalContext := {}
-  numCalls : Nat := 0
-  leanMinusState : Lean.TypeChecker.State := {}
-  failure : Std.HashSet (Expr × Expr) := {}
 
 instance : ToString CallData where
 toString
@@ -509,7 +483,7 @@ def inferTypePure' (e : PExpr) : RecM PExpr := do -- TODO make more efficient/us
   pure eT.toPExpr
 
 def addLVarToCtx (decl : LocalDeclE) (lastVar? : Option FVarId) (idx? : Option Nat := none) : RecM Unit := do
-  let decl' := (decl.toLocalDecl (← get).letUseCount)
+  let decl' := (decl.toLocalDecl (← get).letUseCount (← get).toUnexp)
   if let some lastVar := lastVar? then
     let mut fvarsToLets := (← get).fvarsToLets
     let lets := fvarsToLets.get? lastVar |>.getD #[] |>.push decl
@@ -534,7 +508,7 @@ def mkLetE (t s : PExpr) (p : EExpr) (n := 0) : RecM (EExpr × LocalDeclE × Opt
   -- let pe := p.toExpr
   let (u, A) ← getTypeLevel t
   let B ← inferTypePure 55503 s
-  let type := mkAppN (.const `HEq [u]) #[A, t, B, s]
+  let type ← mkAppN (.const `HEq [u]) #[A, t, B, s]
   -- let typeVars := type.collectFVars
   let decl := .mk 0 (.mk (← mkIdNew (500 + n))) default type p.usedLets fun ctx => p.toExpr'.run' ctx
 
@@ -552,7 +526,7 @@ def mkLetE (t s : PExpr) (p : EExpr) (n := 0) : RecM (EExpr × LocalDeclE × Opt
       fvars := fvars.push v.toExpr
     else
       throw $ .other "encountered null context variable"
-  let bvarIdx := type.abstract fvars.reverse |>.looseBVarRange
+  let bvarIdx := type.toExpr.abstract fvars.reverse |>.looseBVarRange
   if bvarIdx > 0 then
     lastVar? := .some ((← getLCtx).decls.get! (bvarIdx - 1) |>.get!.fvarId, bvarIdx - 1)
   i := (← getLCtx).decls.size - 1
@@ -694,10 +668,10 @@ def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : P
 
       if p?.isSome || tvars'.any fun tvar' => tDom.containsFVar' tvar' then
         withNewFVar 2 sName sDom sBi fun svar => do
-          let teqsType := mkAppN (.const `HEq [lvl]) #[tDom, tvar.toExpr, sDom, svar.toExpr]
-          let seqtType := mkAppN (.const `HEq [lvl]) #[sDom, svar.toExpr, tDom, tvar.toExpr]
-          withNewFVar 3 default teqsType.toPExpr default fun vtEqs => do
-            withNewFVar 4 default seqtType.toPExpr default fun vsEqt => do
+          let teqsType ← mkAppN (.const `HEq [lvl]) #[tDom, tvar.toExpr, sDom, svar.toExpr]
+          let seqtType ← mkAppN (.const `HEq [lvl]) #[sDom, svar.toExpr, tDom, tvar.toExpr]
+          withNewFVar 3 default teqsType default fun vtEqs => do
+            withNewFVar 4 default seqtType default fun vsEqt => do
               withEqFVar tvar svar { aEqb := vtEqs, bEqa := vsEqt, a := tvar.toExpr.toPExpr, b := svar.toExpr.toPExpr, A := tDom, B := sDom, u := lvl } do
                 cont (.some (svar, vtEqs, vsEqt, p?)) svar 
       else
@@ -1019,7 +993,7 @@ def alignLets (remLets : List LocalDeclE) (vars vals : Array Expr) (f : Array Ex
     | l :: remLets =>
       let r e := e.replaceFVars (vars ++ letVars) (vals ++ letVals)
       let ltype := r l.type
-      let lvalue := r (l.value {letCounts := (← get).letUseCount} )
+      let lvalue := r (l.value {letCounts := (← get).letUseCount, toUnexp := (← get).toUnexp} )
       let letVars := letVars.push (.fvar l.fvarId)
       withNewLetVar 20 l.userName ltype lvalue fun lvar => do
         let letVals := letVals.push lvar.toExpr
@@ -1042,12 +1016,12 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
     pure sort'.toExpr.sortLevel!
 
   let mkCast'' nm tl tr p e (prfVars prfVals : Array Expr) (lvl : Level) := do
-    let pe := p.toExpr (dbg := (← shouldTTrace)) (← get).letUseCount
+    let pe := p.toExpr (dbg := (← shouldTTrace)) (← get).toUnexp (← get).letUseCount
     -- dbg_trace s!"DBG[2]: TypeChecker.lean:825 {← getTrace}, {← callId}, {p?.isSome}"
     -- _ ← inferTypeCheck pe.toPExpr
     -- dbg_trace s!"DBG[3]: TypeChecker.lean:827 (after _ ← inferTypeCheck pe.toPExpr)"
-    let app := Lean.mkAppN (← getConst nm [lvl]) #[tl, tr, pe, e]
-    pure $ app.replaceFVars prfVars prfVals
+    let app ← mkAppN (← getConst nm [lvl]) #[tl, tr, pe, e]
+    pure $ app.toExpr.replaceFVars prfVars prfVals
 
   let mkCast' nm tl tr p e (prfVars prfVals : Array Expr) := do
     let lvl ← getLvl tl.toPExpr tr.toPExpr
@@ -1155,7 +1129,7 @@ def insertInitLets (e : PExpr) : RecM PExpr := do
   --   | .mk (fvarId := id) (type := t) (value := v) .. => dbg_trace s!"Y: TypeChecker.lean:1114 {id.name}, {(v {}).containsFVar' n} {t.containsFVar' n}"
 
   -- let ret := (← getLCtx).mkLambda' (← letUseCount) (initLets.map (Expr.fvar ·.fvarId)) e |>.toPExpr
-  let ret := expandLets initLets e |>.toPExpr
+  let ret := expandLets (← get).toUnexp initLets e |>.toPExpr
   pure ret
 
 def smartCast (n : Nat) (tl tr e : PExpr) (p? : Option EExpr := none) : RecM (Bool × PExpr) := do
@@ -1768,9 +1742,9 @@ Otherwise, defers to the calling function.
 -/
 def quickIsDefEq' (t s : PExpr) (useHash := false) : RecLB := do
   -- optimization for terms that are already α-equivalent
-  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 (eqvManager := m)) => -- TODO why do I have to list these?
+  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 a18 (eqvManager := m)) => -- TODO why do I have to list these?
     let (b, m) := m.isEquiv useHash t s
-    (b, .mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 (eqvManager := m))
+    (b, .mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 a18 (eqvManager := m))
   then
     return (.true, none)
   let res : Option (Bool × PExpr) ← match t.toExpr, s.toExpr with
