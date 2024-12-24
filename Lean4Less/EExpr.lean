@@ -9,56 +9,6 @@ instance : Coe LocalDecl FVarId where
 instance : ToString FVarIdSet where
 toString s := toString $ s.toArray.map (·.1)
 
-@[inline] def mkBinding' (isLambda : Bool) (lctx : LocalContext) (letCounts : Std.HashMap FVarId Nat) (xs : Array Expr) (b : Expr) : Expr :=
-  let b := b.abstract xs
-  let ret := xs.size.foldRev (init := b) fun i b =>
-    let x := xs[i]!
-    match lctx.findFVar? x with
-    | some (.cdecl _ _ n ty bi _)  =>
-      let ty := ty.abstractRange i xs;
-      if isLambda then
-        Lean.mkLambda n bi ty b
-      else
-        Lean.mkForall n bi ty b
-    | some (.ldecl _ id n ty val nonDep _) =>
-      if b.hasLooseBVar 0 then
-        if letCounts.get! id > 1 then
-          let ty  := ty.abstractRange i xs
-          let val := val.abstractRange i xs
-          mkLet n ty val b nonDep
-        else
-          let val := val.abstractRange i xs
-          b.instantiate1 val
-      else
-        b.lowerLooseBVars 1 1
-    | none => panic! "unknown free variable"
-  ret
-
--- @[inline] def mkBinding' (isLambda : Bool) (lctx : LocalContext) (xs : Array Expr) (b : Expr) : Expr :=
---   let b := b.abstract xs
---   xs.size.foldRev (init := b) fun i b =>
---     let x := xs[i]!
---     match lctx.findFVar? x with
---     | some (.cdecl _ _ n ty bi _)  =>
---       let ty := ty.abstractRange i xs;
---       if isLambda then
---         Lean.mkLambda n bi ty b
---       else
---         Lean.mkForall n bi ty b
---     | some (.ldecl _ _ n ty val nonDep _) =>
---       if b.hasLooseBVar 0 then
---         let val := val.abstractRange i xs
---         b.instantiate1 val
---       else
---         b.lowerLooseBVars 1 1
---     | none => panic! "unknown free variable"
-
-def _root_.Lean.LocalContext.mkLambda' (lctx : LocalContext) (letCounts : Std.HashMap FVarId Nat) (xs : Array Expr) (b : Expr) : Expr :=
-  mkBinding' true lctx letCounts xs b
-
-def _root_.Lean.LocalContext.mkForall' (lctx : LocalContext) (letCounts : Std.HashMap FVarId Nat) (xs : Array Expr) (b : Expr) : Expr :=
-  mkBinding' false lctx letCounts xs b
-
 namespace Lean4Less
 
 /--
@@ -81,7 +31,6 @@ structure EContext where
   rev : Bool := false
   ctorStack : Array (Name × Array Name) := #[]
   reversedFvars : Std.HashSet FVarId := {}
-  letCounts : Std.HashMap FVarId Nat 
 
 structure LocalDeclE where
 (index : Nat) (fvarId : FVarId) (userName : Name) (type : Expr) (usedLets : FVarIdSet) (value : EContext → Expr)
@@ -92,8 +41,8 @@ inductive LocalDecl' where
 | l : LocalDecl → LocalDecl'
 deriving Inhabited
 
-def LocalDeclE.toLocalDecl (l : LocalDeclE) (letCounts : Std.HashMap FVarId Nat) : LocalDecl := 
-.ldecl l.index l.fvarId l.userName l.type (l.value {letCounts}) false default -- TODO investigate use of `LocalDeclKind` field
+def LocalDeclE.toLocalDecl (l : LocalDeclE) : LocalDecl := 
+.ldecl l.index l.fvarId l.userName l.type (l.value {}) false default -- TODO investigate use of `LocalDeclKind` field
 
 -- FIXME should I really be doing this?
 instance : Coe (Array LocalDeclE) FVarIdSet where
@@ -507,8 +456,8 @@ structure EState where -- TODO why is this needed for dbg_trace to show up?
 
 abbrev EM := ReaderT EContext <| StateT EState <| Id
 
-def EM.run (letCounts : Std.HashMap FVarId Nat) (dbg : Bool := false) (x : EM α) : α :=
-  (StateT.run (x { dbg, letCounts }) {}).1
+def EM.run (dbg : Bool := false) (x : EM α) : α :=
+  (StateT.run (x { dbg }) {}).1
 
 def EM.run' (ctx : EContext) (x : EM α) : α :=
   (StateT.run (x ctx) {}).1
@@ -895,7 +844,7 @@ def expandLets' (lets : Array LocalDeclE) (e : Expr) : EM Expr := do
   pure $ e.replaceFVars prevLetVars ret
 
 def expandLets (lets : Array LocalDeclE) (e : Expr) : Expr := Id.run $ do
-  (expandLets' lets e).run {}
+  (expandLets' lets e).run
 
 def expandLetsForall (lctx : LocalContext) (fvars : Array Expr) (lets : Array (Array LocalDeclE)) (e : Expr) : Expr := Id.run $ do
   let mut ret := e
@@ -911,7 +860,7 @@ def expandLetsLambda (lctx : LocalContext) (fvars : Array Expr) (lets : Array (A
   -- (expandLets' lets e).run {}
 
 def mkLambda (vars : Array LocalDecl) (b : Expr) : EM PExpr := do
-  pure $ LocalContext.mkLambda' (vars.foldl (init := default) fun lctx decl => lctx.addDecl decl) (← read).letCounts (vars.map (·.toExpr)) b |>.toPExpr
+  pure $ LocalContext.mkLambda (vars.foldl (init := default) fun lctx decl => lctx.addDecl decl) (vars.map (·.toExpr)) b |>.toPExpr
 
 def mkForall (vars : Array LocalDecl) (b : Expr) : PExpr := LocalContext.mkForall (vars.foldl (init := default) fun lctx decl => lctx.addDecl decl) (vars.map (·.toExpr)) b |>.toPExpr
 
@@ -1278,15 +1227,15 @@ def EExpr.toExpr' (e : EExpr) : EM Expr :=
 
 end
 
-def EExpr.toExpr (letCounts : Std.HashMap FVarId Nat) (e : EExpr) (dbg := false) : Expr := Id.run $ do
+def EExpr.toExpr (e : EExpr) (dbg := false) : Expr := Id.run $ do
   -- dbg_trace s!"DBG[1]: EExpr.lean:1066 (after def EExpr.toExpr (e : EExpr) (dbg := fal…)"
-  let ret ← e.toExpr'.run letCounts dbg
+  let ret ← e.toExpr'.run dbg
   -- dbg_trace s!"DBG[2]: EExpr.lean:1068 (after let ret ← e.toExpr.run dbg)"
   pure ret
 
 namespace EExpr
 
-def toPExpr (letCounts : Std.HashMap FVarId Nat) (e : EExpr) : PExpr := .mk (e.toExpr letCounts)
+def toPExpr (e : EExpr) : PExpr := .mk e.toExpr
 
 -- instance : BEq EExpr where
 -- beq x y := x.toExpr == y.toExpr
