@@ -874,6 +874,7 @@ def meths : ExtMethods RecM := {
     withNewFVar := withNewFVar
     getLets := getLets
     checkExprCache := @checkExprCache
+    usesPrfIrrel := usesPrfIrrel
   }
 
 def methsA : ExtMethodsA RecM := {
@@ -948,7 +949,9 @@ def _isDefEqApp (t s : PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr) :=
     pure (isDefEq, p?)
 
 def isDefEqForallOpt' (t s : PExpr) : RecB := do
-  let (.some (tAbsType, tAbsDomsVars, tAbsDoms, sAbsType, sAbsDomsVars, sAbsDoms, tAbsDomsEqsAbsDoms?, _)) ← App.forallAbs methsA 2000 t s | return (false, none)
+  let (.some (tAbsType, tAbsDomsVars, tAbsDoms, sAbsType, sAbsDomsVars, sAbsDoms, tAbsDomsEqsAbsDoms?, _)) ← App.forallAbs methsA 2000 t s |
+    dbg_trace s!"DBG[9]: TypeChecker.lean:951 {← isDefEqLean t s}"
+    return (false, none)
 
   let tLCtx := tAbsDomsVars.foldl (init := (← getLCtx)) fun acc v => LocalContext.mkLocalDecl acc v.fvarId v.userName v.type default
   let sLCtx := sAbsDomsVars.foldl (init := (← getLCtx)) fun acc v => LocalContext.mkLocalDecl acc v.fvarId v.userName v.type default
@@ -1775,7 +1778,7 @@ def quickIsDefEq' (t s : PExpr) (useHash := false) : RecLB := do
     | (.undef, _) => pure none
     | (.true, p?) => pure (true, p?)
     | (.false, p?) => pure (false, p?)
-  | .forallE .., .forallE .. => pure $ some $ ← isDefEqForall t s 1
+  | .forallE .., .forallE .. => pure $ some $ ← isDefEqForallOpt' t s
   | .sort a1, .sort a2 => pure $ some $ ((a1.isEquiv a2), none)
   | .mdata _ a1, .mdata _ a2 => pure $ some $ ← isDefEq 44 a1.toPExpr a2.toPExpr
   | .mvar .., .mvar .. => throw $ .other "unreachable 6"

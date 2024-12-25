@@ -92,6 +92,7 @@ structure ExtMethods (m : Type → Type u) where
   withNewFVar : Nat → Name → PExpr → BinderInfo → (LocalDecl → m α) → m α
   getLets : Nat → FVarId → m (Array LocalDeclE)
   checkExprCache (e : PExpr) (T? : Option PExpr := none) : m PExpr
+  usesPrfIrrel (t s : Expr) : m (Bool × Bool)
 
 structure TypeCheckerOpts where
   proofIrrelevance := true
