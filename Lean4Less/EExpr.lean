@@ -843,16 +843,16 @@ def expandLets' (lets : Array LocalDeclE) (e : Expr) : EM Expr := do
     prevLetVars := prevLetVars.push (.fvar l.fvarId)
   pure $ e.replaceFVars prevLetVars ret
 
-def expandLets (lets : Array LocalDeclE) (e : Expr) : Expr := Id.run $ do
-  (expandLets' lets e).run
+def expandLets (lets : Array LocalDecl) (e : Expr) : Expr := Id.run $ do
+  (expandLets' (lets.map fun l => .mk l.index l.fvarId l.userName l.type default (fun _ => l.value)) e).run
 
-def expandLetsForall (lctx : LocalContext) (fvars : Array Expr) (lets : Array (Array LocalDeclE)) (e : Expr) : Expr := Id.run $ do
+def expandLetsForall (lctx : LocalContext) (fvars : Array Expr) (lets : Array (Array LocalDecl)) (e : Expr) : Expr := Id.run $ do
   let mut ret := e
   for (fv, ls) in fvars.zip lets |>.reverse do
     ret := lctx.mkForall #[fv] (expandLets ls ret) |>.toPExpr
   pure ret
 
-def expandLetsLambda (lctx : LocalContext) (fvars : Array Expr) (lets : Array (Array LocalDeclE)) (e : Expr) : Expr := Id.run $ do
+def expandLetsLambda (lctx : LocalContext) (fvars : Array Expr) (lets : Array (Array LocalDecl)) (e : Expr) : Expr := Id.run $ do
   let mut ret := e
   for (fv, ls) in fvars.zip lets |>.reverse do
     ret := lctx.mkLambda #[fv] (expandLets ls ret) |>.toPExpr

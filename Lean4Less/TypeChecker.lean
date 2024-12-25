@@ -1045,7 +1045,7 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
     let lvl ← getLvl tl.toPExpr tr.toPExpr
     mkCast'' nm tl tr p e prfVars prfVals lvl
 
-  let rec loop remLams e tl tr (lamVars prfVars prfVals letVars letVals : Array Expr) p : RecM Expr := do
+  let rec loop remLams e tl tr (lamVars prfVars prfVals letVars letVals : Array Expr) (lamLetVars : Array (Array LocalDecl)) p : RecM Expr := do
     match remLams, e, tl, tr, p with
     | remLams' + 1, .lam n _ b bi, .forallE _ _ tbl .., .forallE _ tdr tbr .., .forallE forallData =>
       let {A, a, extra, u, alets, ..} := forallData
@@ -1090,20 +1090,23 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
         let tbr := tbr.instantiate1 v
 
         alignLets lets'.toList (prfVars ++ letVars) (prfVals ++ letVals) fun newLetVars newLetVals => do
-          let lamVars := lamVars ++ newLetVals
+          let lamLetVars := lamLetVars.push (← newLetVals.mapM fun v => do
+              let some decl := (← getLCtx).find? v.fvarId! | throw $ .other "unreachable!"
+              pure decl
+            )
           let letVars := letVars ++ newLetVars
           let letVals := letVals ++ newLetVals
           if let some (UaEqVx : EExpr) := UaEqVx? then
-            loop remLams' b tbl tbr lamVars prfVars prfVals letVars letVals UaEqVx
+            loop remLams' b tbl tbr lamVars prfVars prfVals letVars letVals lamLetVars UaEqVx
           else
             -- let ret := (← getLCtx).mkLambda' (← letUseCount) lamVars b
-            let ret := (← getLCtx).mkLambda lamVars (b.replaceFVars (prfVars ++ letVars) (prfVals ++ letVals))
+            let ret := expandLetsLambda (← getLCtx) lamVars lamLetVars (b.replaceFVars (prfVars ++ letVars) (prfVals ++ letVals))
 
             pure ret
     | _, _, _, _, _ =>
       let cast ← mkCast' `L4L.castHEq tl tr p e (prfVars ++ letVars) (prfVals ++ letVals)
       -- let ret := (← getLCtx).mkLambda' (← letUseCount) lamVars cast
-      let ret := (← getLCtx).mkLambda lamVars cast
+      let ret := expandLetsLambda (← getLCtx) lamVars lamLetVars cast
       pure ret
   termination_by remLams -- TODO why doesn't structural recursion on `p` work here?
 
@@ -1136,7 +1139,7 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
   --     throw $ .other s!"cast equality does not have expected type"
   let mut ret := (← tlEqtr?.2.mapM (fun (p : EExpr) => do
     let nLams := lamCount e
-    pure (← loop nLams e.toExpr tl.toExpr tr.toExpr #[] #[] #[] #[] #[] p).toPExpr)).getD e
+    pure (← loop nLams e.toExpr tl.toExpr tr.toExpr #[] #[] #[] #[] #[] #[] p).toPExpr)).getD e
   pure $ (tlEqtr?, ret)
 
 def insertInitLets (e : PExpr) : RecM PExpr := do
@@ -1147,7 +1150,7 @@ def insertInitLets (e : PExpr) : RecM PExpr := do
   --   | .mk (fvarId := id) (type := t) (value := v) .. => dbg_trace s!"Y: TypeChecker.lean:1114 {id.name}, {(v {}).containsFVar' n} {t.containsFVar' n}"
 
   -- let ret := (← getLCtx).mkLambda' (← letUseCount) (initLets.map (Expr.fvar ·.fvarId)) e |>.toPExpr
-  let ret := expandLets initLets e |>.toPExpr
+  let ret := expandLets (initLets.map (·.toLocalDecl)) e |>.toPExpr
   pure ret
 
 def smartCast (n : Nat) (tl tr e : PExpr) (p? : Option EExpr := none) : RecM (Bool × PExpr) := do
@@ -1223,7 +1226,7 @@ def inferLambda (e : Expr) (dbg := false) : RecPE := loop #[] false e where
     let mut lets := #[]
     for fvar in fvars do
       let lets' : Array LocalDeclE ← getLets 1 fvar.fvarId!
-      lets := lets.push lets'
+      lets := lets.push (lets'.map (·.toLocalDecl))
     let patch ←
       if domPatched || e'?.isSome then do
         -- let ret := ((← getLCtx).mkLambda' (← letUseCount) newfvars e').toPExpr
@@ -1276,7 +1279,7 @@ def inferForall (e : Expr) : RecPE := do
           let mut lets := #[]
           for fvar in fvars do
             let lets' : Array LocalDeclE ← getLets 1 fvar.fvarId!
-            lets := lets.push lets'
+            lets := lets.push $ lets'.map (·.toLocalDecl)
           -- let ret := ((← getLCtx).mkForall' (← letUseCount) newfvars e').toPExpr
           let ret := (expandLetsForall (← getLCtx) fvars lets e').toPExpr
           -- dbg_trace s!"DBG[15]: TypeChecker.lean:1139 (after let ret := {ret.toExpr.containsFVar' (.mk "_kernel_fresh.37".toName)}"
@@ -1336,7 +1339,7 @@ def inferLet (e : Expr) : RecPE := do
       let mut lets := #[]
       for fvar in fvars do
         let lets' : Array LocalDeclE ← getLets 1 fvar.fvarId!
-        lets := lets.push lets'
+        lets := lets.push $ lets'.map (·.toLocalDecl)
       let patch? ←
         if typePatched || e'?.isSome then do
           -- if lets.any fun l => l.fvarId.name == "_kernel_fresh.61".toName then
