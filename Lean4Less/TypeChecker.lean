@@ -843,6 +843,57 @@ def getInitLets : RecM (Array LocalDeclE) := do
     ret := ret.push l ++ (← getLets 0 l.fvarId)
   pure ret
 
+/--
+If `t` and `s` are lambda expressions, checks that their domains are defeq and
+recurses on the bodies, substituting in a new free variable for that binder
+(this substitution is delayed for efficiency purposes using the `subst`
+parameter). Otherwise, does a normal defeq check.
+-/
+def isDefEqLambda (t s : PExpr) : RecB := do
+  let rec getData t s := do
+    match t, s with
+    | .lam tName tDom tBody tBi, .lam sName sDom sBody sBi =>
+      let (datas, tBody, sBody) ← getData tBody sBody
+      pure (#[({name := tName, dom := tDom.toPExpr, info := tBi}, {name := sName, dom := sDom.toPExpr, info := sBi})] ++ datas, tBody, sBody)
+    | tBody, sBody =>
+      pure (#[], tBody.toPExpr, sBody.toPExpr)
+  let (datas, tBody, sBody) ← getData t.toExpr s.toExpr
+  ttrace s!"DBG[11]: TypeChecker.lean:1579 (after let (datas, tBody, sBody) ← getData t.…)"
+  let ret ← isDefEqBinder datas tBody sBody fun fa' gx' faEqgb? as ds => do
+    ttrace s!"DBG[12]: TypeChecker.lean:1581 (after let ret ← isDefEqBinder datas tBody sB…)"
+    let mut faEqgx? := faEqgb?
+    let mut fa := fa'
+    let mut gx := gx'
+    for (a, d?) in as.zip ds do
+      let f := (← getLCtx).mkLambda #[a.toExpr] fa |>.toPExpr
+      -- gx was abstracted over a if A defeq B (instead of over a fresh (b : B))
+      let x : LocalDecl := if let some (b, _, _) := d? then b else a
+      let g := (← getLCtx).mkLambda #[x.toExpr] gx |>.toPExpr
+      if d?.isSome || faEqgx?.isSome then
+        let (ALvl, A) ← getTypeLevel a.toExpr.toPExpr
+        let u := ALvl
+        let (UaLvl, Ua) ← getTypeLevel fa
+        let v := UaLvl
+        let Vx ← inferTypePure 41 gx
+        let faEqgx ← faEqgx?.getDM $ mkHRefl 6 UaLvl Ua fa
+        let (U, V) := ((Ua, a), (Vx, x))
+        let extra ← if let some (b, aEqb, bEqa, hAB?) := d? then
+          let hAB ← hAB?.getDM (mkHRefl 8 u.succ (Expr.sort u).toPExpr A)
+          let B := b.type.toPExpr
+          pure $ .ABUV {B, b, hAB, vaEqb := {aEqb, bEqa, lets := ← getLets 10 aEqb}, blets := ← getLets 9 b} {V}
+        else
+          let (_, UaEqVx?) ← isDefEq 43 Ua Vx
+          if UaEqVx?.isSome then
+            pure $ .UV {V}
+          else
+            pure $ .none
+        faEqgx? := .some $ .lam {u, v, A, a, U, f, g, faEqgx, extra, alets := ← getLets 8 a}
+
+      fa := f
+      gx := g
+    pure faEqgx?
+  pure ret
+
 def meths : ExtMethods RecM := {
     isDefEq := isDefEq
     isDefEqApp := fun n t s m => isDefEqApp n t s (targsEqsargs? := m)
@@ -875,6 +926,7 @@ def meths : ExtMethods RecM := {
     getLets := getLets
     checkExprCache := @checkExprCache
     usesPrfIrrel := usesPrfIrrel
+    isDefEqLambda := isDefEqLambda
   }
 
 def methsA : ExtMethodsA RecM := {
@@ -948,9 +1000,8 @@ def _isDefEqApp (t s : PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr) :=
     let p? := data?.map (·.1)
     pure (isDefEq, p?)
 
-def isDefEqForallOpt' (t s : PExpr) : RecB := do
-  let (.some (tAbsType, tAbsDomsVars, tAbsDoms, sAbsType, sAbsDomsVars, sAbsDoms, tAbsDomsEqsAbsDoms?, _)) ← App.forallAbs methsA 2000 t s |
-    dbg_trace s!"DBG[9]: TypeChecker.lean:951 {← isDefEqLean t s}"
+def isDefEqBinOpt (t s : PExpr) (lambda : Bool): RecB := do
+  let (.some (tAbsType, tAbsDomsVars, tAbsDoms, sAbsType, sAbsDomsVars, sAbsDoms, tAbsDomsEqsAbsDoms?, _)) ← App.binAbs methsA 2000 t s lambda |
     return (false, none)
 
   let tLCtx := tAbsDomsVars.foldl (init := (← getLCtx)) fun acc v => LocalContext.mkLocalDecl acc v.fvarId v.userName v.type default
@@ -969,6 +1020,9 @@ def isDefEqForallOpt' (t s : PExpr) : RecB := do
   else
     let (ret, dat?) ← dbg_wrap 9908 $ isDefEqApp'' tf'.toPExpr sf'.toPExpr tAbsDoms sAbsDoms tAbsDomsEqsAbsDomsMap
     pure (ret, dat?.map (·.1))
+
+def isDefEqForallOpt (t s : PExpr) : RecB := isDefEqBinOpt t s false
+def isDefEqLambdaOpt (t s : PExpr) : RecB := isDefEqBinOpt t s true
 
 def lamCount : Expr → Nat
   | .lam _ _ b _ =>
@@ -1701,56 +1755,6 @@ def reduceNat (e : PExpr) : RecM (Option (PExpr × Option EExpr)) := do
     if f == ``Nat.ble then return ← reduceBinNatPred ``Nat.ble Nat.ble a.toPExpr b.toPExpr
   return none
 
-/--
-If `t` and `s` are lambda expressions, checks that their domains are defeq and
-recurses on the bodies, substituting in a new free variable for that binder
-(this substitution is delayed for efficiency purposes using the `subst`
-parameter). Otherwise, does a normal defeq check.
--/
-def isDefEqLambda (t s : PExpr) : RecB := do
-  let rec getData t s := do
-    match t, s with
-    | .lam tName tDom tBody tBi, .lam sName sDom sBody sBi =>
-      let (datas, tBody, sBody) ← getData tBody sBody
-      pure (#[({name := tName, dom := tDom.toPExpr, info := tBi}, {name := sName, dom := sDom.toPExpr, info := sBi})] ++ datas, tBody, sBody)
-    | tBody, sBody =>
-      pure (#[], tBody.toPExpr, sBody.toPExpr)
-  let (datas, tBody, sBody) ← getData t.toExpr s.toExpr
-  ttrace s!"DBG[11]: TypeChecker.lean:1579 (after let (datas, tBody, sBody) ← getData t.…)"
-  let ret ← isDefEqBinder datas tBody sBody fun fa' gx' faEqgb? as ds => do
-    ttrace s!"DBG[12]: TypeChecker.lean:1581 (after let ret ← isDefEqBinder datas tBody sB…)"
-    let mut faEqgx? := faEqgb?
-    let mut fa := fa'
-    let mut gx := gx'
-    for (a, d?) in as.zip ds do
-      let f := (← getLCtx).mkLambda #[a.toExpr] fa |>.toPExpr
-      -- gx was abstracted over a if A defeq B (instead of over a fresh (b : B))
-      let x : LocalDecl := if let some (b, _, _) := d? then b else a
-      let g := (← getLCtx).mkLambda #[x.toExpr] gx |>.toPExpr
-      if d?.isSome || faEqgx?.isSome then
-        let (ALvl, A) ← getTypeLevel a.toExpr.toPExpr
-        let u := ALvl
-        let (UaLvl, Ua) ← getTypeLevel fa
-        let v := UaLvl
-        let Vx ← inferTypePure 41 gx
-        let faEqgx ← faEqgx?.getDM $ mkHRefl 6 UaLvl Ua fa
-        let (U, V) := ((Ua, a), (Vx, x))
-        let extra ← if let some (b, aEqb, bEqa, hAB?) := d? then
-          let hAB ← hAB?.getDM (mkHRefl 8 u.succ (Expr.sort u).toPExpr A)
-          let B := b.type.toPExpr
-          pure $ .ABUV {B, b, hAB, vaEqb := {aEqb, bEqa, lets := ← getLets 10 aEqb}, blets := ← getLets 9 b} {V}
-        else
-          let (_, UaEqVx?) ← isDefEq 43 Ua Vx
-          if UaEqVx?.isSome then
-            pure $ .UV {V}
-          else
-            pure $ .none
-        faEqgx? := .some $ .lam {u, v, A, a, U, f, g, faEqgx, extra, alets := ← getLets 8 a}
-
-      fa := f
-      gx := g
-    pure faEqgx?
-  pure ret
 
 def isDefEqFVar (idt ids : FVarId) : RecLB := do
   if let some d := (← readThe Context).eqFVars.get? (idt, ids) then
@@ -1772,13 +1776,13 @@ def quickIsDefEq' (t s : PExpr) (useHash := false) : RecLB := do
   then
     return (.true, none)
   let res : Option (Bool × PExpr) ← match t.toExpr, s.toExpr with
-  | .lam .., .lam .. => pure $ some $ ← isDefEqLambda t s
+  | .lam .., .lam .. => pure $ some $ ← isDefEqLambdaOpt t s
   | .fvar idt, .fvar ids =>
     match ← isDefEqFVar idt ids with
     | (.undef, _) => pure none
     | (.true, p?) => pure (true, p?)
     | (.false, p?) => pure (false, p?)
-  | .forallE .., .forallE .. => pure $ some $ ← isDefEqForallOpt' t s
+  | .forallE .., .forallE .. => pure $ some $ ← isDefEqForallOpt t s
   | .sort a1, .sort a2 => pure $ some $ ((a1.isEquiv a2), none)
   | .mdata _ a1, .mdata _ a2 => pure $ some $ ← isDefEq 44 a1.toPExpr a2.toPExpr
   | .mvar .., .mvar .. => throw $ .other "unreachable 6"

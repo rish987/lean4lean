@@ -232,19 +232,19 @@ def mkAppEqProof (TLam SLam : PExpr) (TVarLams SVarLams : Array ((Array Nat) × 
     pure none
 
 -- TODO generalize so can also be used for lambdas
-def forallAbs (max : Nat) (tfT' sfT' : Expr) : m
+def binAbs (max : Nat) (tfT' sfT' : Expr) (lambda : Bool) : m
     (Option (PExpr × Array LocalDecl × Array PExpr ×
      PExpr × Array LocalDecl × Array PExpr ×
      Array (Option EExpr) × Std.HashSet Nat)) := do
   let rec loop tfT sfT tDomsVars tDoms sDomsVars sDoms tDomsEqsDoms (absArgs' : Std.HashSet Nat) idx' (origDomVars origDomVarsAbs : Array (FVarId × FVarId)) (origDomVarsRefs : Std.HashMap (FVarId × FVarId) (Std.HashSet (FVarId × FVarId))) (origDomVarsToNewDomVars : Std.HashMap (FVarId × FVarId) (FVarId × FVarId)) := do
 
-    let withMaybeAbs tType sType tTypeEqsType? f (tName := `tT) (sName := `sT) (tBi := default) (sBi := default) := do 
-      if tTypeEqsType?.isSome || origDomVarsAbs.any (tType.containsFVar' ·.1) || origDomVarsAbs.any (sType.containsFVar' ·.2) then
+    let withMaybeAbs tBod sBod tTypeEqsType? f (tName := `tT) (sName := `sT) (tBi := default) (sBi := default) := do 
+      if tTypeEqsType?.isSome || origDomVarsAbs.any (tBod.containsFVar' ·.1) || origDomVarsAbs.any (sBod.containsFVar' ·.2) then
         let mut depVars := #[]
         let mut origDepVars := #[]
         let mut origDepVarsSet : Std.HashSet (FVarId × FVarId) := default
         for (tvar, svar) in origDomVars do
-          if tType.containsFVar' tvar || sType.containsFVar' svar then
+          if tBod.containsFVar' tvar || sBod.containsFVar' svar then
             origDepVarsSet := origDepVarsSet.insert (tvar, svar)
             for (tvar', svar') in origDomVarsRefs.get! (tvar, svar) do
               origDepVarsSet := origDepVarsSet.insert (tvar', svar')
@@ -254,12 +254,12 @@ def forallAbs (max : Nat) (tfT' sfT' : Expr) : m
             depVars := depVars.push $ origDomVarsToNewDomVars.get! (tvar, svar)
             origDepVars := origDepVars.push $ (tvar, svar)
 
-        let tsort ← meth.ensureSortCorePure (← meth.inferTypePure 214 tType.toPExpr) tType.toPExpr
-        let Mt := (← getLCtx).mkForall (depVars.map fun (tvar, _) => (Expr.fvar tvar)) tsort
+        let tType ← meth.inferTypePure 214 tBod.toPExpr
+        let Mt := (← getLCtx).mkForall (depVars.map fun (tvar, _) => (Expr.fvar tvar)) tType
         let MtNamePrefix := tName.getRoot.toString ++ "T" |>.toName
         let MtName := tName.replacePrefix (tName.getRoot) MtNamePrefix
-        let ssort ← meth.ensureSortCorePure (← meth.inferTypePure 215 sType.toPExpr) sType.toPExpr
-        let Ms := (← getLCtx).mkForall (depVars.map fun (_, svar) => (Expr.fvar svar)) ssort
+        let sType ← meth.inferTypePure 215 sBod.toPExpr
+        let Ms := (← getLCtx).mkForall (depVars.map fun (_, svar) => (Expr.fvar svar)) sType
         let MsNamePrefix := sName.getRoot.toString ++ "T" |>.toName
         let MsName := sName.replacePrefix (sName.getRoot) MsNamePrefix
 
@@ -267,12 +267,16 @@ def forallAbs (max : Nat) (tfT' sfT' : Expr) : m
           meth.withNewFVar 206 MsName Ms.toPExpr sBi fun MsVar => do
             let tDomsVars := tDomsVars.push MtVar
             let sDomsVars := sDomsVars.push MsVar
-            let tDom := (← getLCtx).mkLambda (origDepVars.map fun (tvar, _) => (Expr.fvar tvar)) tType |>.toPExpr
-            let sDom := (← getLCtx).mkLambda (origDepVars.map fun (_, svar) => (Expr.fvar svar)) sType |>.toPExpr
+            let tDom := (← getLCtx).mkLambda (origDepVars.map fun (tvar, _) => (Expr.fvar tvar)) tBod |>.toPExpr
+            let sDom := (← getLCtx).mkLambda (origDepVars.map fun (_, svar) => (Expr.fvar svar)) sBod |>.toPExpr
             let tDoms := tDoms.push tDom
             let sDoms := sDoms.push sDom
-            let (true, tDomEqsDom?) ← meth.isDefEq 216 tDom sDom |
-              return none
+            let (true, tDomEqsDom?) ←
+              if origDepVars.isEmpty then
+                meth.isDefEq 216 tDom sDom
+              else
+                meth.isDefEqLambda tDom sDom
+              | return none
             let tDomsEqsDoms := tDomsEqsDoms.push tDomEqsDom?
             let newtType := Lean.mkAppN (.fvar MtVar) (depVars.map (.fvar ·.1))
             let newsType := Lean.mkAppN (.fvar MsVar) (depVars.map (.fvar ·.2))
@@ -288,11 +292,24 @@ def forallAbs (max : Nat) (tfT' sfT' : Expr) : m
         let mut newDomVars := #[]
         for tsvar in origDomVars do
           newDomVars := newDomVars.push (origDomVarsToNewDomVars.get! tsvar)
-        pure ((← getLCtx).mkForall (newDomVars.map (fun ((tvar, _) : FVarId × FVarId) => .fvar tvar)) newtBod |>.toPExpr, tDomsVars, tDoms, (← getLCtx).mkForall (newDomVars.map (fun ((_, svar) : FVarId × FVarId) => .fvar svar)) newsBod |>.toPExpr, sDomsVars, sDoms, tDomsEqsDoms, absArgs')
+        let tAbsArgs := (newDomVars.map (fun ((tvar, _) : FVarId × FVarId) => .fvar tvar))
+        let tAbs ← do
+          if lambda then
+            pure $ (← getLCtx).mkLambda tAbsArgs newtBod |>.toPExpr
+          else
+            pure $ (← getLCtx).mkForall tAbsArgs newtBod |>.toPExpr
+        let sAbsArgs := (newDomVars.map (fun ((_, svar) : FVarId × FVarId) => .fvar svar))
+        let sAbs ← do
+          if lambda then
+            pure $ (← getLCtx).mkLambda sAbsArgs newsBod |>.toPExpr
+          else
+            pure $ (← getLCtx).mkForall sAbsArgs newsBod |>.toPExpr
+        pure (tAbs, tDomsVars, tDoms, sAbs, sDomsVars, sDoms, tDomsEqsDoms, absArgs')
 
     if idx' < max then
-      match (← meth.whnfPure 218 tfT.toPExpr).toExpr, (← meth.whnfPure 219 sfT.toPExpr).toExpr with
-        | .forallE tName tDom tBod tBi, .forallE sName sDom sBod sBi =>
+      match lambda, (← meth.whnfPure 218 tfT.toPExpr).toExpr, (← meth.whnfPure 219 sfT.toPExpr).toExpr with
+        | false, .forallE tName tDom tBod tBi, .forallE sName sDom sBod sBi
+        | true, .lam tName tDom tBod tBi, .lam sName sDom sBod sBi =>
           let mut refs := default
           for (tvar, svar) in origDomVars do
             if tDom.containsFVar' tvar || sDom.containsFVar' svar then
@@ -300,7 +317,7 @@ def forallAbs (max : Nat) (tfT' sfT' : Expr) : m
               for (tvar', svar') in origDomVarsRefs.get! (tvar, svar) do
                 refs := refs.insert (tvar', svar')
 
-          let (true, tDomEqsDom?) ← meth.isDefEq 220 tDom.toPExpr sDom.toPExpr |
+          let (true, tDomEqsDom?) ← meth.isDefEq 220 tDom.toPExpr sDom.toPExpr | -- FIXME only check usesPrfIrrel here, no need to compute patched term
             return none
 
           let cont' idt ids := do
@@ -338,11 +355,21 @@ def forallAbs (max : Nat) (tfT' sfT' : Expr) : m
                       cont' idt ids
             else
               cont' idt idt
-        | tBod, sBod =>
+        | _, tBod, sBod =>
           cont tBod sBod
     else
       cont tfT sfT
   loop tfT' sfT' #[] #[] #[] #[] #[] default 0 #[] #[] default default
+
+def forallAbs (max : Nat) (tfT' sfT' : Expr) : m
+    (Option (PExpr × Array LocalDecl × Array PExpr ×
+     PExpr × Array LocalDecl × Array PExpr ×
+     Array (Option EExpr) × Std.HashSet Nat)) := binAbs meth max tfT' sfT' false
+
+def lamAbs (max : Nat) (tfT' sfT' : Expr) : m
+    (Option (PExpr × Array LocalDecl × Array PExpr ×
+     PExpr × Array LocalDecl × Array PExpr ×
+     Array (Option EExpr) × Std.HashSet Nat)) := binAbs meth max tfT' sfT' true
 
 mutual
 def deconstructAppHEq' (n : Nat) (t s : PExpr) (tEqs : EExpr) (T? : Option PExpr) : m (Option (Array PExpr × Array PExpr × Array (Option EExpr) × Array (FVarId × Name × PExpr) × Array (FVarId × Name × PExpr) × PExpr × PExpr)) :=

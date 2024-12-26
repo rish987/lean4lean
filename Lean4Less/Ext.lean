@@ -93,6 +93,7 @@ structure ExtMethods (m : Type → Type u) where
   getLets : Nat → FVarId → m (Array LocalDeclE)
   checkExprCache (e : PExpr) (T? : Option PExpr := none) : m PExpr
   usesPrfIrrel (t s : Expr) : m (Bool × Bool)
+  isDefEqLambda (t s : PExpr) : m (Bool × Option EExpr)
 
 structure TypeCheckerOpts where
   proofIrrelevance := true
