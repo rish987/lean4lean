@@ -107,8 +107,7 @@ def inductiveReduceRec [Monad m] [MonadLCtx m] [MonadExcept KernelException m] [
   let majorIdx := info.getMajorIdx
   let some major' := recArgs[majorIdx]? | return none
   let major := major'.toPExpr
-  let (majorWhnf', majorEqmajorWhnf?') ← meth.whnf 110 major
-  let (majorWhnf, majorEqmajorWhnf?) ← if info.k && majorEqmajorWhnf?'.isSome then pure (major, none) else pure (majorWhnf', majorEqmajorWhnf?')
+  let (majorWhnf, majorEqmajorWhnf?) ← if info.k then pure (← meth.whnfPure 0 major, none) else meth.whnf 110 major
   let (majorKWhnf, majorWhnfEqmajorKWhnf?) ← if info.k && not cheapK then toCtorWhenK env meth info majorWhnf else pure (majorWhnf, none)
   let majorEqmajorKWhnf? ← meth.appHEqTrans? major majorWhnf majorKWhnf majorEqmajorWhnf? majorWhnfEqmajorKWhnf?
   let (majorMaybeCtor, majorKWhnfEqMajorMaybeCtor?) ← match majorKWhnf.toExpr with
