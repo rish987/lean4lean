@@ -80,7 +80,7 @@ def toCtorWhenStruct (inductName : Name) (e : PExpr) : m (PExpr × Option EExpr)
     return (e, none)
   let eType ← meth.whnfPure 107 (← meth.inferTypePure 106 e)
   if !eType.toExpr.getAppFn.isConstOf inductName then return (e, none)
-  if (← meth.whnf 108 (← meth.inferTypePure 109 eType)).1 == Expr.prop.toPExpr then return (e, none)
+  if (← meth.whnfPure 108 (← meth.inferTypePure 109 eType)).toExpr == Expr.prop then return (e, none)
   return expandEtaStruct env eType e
 
 def getRecRuleFor (rval : RecursorVal) (major : Expr) : Option RecursorRule := do
@@ -107,7 +107,8 @@ def inductiveReduceRec [Monad m] [MonadLCtx m] [MonadExcept KernelException m] [
   let majorIdx := info.getMajorIdx
   let some major' := recArgs[majorIdx]? | return none
   let major := major'.toPExpr
-  let (majorWhnf, majorEqmajorWhnf?) ← meth.whnf 110 major
+  let (majorWhnf', majorEqmajorWhnf?') ← meth.whnf 110 major
+  let (majorWhnf, majorEqmajorWhnf?) ← if info.k && majorEqmajorWhnf?'.isSome then pure (major, none) else pure (majorWhnf', majorEqmajorWhnf?')
   let (majorKWhnf, majorWhnfEqmajorKWhnf?) ← if info.k && not cheapK then toCtorWhenK env meth info majorWhnf else pure (majorWhnf, none)
   let majorEqmajorKWhnf? ← meth.appHEqTrans? major majorWhnf majorKWhnf majorEqmajorWhnf? majorWhnfEqmajorKWhnf?
   let (majorMaybeCtor, majorKWhnfEqMajorMaybeCtor?) ← match majorKWhnf.toExpr with

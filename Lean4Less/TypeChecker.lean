@@ -1502,7 +1502,7 @@ def inferType' (e : Expr) (_dbg := false) : RecPE := do
       -- for some universe level `l`, so this use of `isDefEq` is valid
       let ((true, pa'?), a') ← smartCast' aType dType (a'?.getD a.toPExpr) 19 |
         -- if e'.isApp then if let .const `Bool.casesOn _ := e'.withApp fun f _ => f then
-        dbg_trace s!"dbg: {e}"
+        -- dbg_trace s!"dbg: {(← whnf 0 dType.toExpr.getAppArgs[2]!.toPExpr).1} {(← whnf 0 aType.toExpr.getAppArgs[2]!.toPExpr).1}"
         throw <| .appTypeMismatch (← getEnv) (← getLCtx) e fType' aType
 
       let patch := if f'?.isSome || a'?.isSome || pf'?.isSome || pa'?.isSome then .some (Expr.app f' a').toPExpr else none
@@ -1616,10 +1616,10 @@ theorem or definition), returning its `ConstantInfo` if so.
 -/
 def isDelta (env : Environment) (e : PExpr) : Option ConstantInfo := do
   if let .const c _ := e.toExpr.getAppFn then
-    if c != `L4L.eq_of_heq then -- TODO have to block all of the patch theorems?
-      if let some ci := env.find? c then
-        if ci.hasValue then
-          return ci
+    -- if c != `L4L.eq_of_heq then -- TODO have to block all of the patch theorems?
+    if let some ci := env.find? c then
+      if ci.hasValue then
+        return ci
   none
 
 /--
