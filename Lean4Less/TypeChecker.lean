@@ -1776,7 +1776,7 @@ def quickIsDefEq' (t s : PExpr) (useHash := false) : RecLB := do
   then
     return (.true, none)
   let res : Option (Bool × PExpr) ← match t.toExpr, s.toExpr with
-  | .lam .., .lam .. => pure $ some $ ← isDefEqLambdaOpt t s
+  | .lam .., .lam .. => pure $ some $ ← isDefEqLambda t s
   | .fvar idt, .fvar ids =>
     match ← isDefEqFVar idt ids with
     | (.undef, _) => pure none
