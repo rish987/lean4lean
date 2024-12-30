@@ -2048,7 +2048,7 @@ def isDefEqProofIrrel (t s : PExpr) : RecLB := do
         pure none
     pure (.true, tEqs?)
   else
-    pure (.undef, none)
+    pure (.false, none)
 
 def failedBefore (failure : Std.HashSet (Expr × Expr)) (t s : Expr) : Bool :=
   if t.hash < s.hash then

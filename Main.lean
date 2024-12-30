@@ -83,6 +83,9 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
   let mod : Name := p.positionalArg! "input" |>.value.toName
   let onlyConsts? := p.flag? "only" |>.map fun onlys => 
     onlys.as! (Array String)
+  let blConsts? := p.flag? "blacklist" |>.map fun bls =>
+    bls.as! (Array String)
+  let blConsts := blConsts?.getD #[] |>.map (·.toName)
   let cachedPath? := p.flag? "cached" |>.map fun sp => 
     System.FilePath.mk $ sp.as! String
   let pi : Bool := p.hasFlag "proof-irrel"
@@ -143,7 +146,7 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
             unless not skip do return
 
             let newConstants ← d.constNames.zip d.constants |>.foldlM (init := default) fun acc (n, ci) => do
-              if not ((← get).env.contains n) then
+              if not ((← get).env.contains n) && not (blConsts.any fun bn => n == bn) then
                 pure $ acc.insert n ci
               else
                 pure $ acc
@@ -180,6 +183,7 @@ unsafe def transCmd : Cmd := `[Cli|
     pi, "proof-irrel"; "eliminate proof irrelevance"
     klr, "klike-red"; "eliminate klike reduction"
     c, cached : String; "Use cached library translation files from specified directory."
+    bl, blacklist : Array String; "Use cached library translation files from specified directory."
 
   ARGS:
     input : String;         "Input .lean file."
