@@ -7,8 +7,8 @@ open Lean
 
 def defFuel := 1300
 
--- def tr := true
-def tr := false
+def tr := true
+-- def tr := false
 
 mutual
 def fuelWrap (idx : Nat) (fuel : Nat) (d : CallData) : M (CallDataT d) := do
@@ -53,7 +53,7 @@ match fuel with
     -- t := .some 33496
     let methPrint := false
     -- let methPrint := (← shouldTrace)
-    -- let methPrint := true
+    let methPrint := true
     let cond := tr &&
       if s.numCalls % 1 == 0 then
         if let some n := t then
@@ -70,7 +70,7 @@ match fuel with
         else
           s!"{d.1}"
       )
-      dbg_trace s!"calltrace {s.numCalls}: {stackStr}, {idx}, {ctx.callId}"
+      dbg_trace s!"{(← readThe Context).const} calltrace {s.numCalls}: {stackStr}, {idx}, {ctx.callId}"
 
     -- if s.numCalls == 39363 then
     --   dbg_trace s!"DBG[21]: Methods.lean:46 (after if s.numCalls == 39363 then)"
@@ -138,7 +138,7 @@ match fuel with
         else
           m (Methods.withFuel fuel')
       if printedTrace then
-        dbg_trace s!"end of    {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}, {(← readThe Context).callId}"
+        dbg_trace s!"{(← readThe Context).const} end of    {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}, {(← readThe Context).callId}"
       -- if s.numCalls == 39363 then
       --   dbg_trace s!"DBG[22]: Methods.lean:110 (after dbg_trace s!DBG[21]: Methods.lean:46 (af…)"
       pure ret

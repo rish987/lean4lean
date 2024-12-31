@@ -485,6 +485,10 @@ def usesPrfIrrel (t s : Expr) (fuel := 1000) : RecM (Bool × Bool) := do
   let (defEq, s) ← runLeanRecM' $ Lean.TypeChecker.isDefEq t s fuel
   pure (defEq, ← s.data.usedM)
 
+def usesPrfIrrelWhnf (t : Expr) : RecM (Expr × Bool) := do
+  let (defEq, s) ← runLeanRecM' $ Lean.TypeChecker.whnf t
+  pure (defEq, ← s.data.usedM)
+
 def inferTypeLean (n : Nat) (t : Expr) : RecM Expr := do
   dbg_wrap (55000 + n) $ runLeanRecM $ Lean.TypeChecker.Inner.inferType 0 t (inferOnly := false)
 
@@ -1586,7 +1590,13 @@ Reduces a projection of `struct` at index `idx` (when `struct` is reducible to a
 constructor application).
 -/
 def reduceProj (structName : Name) (projIdx : Nat) (struct : PExpr) (cheapK : Bool) (cheapProj : Bool) : RecM (Option (PExpr × Option EExpr)) := do
-  let mut (structN, structEqc?) ← (if cheapProj then whnfCore 35 struct cheapK cheapProj else whnf 305 struct (cheapK := cheapK))
+  let mut (structN, structEqc?) ← (if cheapProj then whnfCore 35 struct cheapK cheapProj else do
+    let (s', usedPI) ← usesPrfIrrelWhnf struct
+    if usedPI then
+      whnf 305 struct (cheapK := cheapK)
+    else
+      pure (s'.toPExpr, none)
+    )
   -- if structEqc?.isNone then
   --   if not (← isDefEqPure 0 struct structN) then
   --     throw $ .other s!"reduceProj failed sanity check {(← get).numCalls}"
@@ -2039,14 +2049,18 @@ def isDefEqProofIrrel (t s : PExpr) : RecLB := do
   let prop ← isPropPure tType
   if !prop then return (.undef, none)
   let sType ← inferTypePure 60 s
-  let (ret, pt?) ← isDefEq 61 tType sType
-  if ret == .true then
-    let tEqs? ←
-      if (← readThe Context).opts.proofIrrelevance then
-        isDefEqProofIrrel' t s tType sType pt? 1
-      else
-        pure none
-    pure (.true, tEqs?)
+  let (ret, usesPI) ← usesPrfIrrel tType sType
+  if ret then
+    if usesPI then
+      let (true, pt?) ← isDefEq 61 tType sType | throw $ .other "isDefEqProofIrrel error"
+      let tEqs? ←
+        if (← readThe Context).opts.proofIrrelevance then
+          isDefEqProofIrrel' t s tType sType pt? 1
+        else
+          pure none
+      pure (.true, tEqs?)
+    else
+      pure (.true, none)
   else
     pure (.false, none)
 
