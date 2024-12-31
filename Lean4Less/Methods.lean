@@ -7,8 +7,8 @@ open Lean
 
 def defFuel := 1300
 
-def tr := true
--- def tr := false
+-- def tr := true
+def tr := false
 
 mutual
 def fuelWrap (idx : Nat) (fuel : Nat) (d : CallData) : M (CallDataT d) := do
@@ -254,6 +254,10 @@ def ensureForall (t : PExpr) (lps : List Name) (s := t) : MEE := withReader ({ �
 
 def maybeCast (p? : Option EExpr) (typLhs typRhs e : PExpr) (lps : List Name) : M PExpr := 
   withReader ({ · with lparams := lps }) (Inner.maybeCast 24 p? typLhs typRhs e).run
+
+def isValidApp (e : PExpr) (lps : List Name) : M Unit := do
+  let ret ← withReader ({ · with lparams := lps }) (Inner.isValidApp 0 e).run
+  if not ret then throw $ .other "failed isValidApp sanity check"
 
 def smartCast (typLhs typRhs e : PExpr) (lps : List Name) : M (Bool × PExpr) := do
   let ret ← withReader ({ · with lparams := lps }) (Inner.smartCast 25 typLhs typRhs e).run

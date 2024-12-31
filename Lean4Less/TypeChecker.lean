@@ -722,6 +722,7 @@ def isValidApp (_n : Nat) (t : Expr) : RecM Bool := do
     _ ← runLeanMinusRecM $ Lean.TypeChecker.Inner.inferType 0 t (inferOnly := false)
     pure true
   catch _e =>
+    throw _e
     pure false
 
 def appPrfIrrelHEq (P Q : PExpr) (hPQ : EExpr) (p q : PExpr) : RecM EExpr := do

@@ -55,8 +55,6 @@ def patchConsts : Array Name := #[
 `L4L.prfIrrelHEq,
 `L4L.prfIrrelHEqPQ,
 
-`L4L.castOrigHEq,
-
 `L4L.forallHEqUV,
 `L4L.forallHEqUV',
 `L4L.forallHEqAB,
@@ -81,6 +79,8 @@ def patchConsts : Array Name := #[
 `L4L.lambdaHEqUV',
 `L4L.lambdaHEqABUV,
 `L4L.lambdaHEqABUV',
+
+`L4L.castOrigHEq,
 
 `L4L.appHEqBinNatFn,
 `sorryAx --FIXME
