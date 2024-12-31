@@ -2289,8 +2289,8 @@ def isDefEqCore' (t s : PExpr) : RecM (Bool × (Option EExpr)) := do
   --   if t.toExpr.containsFVar' (.mk "_kernel_fresh.37".toName) || s.toExpr.containsFVar' (.mk "_kernel_fresh.37".toName) then 
   --     throw $ .other "HERE"
   -- let (ret, usedPI) ← usesPrfIrrel' t s
-  -- if ret && not usedPI then
-  --   return (true, none)
+  -- if not usedPI then
+  --   return (ret, none)
 
   -- if ← isDefEqPure 74 t s 15 then -- NOTE: this is a tradeoff between runtime and output size -- TODO put back
   --   return (true, none)

@@ -238,8 +238,8 @@ def binAbs (max : Nat) (tfT' sfT' : Expr) (lambda : Bool) : m
      Array (Option EExpr) × Std.HashSet Nat)) := do
   let rec loop tfT sfT tDomsVars tDoms sDomsVars sDoms tDomsEqsDoms (absArgs' : Std.HashSet Nat) idx' (origDomVars origDomVarsAbs : Array (FVarId × FVarId)) (origDomVarsRefs : Std.HashMap (FVarId × FVarId) (Std.HashSet (FVarId × FVarId))) (origDomVarsToNewDomVars : Std.HashMap (FVarId × FVarId) (FVarId × FVarId)) := do
 
-    let withMaybeAbs tBod sBod tTypeEqsType? f (tName := `tT) (sName := `sT) (tBi := default) (sBi := default) := do 
-      if tTypeEqsType?.isSome || origDomVarsAbs.any (tBod.containsFVar' ·.1) || origDomVarsAbs.any (sBod.containsFVar' ·.2) then
+    let withMaybeAbs tBod sBod usesPrfIrrel f (tName := `tT) (sName := `sT) (tBi := default) (sBi := default) := do 
+      if usesPrfIrrel || origDomVarsAbs.any (tBod.containsFVar' ·.1) || origDomVarsAbs.any (sBod.containsFVar' ·.2) then
         let mut depVars := #[]
         let mut origDepVars := #[]
         let mut origDepVarsSet : Std.HashSet (FVarId × FVarId) := default
@@ -285,7 +285,7 @@ def binAbs (max : Nat) (tfT' sfT' : Expr) (lambda : Bool) : m
         f none tDomsVars sDomsVars tDoms sDoms tDomsEqsDoms
 
     let cont tBod sBod := do 
-      let (true, tBodEqsBod?) ← meth.isDefEq 217 tBod.toPExpr sBod.toPExpr |
+      let (true, tBodEqsBod?) ← meth.usesPrfIrrel tBod.toPExpr sBod.toPExpr |
         return none
       withMaybeAbs tBod sBod tBodEqsBod? fun newtsBod? tDomsVars sDomsVars tDoms sDoms tDomsEqsDoms => do
         let (newtBod, newsBod) := newtsBod?.getD (tBod, sBod)
@@ -317,7 +317,7 @@ def binAbs (max : Nat) (tfT' sfT' : Expr) (lambda : Bool) : m
               for (tvar', svar') in origDomVarsRefs.get! (tvar, svar) do
                 refs := refs.insert (tvar', svar')
 
-          let (true, tDomEqsDom?) ← meth.isDefEq 220 tDom.toPExpr sDom.toPExpr | -- FIXME only check usesPrfIrrel here, no need to compute patched term
+          let (true, tDomEqsDom?) ← meth.usesPrfIrrel tDom.toPExpr sDom.toPExpr | -- FIXME only check usesPrfIrrel here, no need to compute patched term
             return none
 
           let cont' idt ids := do
@@ -340,7 +340,7 @@ def binAbs (max : Nat) (tfT' sfT' : Expr) (lambda : Bool) : m
               tName sName
 
           meth.withNewFVar 207 tName tDom.toPExpr tBi fun idt => do
-            if tDomEqsDom?.isSome then
+            if tDomEqsDom? then
               meth.withNewFVar 210 sName sDom.toPExpr sBi fun ids => do
                 let sort ← meth.inferTypePure 221 tDom.toPExpr
                 let .sort lvl := (← meth.ensureSortCorePure sort tDom).toExpr | unreachable!
