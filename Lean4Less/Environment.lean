@@ -20,7 +20,7 @@ def checkConstantVal (env : Environment) (v : ConstantVal) (allowPrimitive := fa
   let (sort, typeTypeEqSort?) ← ensureSort typeType v.levelParams type'
   let type'' ← maybeCast typeTypeEqSort? typeType sort type' v.levelParams
   let ret ← insertInitLets type''
-  isValidApp ret v.levelParams
+  -- isValidApp ret v.levelParams
   pure ret
 
 def patchAxiom (env : Environment) (v : AxiomVal) (opts : TypeCheckerOpts) :
@@ -51,7 +51,7 @@ def patchDefinition (env : Environment) (v : DefinitionVal) (allowAxiomReplace :
       let value ← insertInitLets value
       if type.toExpr.hasFVar || value.toExpr.hasFVar then
         throw $ .other "fvar in translated term"
-      isValidApp value v.levelParams
+      -- isValidApp value v.levelParams
       let v := {v with type, value}
       return .defnInfo v
   else
@@ -79,7 +79,7 @@ def patchDefinition (env : Environment) (v : DefinitionVal) (allowAxiomReplace :
       -- dbg_trace s!"DBG[3]: Methods.lean:202: patch={← (Lean.collectFVars default value.toExpr).fvarIds.mapM fun v => do pure (v.name, (← get).fvarRegistry.get? v.name)}"
       -- dbg_trace s!"DBG[15]: Environment.lean:65 (after let value ← smartCast valueType type v…)"
       let value ← insertInitLets value
-      isValidApp value v.levelParams
+      -- isValidApp value v.levelParams
       let v := {v with type, value}
       if type.toExpr.hasFVar || value.toExpr.hasFVar then
         throw $ .other "fvar in translated term"

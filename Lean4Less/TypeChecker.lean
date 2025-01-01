@@ -677,8 +677,8 @@ def isDefEqBinder (binDatas : Array (BinderData × BinderData)) (tBody sBody : P
         else
           let tBody := tBody.instantiateRev (tvars.map (·.toExpr.toPExpr))
           let sBody := sBody.instantiateRev (svars.map (·.toExpr.toPExpr))
-          let (true, usesPI) ← usesPrfIrrel tBody sBody | return (false, none)
-          let ptbodEqsbod? ← if usesPI then
+          -- let (true, usesPI) ← usesPrfIrrel tBody sBody | return (false, none)
+          let ptbodEqsbod? ← if true then
             let (true, ptbodEqsbod?) ← isDefEq 6 tBody sBody | return (false, none) -- TODO refactor isDefEq to return normalized terms that were finally compared (to eliminate unused fvar dependencies)
             -- if ptbodEqsbod?.isNone && usesPI then
             --   dbg_trace s!"HERE 2"
@@ -1591,13 +1591,7 @@ Reduces a projection of `struct` at index `idx` (when `struct` is reducible to a
 constructor application).
 -/
 def reduceProj (structName : Name) (projIdx : Nat) (struct : PExpr) (cheapK : Bool) (cheapProj : Bool) : RecM (Option (PExpr × Option EExpr)) := do
-  let mut (structN, structEqc?) ← (if cheapProj then whnfCore 35 struct cheapK cheapProj else do
-    let (s', usedPI) ← usesPrfIrrelWhnf struct
-    if usedPI then
-      whnf 305 struct (cheapK := cheapK)
-    else
-      pure (s'.toPExpr, none)
-    )
+  let mut (structN, structEqc?) ← (if cheapProj then whnfCore 35 struct cheapK cheapProj else whnf 305 struct (cheapK := cheapK))
   -- if structEqc?.isNone then
   --   if not (← isDefEqPure 0 struct structN) then
   --     throw $ .other s!"reduceProj failed sanity check {(← get).numCalls}"
@@ -2050,10 +2044,10 @@ def isDefEqProofIrrel (t s : PExpr) : RecLB := do
   let prop ← isPropPure tType
   if !prop then return (.undef, none)
   let sType ← inferTypePure 60 s
-  let (ret, usesPI) ← usesPrfIrrel tType sType
+  -- let (ret, usesPI) ← usesPrfIrrel tType sType
+  let (ret, pt?) ← isDefEq 61 tType sType
   if ret then
-    if usesPI then
-      let (true, pt?) ← isDefEq 61 tType sType | throw $ .other "isDefEqProofIrrel error"
+    if true then
       let tEqs? ←
         if (← readThe Context).opts.proofIrrelevance then
           isDefEqProofIrrel' t s tType sType pt? 1
