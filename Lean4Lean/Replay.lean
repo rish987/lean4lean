@@ -77,6 +77,7 @@ structure State where
   printNewLine := false
   numToCheck : Nat
   numChecked : Nat := 0
+  aborted : NameSet := {}
   remaining : NameSet := {}
   pending : NameSet := {}
   postponedConstructors : NameSet := {}
@@ -201,6 +202,8 @@ The construct the `Declaration` from its stored `ConstantInfo`,
 and add it to the environment.
 -/
 partial def replayConstant (name : Name) (addDeclFn' : Declaration → M Unit) (printProgress? : Bool := false) (op : String := "typecheck") : M Unit := do
+  if (← get).aborted.contains name then
+    return
   let postAddDecl := do
     modify fun s => {s with numChecked := s.numChecked + 1}
     if printProgress? then
@@ -213,10 +216,24 @@ partial def replayConstant (name : Name) (addDeclFn' : Declaration → M Unit) (
   let addDeclFn := fun decl => do
     preAddDecl decl.name
     try
+      let some ci := (← read).newConstants[name]? | unreachable!
+      let mut deps := ci.getUsedConstants
+      let abortedDeps : Lean.NameSet := (deps.intersectBy (fun _ _ _ => ()) (← get).aborted)
+      if not abortedDeps.isEmpty then
+        modify fun s =>
+          { s with aborted := s.aborted.insert name }
+        IO.println s!"\n{name} aborted due to aborted dependencies"
+        return
       addDeclFn' decl
     catch e =>
-      dbg_trace s!"Error in {decl.name}"
-      throw e
+      match e with
+      | .otherError 165846 m => -- 165846 is the abort code
+        modify fun s =>
+          { s with aborted := s.aborted.insert name }
+        IO.println s!"\n{name} aborted: {m}"
+      | _ =>
+        dbg_trace s!"Error in {decl.name}"
+        throw e
     postAddDecl
 
   if ← isTodo name then
@@ -321,7 +338,7 @@ def _root_.Lean.Environment.toMap₂ (env : Environment) : Environment :=
   env.withConsts fun c => {c with map₂ := newMap, map₁ := default}
 
 /-- "Replay" some constants into an `Environment`, sending them to the kernel for checking. -/
-def replay (ctx : Context) (env : Environment) (decl : Option Name := none) (printProgress : Bool := false) (op : String := "typecheck") : IO Environment := do 
+def replay (ctx : Context) (env : Environment) (decl : Option Name := none) (printProgress : Bool := false) (op : String := "typecheck") (aborted : NameSet := default): IO (Environment × NameSet) := do
   let env := env.toMap₁.withConsts fun c => {c with stage₁ := false}
   let mut remaining : NameSet := ∅
   let mut numToCheck : Nat := 0
@@ -333,14 +350,17 @@ def replay (ctx : Context) (env : Environment) (decl : Option Name := none) (pri
       numToCheck := numToCheck + 1
   -- if let some onlyConsts := onlyConsts? then
   --   numToCheck := (← getDepConsts ctx.newConstants onlyConsts).size
-  let (_, s) ← StateRefT'.run (s := { env, remaining, numToCheck }) do
+  let (_, s) ← StateRefT'.run (s := { env, remaining, numToCheck, aborted }) do
     ReaderT.run (r := ctx) do
       match decl with
       | some d => replayConstant d addDeclFn (op := op)
       | none =>
         let tryReplay n :=
           try
-            replayConstant n addDeclFn printProgress op
+            if (← get).aborted.contains n then
+              IO.println s!"\n{n} aborted (on aborted list)"
+            else
+              replayConstant n addDeclFn printProgress op
           catch
           | e => 
             IO.eprintln s!"Error {op}ing constant `{n}`: {e.toString}"
@@ -365,7 +385,7 @@ def replay (ctx : Context) (env : Environment) (decl : Option Name := none) (pri
     --         IO.println s!"  - used proof irrelevance"
     --       if d.usedKLikeReduction then
     --         IO.println s!"  - used k-like reduction"
-  return s.env
+  return (s.env, s.aborted)
 
 unsafe def replayFromImports (module : Name) (verbose := false) (compare := false) (opts : TypeCheckerOpts := {}) : IO Unit := do
   let mFile ← findOLean module
@@ -379,14 +399,14 @@ unsafe def replayFromImports (module : Name) (verbose := false) (compare := fals
   let mut newConstants := {}
   for name in mod.constNames, ci in mod.constants do
     newConstants := newConstants.insert name ci
-  let env' ← replay addDeclFn { newConstants, verbose, compare, opts } env
+  let (env', _) ← replay addDeclFn { newConstants, verbose, compare, opts } env
   env'.freeRegions
   region.free
 
 unsafe def replayFromInit'' (module : Name) (initEnv : Environment) (newConstants : Std.HashMap Name ConstantInfo) (f : Environment → IO Unit) (op : String := "typecheck")
     (verbose := false) (compare := false) (decl : Option Name := none) (opts : TypeCheckerOpts := {}) (printProgress := true) : IO Unit := do
     let ctx := { newConstants, verbose, compare, opts }
-    let env ← replay addDeclFn ctx (initEnv.setMainModule module) (op := op) (decl := decl) (printProgress := printProgress)
+    let (env, _) ← replay addDeclFn ctx (initEnv.setMainModule module) (op := op) (decl := decl) (printProgress := printProgress)
     f env
 
 unsafe def replayFromInit' (module : Name) (initEnv : Environment) (f : Environment → IO Unit) (op : String := "typecheck")

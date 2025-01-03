@@ -39,7 +39,7 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn :
           map := map.erase skipConst
 
         let rp := do
-          let env ← replay addDeclFn {newConstants := map.erase const, opts := {}} modEnv (printProgress := printProgress)
+          let (env, _) ← replay addDeclFn {newConstants := map.erase const, opts := {}} modEnv (printProgress := printProgress)
           -- _ ← replay Lean4Lean.addDecl {newConstants := ← getDepConstsEnv modEnv #[const], opts := {proofIrrelevance := false, kLikeReduction := false}} env (printProgress := printProgress)
           -- unsafe replayFromEnv Lean4Lean.addDecl modEnv.mainModule modEnv.toMap₁ (op := "typecheck") (opts := {proofIrrelevance := false, kLikeReduction := false}) (printProgress := false)
           pure env
@@ -64,7 +64,7 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn :
         else
           modEnv ← rp
 
-        modEnv ← replay addDeclFn {newConstants := Std.HashMap.insert default const (map.get! const), opts} modEnv (printProgress := printProgress)
+        (modEnv, _) ← replay addDeclFn {newConstants := Std.HashMap.insert default const (map.get! const), opts} modEnv (printProgress := printProgress)
         skipConsts := skipConsts.union mapConsts -- TC success, so want to skip in future runs (already in environment)
       let onlyConstsToTrans := onlyConstsToTrans.insert const
       pure (modEnv, skipConsts, errConsts, onlyConstsToTrans)
