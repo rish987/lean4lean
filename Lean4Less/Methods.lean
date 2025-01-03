@@ -40,6 +40,8 @@ match fuel with
       | .inferTypePure e => inferTypePure' e
     -- if recDepth > 500 then
     --   dbg_trace s!"DBG[3]: {d.name}, {fuel}, {idx}"
+    if (← get).numCalls > 1500000 then
+      throw $ .other "translation aborted"
     modify fun s => {s with numCalls := s.numCalls + 1} 
     let s ← get
     -- let newFuel := 
@@ -153,7 +155,10 @@ match fuel with
       --     pure ()
       --   | _ => unreachable!
         -- isDefEqLean 
-      dbg_trace s!"err calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}"
+      if let .other "translation aborted" := e then
+        pure ()
+      else
+        dbg_trace s!"err calltrace {s.numCalls}: {(← readThe Context).callStack.map (·.1)}, {idx}"
       throw e
 
 def Methods.withFuel (n : Nat) : Methods := 

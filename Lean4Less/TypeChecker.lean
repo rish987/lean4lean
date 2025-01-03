@@ -1181,7 +1181,7 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
       let (tl', tr', nLams) ← try 
         alignForAll nLams tl tr
       catch ex =>
-        dbg_trace s!"smartCast error: {n}, {nLams}"
+        -- dbg_trace s!"smartCast error: {n}, {nLams}"
         throw ex
       let tl' := tl'.toPExpr
       let tr' := tr'.toPExpr
@@ -1219,7 +1219,7 @@ def smartCast (n : Nat) (tl tr e : PExpr) (p? : Option EExpr := none) : RecM (Bo
   let ret ← try
     smartCast' tl tr e n p?
   catch ex =>
-    dbg_trace s!"smartCast error: {n}"
+    -- dbg_trace s!"smartCast error: {n}"
     throw ex
   pure (ret.1.1, ret.2)
 

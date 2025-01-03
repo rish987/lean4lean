@@ -22,6 +22,10 @@ def addDecl (d : Declaration) (opts : TypeCheckerOpts := {}) : M Unit := do
       println! "{Lean4Lean.Ansi.resetLine}lean4less took {t2 - t1}:\t {d.name}"
     modify fun s => { s with env := env }
   | .error ex =>
-    throwKernelException ex
+    match ex with
+    | .other "translation aborted" =>
+      throw $ .otherError 165846 "translation aborted"
+    | _ =>
+      throwKernelException ex
 
 end Lean4Less

@@ -41,7 +41,8 @@ abbrev ForEachModuleM := StateRefT ForEachModuleState IO
 @[inline] nonrec def ForEachModuleM.run (env : Environment) (x : ForEachModuleM α) (s : ForEachModuleState := {env}) : IO (α × ForEachModuleState) :=
   x.run s
 
-partial def forEachModule' (f : Name → ModuleData → ForEachModuleM Unit) (imports : Array Import) : ForEachModuleM Unit := do
+partial def forEachModule' (f : Name → ModuleData → NameSet → ForEachModuleM NameSet) (imports : Array Import) (aborted : NameSet) : ForEachModuleM NameSet := do
+  let mut aborted := aborted
   for i in imports do
     if i.runtimeOnly || (← get).moduleNameSet.contains i.module then
       continue
@@ -50,9 +51,10 @@ partial def forEachModule' (f : Name → ModuleData → ForEachModuleM Unit) (im
     unless (← mFile.pathExists) do
       throw <| IO.userError s!"object file '{mFile}' of module {i.module} does not exist"
     let (mod, _) ← readModuleData mFile
-    forEachModule' f mod.imports
+    aborted ← forEachModule' f mod.imports aborted
     modify fun s => { s with count := s.count + 1}
-    f i.module mod
+    aborted ← f i.module mod aborted
+  pure aborted
 
 def mkModuleData (imports : Array Import) (env : Environment) : IO ModuleData := do
   let pExts ← persistentEnvExtensionsRef.get
@@ -105,28 +107,51 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
           _ ← Lean4Less.checkL4L (onlyConsts.map (·.toName)) env (printProgress := true) (printOutput := p.hasFlag "print") (opts := opts)
       else
         let outDir := ((← IO.Process.getCurrentDir).join "out")
+        let abortedFile := outDir.join "aborted.txt"
         if (← outDir.pathExists) && not cachedPath?.isSome then
           IO.FS.removeDirAll outDir
+        let aborted ← do
+          if let some _ := cachedPath? then
+            if ← abortedFile.pathExists then do
+              let abortedTxt ← IO.FS.readFile abortedFile
+              let abortedTxtSplit := abortedTxt.splitOn "\n" |>.toArray
+              pure $ abortedTxtSplit.foldl (init := default) fun acc c =>
+                if c.length > 0 then
+                  acc.insert c.toName
+                else
+                  acc
+            else
+              pure default
+          else
+            pure default
+        -- dbg_trace s!"DBG[39]: Main.lean:117: abortedTxtSplit={aborted.toList}"
         IO.FS.createDirAll outDir
-        let mkMod imports env n := do
+        let mkMod imports env n aborted := do
           let mod ← mkModuleData imports env
           let modPath := (modToFilePath outDir n "olean")
           let some modParent := modPath.parent | panic! s!"could not find parent dir of module {n}"
           IO.FS.createDirAll modParent
+          let aborteds := aborted.toList
+          let mut abortedTxt := ""
+          for i in [:aborteds.length] do
+            abortedTxt := abortedTxt ++ aborteds[i]!.toString
+            if i < aborteds.length - 1 then
+              abortedTxt := abortedTxt ++ "\n"
+          IO.FS.writeFile abortedFile abortedTxt
           saveModuleData modPath n mod
 
         IO.println s!">>init module"
         let patchConsts ← getDepConstsEnv lemmEnv Lean4Less.patchConsts
-        let env ← replay (Lean4Less.addDecl (opts := opts)) {newConstants := patchConsts, opts := {}} (← mkEmptyEnvironment) (printProgress := true) (op := "patch")
-        mkMod #[] env patchPreludeModName
+        let (env, aborted) ← replay (Lean4Less.addDecl (opts := opts)) {newConstants := patchConsts, opts := {}} (← mkEmptyEnvironment) (printProgress := true) (op := "patch") (aborted := aborted)
+        mkMod #[] env patchPreludeModName aborted
 
         let (_, s) ← ForEachModuleM.run env do
-          forEachModule' (imports := #[m]) fun _ _ => do
-            pure ()
+          forEachModule' (imports := #[m]) (aborted := aborted) fun _ _ aborted => do
+            pure aborted
         let numMods := s.moduleNameSet.size
 
         let (_, s) ← ForEachModuleM.run env do
-          forEachModule' (imports := #[m]) fun dn d => do
+          forEachModule' (imports := #[m]) (aborted := aborted) fun dn d aborted => do
             let skip ←
               if let some cachedPath := cachedPath? then
                 if let some mfile ← SearchPath.findWithExt [cachedPath] "olean" dn then
@@ -143,7 +168,7 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
                   pure false
               else
                 pure false
-            unless not skip do return
+            unless not skip do return aborted
 
             let newConstants ← d.constNames.zip d.constants |>.foldlM (init := default) fun acc (n, ci) => do
               if not ((← get).env.contains n) && not (blConsts.any fun bn => n == bn) then
@@ -151,14 +176,15 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
               else
                 pure $ acc
             IO.println s!">>{dn} module [{(← get).count}/{numMods}]"
-            let env ← replay (Lean4Less.addDecl (opts := opts)) {newConstants := newConstants, opts := {}} (← get).env (printProgress := true) (op := "patch")
+            let (env, aborted) ← replay (Lean4Less.addDecl (opts := opts)) {newConstants := newConstants, opts := {}} (← get).env (printProgress := true) (op := "patch") (aborted := aborted)
             let imports := if dn == `Init.Prelude then
                 #[{module := `Init.PatchPrelude}] ++ d.imports
               else
                 d.imports
 
-            mkMod imports env dn
+            mkMod imports env dn aborted
             modify fun s => {s with env}
+            pure aborted
         let env := s.env
         replayFromEnv Lean4Lean.addDecl m env.toMap₁ (op := "typecheck") (opts := {proofIrrelevance := not opts.proofIrrelevance, kLikeReduction := not opts.kLikeReduction})
         -- forEachModule' (imports := #[m]) (init := env) fun e dn d => do
