@@ -108,20 +108,25 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
       else
         let outDir := ((← IO.Process.getCurrentDir).join "out")
         let abortedFile := outDir.join "aborted.txt"
+        let abortedModsFile := outDir.join "aborted_mods.txt"
         if (← outDir.pathExists) && not cachedPath?.isSome then
           IO.FS.removeDirAll outDir
-        let aborted ← do
+        let (aborted, abortedMods) ← do
           if let some _ := cachedPath? then
-            if ← abortedFile.pathExists then do
-              let abortedTxt ← IO.FS.readFile abortedFile
-              let abortedTxtSplit := abortedTxt.splitOn "\n" |>.toArray
-              pure $ abortedTxtSplit.foldl (init := default) fun acc c =>
-                if c.length > 0 then
-                  acc.insert c.toName
-                else
-                  acc
-            else
-              pure default
+            let readNames (file : System.FilePath) := do
+              if ← file.pathExists then do
+                let txt : String ← IO.FS.readFile file
+                let txtSplit := txt.splitOn "\n" |>.toArray
+                pure $ txtSplit.foldl (init := default) fun (acc : NameSet) c =>
+                  if c.length > 0 then
+                    acc.insert c.toName
+                  else
+                    acc
+              else
+                pure default
+            let aborted : NameSet ← readNames abortedFile
+            let abortedMods : NameSet ← readNames abortedModsFile
+            pure (aborted, abortedMods)
           else
             pure default
         -- dbg_trace s!"DBG[39]: Main.lean:117: abortedTxtSplit={aborted.toList}"
@@ -145,9 +150,12 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
         let (env, aborted) ← replay (Lean4Less.addDecl (opts := opts)) {newConstants := patchConsts, opts := {}} (← mkEmptyEnvironment) (printProgress := true) (op := "patch") (aborted := aborted)
         mkMod #[] env patchPreludeModName aborted
 
-        let (_, s) ← ForEachModuleM.run env do
-          forEachModule' (imports := #[m]) (aborted := aborted) fun _ _ aborted => do
-            pure aborted
+        let (aborted, s) ← ForEachModuleM.run env do
+          forEachModule' (imports := #[m]) (aborted := aborted) fun n d aborted => do
+            if abortedMods.contains n then
+              pure $ d.constNames.foldl (init := aborted) fun acc cn => acc.insert cn
+            else
+              pure aborted
         let numMods := s.moduleNameSet.size
 
         let (_, s) ← ForEachModuleM.run env do
