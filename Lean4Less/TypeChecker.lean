@@ -35,6 +35,7 @@ structure TypeChecker.State where
   fvarRegistry : Std.HashMap Name Nat := {} -- for debugging purposes
   initLets : Array LocalDeclE := {}
   fvarsToLets : Std.HashMap FVarId (Array LocalDeclE) := {}
+  letsToBindVar : Std.HashMap FVarId FVarId := {}
   eqvManager : EquivManager := {}
   lctx : LocalContext := {}
   numCalls : Nat := 0
@@ -533,7 +534,7 @@ def mkLetE (t s : PExpr) (p : EExpr) (n := 0) : RecM (EExpr × LocalDeclE × Opt
   let B ← inferTypePure 55503 s
   let type := mkAppN (.const `HEq [u]) #[A, t, B, s]
   -- let typeVars := type.collectFVars
-  let decl := .mk 0 (.mk (← mkIdNew (500 + n))) default type p.usedLets fun ctx => p.toExpr'.run' ctx
+  let decl := .mk 0 (.mk (← mkIdNew (600 + n))) default type p.usedLets fun ctx => p.toExpr'.run' ctx
 
   -- if decl.fvarId.name == "_kernel_fresh.460".toName then
   --   dbg_trace s!"DBG[4]: TypeChecker.lean:543 {(← getLCtx).any fun x => x.fvarId.name == "_kernel_fresh.445".toName}"
@@ -571,8 +572,10 @@ def mkLetE (t s : PExpr) (p : EExpr) (n := 0) : RecM (EExpr × LocalDeclE × Opt
   --   if let some (_, newi) := lastVar? then
   --     if newi != origi then
   --       dbg_trace s!"DBG[72]: TypeChecker.lean:592 {(newi, origi)}"
+  if let some (lastVar, _) := lastVar? then
+    modify fun st => { st with letsToBindVar := st.letsToBindVar.insert (.mk decl.fvarId.name) (st.letsToBindVar.get? lastVar |>.getD lastVar)}
   if (← readThe Context).dbgFIds.size > 0 && decl.fvarId.name == (← readThe Context).dbgFIds[0]! then
-    dbg_trace s!"DBG[2]: TypeChecker.lean:544 {lastVar?.map (·.1.name)}"
+    dbg_trace s!"DBG[2]: TypeChecker.lean:544 {(← get).letsToBindVar.get? decl.fvarId |>.map (·.name)}"
 
   addLVarToCtx decl (lastVar?.map (·.1)) (lastVar?.map (·.2))
   let lv := .lvar {A, B, a := t, b := s, u, v := decl.fvarId}
@@ -773,6 +776,7 @@ def isDefEqForall' (t s : PExpr) (numBinds : Nat) (f : Option EExpr → RecM (Op
 
     let mut idx := 0
     for (a, d?) in as.zip ds do
+
       let x := if let some (b, _, _) := d? then b else a
 
       idx := idx + 1
@@ -870,6 +874,9 @@ def isDefEqLambda (t s : PExpr) : RecB := do
     let mut fa := fa'
     let mut gx := gx'
     for (a, d?) in as.zip ds do
+      -- if a.fvarId == .mk "_kernel_fresh.2388".toName then
+      --   dbg_trace s!"DBG[B]: TypeChecker.lean:819 (after if a == sirry then)"
+
       let f := (← getLCtx).mkLambda #[a.toExpr] fa |>.toPExpr
       -- gx was abstracted over a if A defeq B (instead of over a fresh (b : B))
       let x : LocalDecl := if let some (b, _, _) := d? then b else a
@@ -1000,7 +1007,7 @@ their function heads and arguments being defeq.
 -/
 def _isDefEqApp (t s : PExpr) (targsEqsargs? : Std.HashMap Nat (Option EExpr) := default)
   (tfEqsf? : Option (Option EExpr) := none) : RecM (Bool × Option EExpr) := do
-  checkIsDefEqCache 0 t s do
+  checkIsDefEqCache 104 t s do
     let (isDefEq, data?) ← isDefEqApp' (cache := false) t s targsEqsargs? tfEqsf?
     let p? := data?.map (·.1)
     pure (isDefEq, p?)
@@ -1127,8 +1134,8 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
           | .ABUV {B, b, vaEqb, hAB, blets, ..}
           | .AB {B, b, vaEqb, hAB, blets, ..} =>
             let hBA ← appHEqSymm hAB
-            let vCast ← mkCast'' `L4L.castHEq B.toExpr A.toExpr hBA v prfVars prfVals u
-            let vCastEqv ← mkCast'' `L4L.castOrigHEq B.toExpr A.toExpr hBA v prfVars prfVals u
+            let vCast ← mkCast'' `L4L.castHEq B.toExpr A.toExpr hBA v (prfVars ++ letVars) (prfVals ++ letVals) u
+            let vCastEqv ← mkCast'' `L4L.castOrigHEq B.toExpr A.toExpr hBA v (prfVars ++ letVars) (prfVals ++ letVals) u
 
             let newPrfVars := #[a.toExpr, b.toExpr, vaEqb.aEqb.toExpr]
             let newPrfVals := #[vCast, v, vCastEqv]
@@ -1159,16 +1166,26 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
           let letVars := letVars ++ newLetVars
           let letVals := letVals ++ newLetVals
           if let some (UaEqVx : EExpr) := UaEqVx? then
-            loop remLams' b tbl tbr lamVars prfVars prfVals letVars letVals lamLetVars UaEqVx
+            let ret ← loop remLams' b tbl tbr lamVars prfVars prfVals letVars letVals lamLetVars UaEqVx
+            -- if newLetVars.any fun l => l.fvarId!.name == "_kernel_fresh.2400".toName then
+            --   dbg_trace s!"DBG[C]: EExpr.lean:858 {ret.containsFVar' (.mk "_kernel_fresh.2400".toName)}"
+            --   for val in letVals do
+            --     let some var := (← getLCtx).find? val.fvarId! | throw $ .other "unreachable!"
+            --     dbg_trace s!"DBG[E]: EExpr.lean:858 {var.fvarId.name}, {var.type.containsFVar' (.mk "_kernel_fresh.2400".toName)}, {var.value.containsFVar' (.mk "_kernel_fresh.2400".toName)}"
+            pure ret
           else
             -- let ret := (← getLCtx).mkLambda' (← letUseCount) lamVars b
-            let ret := expandLetsLambda (← getLCtx) lamVars lamLetVars (b.replaceFVars (prfVars ++ letVars) (prfVals ++ letVals))
-
+            let bod := b.replaceFVars (prfVars ++ letVars) (prfVals ++ letVals)
+            let ret := expandLetsLambda (← getLCtx) lamVars lamLetVars bod
+            -- if letVars.any fun l => l.fvarId!.name == "_kernel_fresh.2400".toName then
+            --   dbg_trace s!"DBG[D]: EExpr.lean:858 {ret.containsFVar' (.mk "_kernel_fresh.2400".toName)}, {bod.containsFVar' (.mk "_kernel_fresh.2400".toName)}"
             pure ret
     | _, _, _, _, _ =>
       let cast ← mkCast' `L4L.castHEq tl tr p e (prfVars ++ letVars) (prfVals ++ letVals)
       -- let ret := (← getLCtx).mkLambda' (← letUseCount) lamVars cast
       let ret := expandLetsLambda (← getLCtx) lamVars lamLetVars cast
+      -- if letVars.any fun l => l.fvarId!.name == "_kernel_fresh.2400".toName then
+      --   dbg_trace s!"DBG[F]: EExpr.lean:858 {ret.containsFVar' (.mk "_kernel_fresh.2400".toName)}, {prfVals.any fun v => v.containsFVar' (.mk "_kernel_fresh.2400".toName)} {letVals.any fun v => v.containsFVar' (.mk "_kernel_fresh.2400".toName)}"
       pure ret
   termination_by remLams -- TODO why doesn't structural recursion on `p` work here?
 
@@ -1775,9 +1792,9 @@ Otherwise, defers to the calling function.
 -/
 def quickIsDefEq' (t s : PExpr) (useHash := false) : RecLB := do
   -- optimization for terms that are already α-equivalent
-  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 (eqvManager := m)) => -- TODO why do I have to list these?
+  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 (eqvManager := m)) => -- TODO why do I have to list these?
     let (b, m) := m.isEquiv useHash t s
-    (b, .mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 (eqvManager := m))
+    (b, .mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 (eqvManager := m))
   then
     return (.true, none)
   let res : Option (Bool × PExpr) ← match t.toExpr, s.toExpr with
@@ -1889,7 +1906,7 @@ private def _whnfCore' (_e : Expr) (cheapK := false) (cheapProj := false) : RecE
     let (e', p?) := r
     if !cheapK && !cheapProj then
       let cacheData? ← p?.mapM fun p => do
-        let (lv, decl, lastVar?) ← mkLetE e e' p
+        let (lv, decl, lastVar?) ← mkLetE e e' p 103
         pure (lv, decl, lastVar?.map (·.1))
       modify fun s => { s with whnfCoreCache := s.whnfCoreCache.insert e (e', cacheData?) }
       -- if cheapK && r.2.isNone then

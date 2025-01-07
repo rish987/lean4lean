@@ -836,15 +836,17 @@ def _root_.Lean.LocalDecl.replaceFVar (fvar val : PExpr) (var : LocalDecl) : Loc
 -- end
 
 def expandLets' (lets : Array LocalDeclE) (e : Expr) : EM Expr := do
-  let mut ret := #[]
+  let mut newLets := #[]
   let mut prevLetVars := #[]
   for l in lets do
-    ret := ret.push $ (l.value (← read)).replaceFVars prevLetVars ret
+    newLets := newLets.push $ (l.value (← read)).replaceFVars prevLetVars newLets
     prevLetVars := prevLetVars.push (.fvar l.fvarId)
-  pure $ e.replaceFVars prevLetVars ret
+  let ret := e.replaceFVars prevLetVars newLets
+  pure ret
 
 def expandLets (lets : Array LocalDecl) (e : Expr) : Expr := Id.run $ do
-  (expandLets' (lets.map fun l => .mk l.index l.fvarId l.userName l.type default (fun _ => l.value)) e).run
+  let ret := (expandLets' (lets.map fun l => .mk l.index l.fvarId l.userName l.type default (fun _ => l.value)) e).run
+  pure ret
 
 def expandLetsForall (lctx : LocalContext) (fvars : Array Expr) (lets : Array (Array LocalDecl)) (e : Expr) : Expr := Id.run $ do
   let mut ret := e
@@ -1008,9 +1010,9 @@ def ForallData.toExpr (e : ForallData EExpr) : EM Expr := match e with
       else
         match extra with
         | .ABUV {UaEqVx, ..} =>
-          pure (← UaEqVx.1.toExpr').toPExpr
+          pure $ ← expandLets' alets (← UaEqVx.1.toExpr').toPExpr
         | .UV {UaEqVx, ..} =>
-          pure (← UaEqVx.1.toExpr').toPExpr
+          pure $ ← expandLets' alets (← UaEqVx.1.toExpr').toPExpr
         | _ => unreachable!
 
     match extra with
@@ -1034,9 +1036,9 @@ def ForallData.toExpr (e : ForallData EExpr) : EM Expr := match e with
       else
         match extra with
         | .ABUV {UaEqVx, ..} =>
-          pure (← UaEqVx.1.toExpr').toPExpr
+          pure $ ← expandLets' alets (← UaEqVx.1.toExpr').toPExpr
         | .UV {UaEqVx, ..} =>
-          pure (← UaEqVx.1.toExpr').toPExpr
+          pure $ ← expandLets' alets (← UaEqVx.1.toExpr').toPExpr
         | _ => unreachable!
 
     match extra with
