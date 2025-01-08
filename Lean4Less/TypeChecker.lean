@@ -1102,7 +1102,7 @@ def smartCast' (n : Nat) (tl tr e : PExpr) (p? : Option EExpr := none) : RecM ((
     let sort' ← ensureSortCorePure sort tl
     pure sort'.toExpr.sortLevel!
 
-  let mkCast'' nm tl tr p e (prfVars prfVals : Array Expr) (lvl : Level) := do
+  let mkCast'' (_n : Nat) (nm : Name) (tl tr : Expr) (p : EExpr) e (prfVars prfVals : Array Expr) (lvl : Level) := do
     let pe := p.toExpr (dbg := (← shouldTTrace))
     -- dbg_trace s!"DBG[2]: TypeChecker.lean:825 {← getTrace}, {← callId}, {p?.isSome}"
     -- _ ← inferTypeCheck pe.toPExpr
@@ -1110,16 +1110,16 @@ def smartCast' (n : Nat) (tl tr e : PExpr) (p? : Option EExpr := none) : RecM ((
     let app := Lean.mkAppN (← getConst nm [lvl]) #[tl, tr, pe, e]
     pure $ app.replaceFVars prfVars prfVals
 
-  let mkCast' nm tl tr p e (prfVars prfVals : Array Expr) := do
+  let mkCast' (n : Nat) (nm : Name) (tl tr : Expr) (p : EExpr) e (prfVars prfVals : Array Expr) := do
     let lvl ← getLvl tl.toPExpr
-    mkCast'' nm tl tr p e prfVars prfVals lvl
+    mkCast'' n nm tl tr p e prfVars prfVals lvl
 
   let rec loop remLams e tl tr (lamVars prfVars prfVals letVars letVals : Array Expr) (lamLetVars : Array (Array LocalDecl)) p : RecM Expr := do
     match remLams, e, tl, tr, p with
-    | remLams' + 1, .lam n _ b bi, .forallE _ _ tbl .., .forallE _ tdr tbr .., .forallE forallData =>
+    | remLams' + 1, .lam nm _ b bi, .forallE _ _ tbl .., .forallE _ tdr tbr .., .forallE forallData =>
       let {A, a, extra, u, alets, ..} := forallData
       -- ttrace s!"DBG[16]: TypeChecker.wean:953: a={a.fvarId.name}"
-      withNewFVar 5 n tdr.toPExpr bi fun var => do
+      withNewFVar 5 nm tdr.toPExpr bi fun var => do
         let (UaEqVx? : Option EExpr) := 
           match extra with
           | .ABUV {UaEqVx, ..}
@@ -1134,8 +1134,8 @@ def smartCast' (n : Nat) (tl tr e : PExpr) (p? : Option EExpr := none) : RecM ((
           | .ABUV {B, b, vaEqb, hAB, blets, ..}
           | .AB {B, b, vaEqb, hAB, blets, ..} =>
             let hBA ← appHEqSymm hAB
-            let vCast ← mkCast'' `L4L.castHEq B.toExpr A.toExpr hBA v (prfVars ++ letVars) (prfVals ++ letVals) u
-            let vCastEqv ← mkCast'' `L4L.castOrigHEq B.toExpr A.toExpr hBA v (prfVars ++ letVars) (prfVals ++ letVals) u
+            let vCast ← mkCast'' (1000 + n) `L4L.castHEq B.toExpr A.toExpr hBA v (prfVars ++ letVars) (prfVals ++ letVals) u
+            let vCastEqv ← mkCast'' (2000 + n) `L4L.castOrigHEq B.toExpr A.toExpr hBA v (prfVars ++ letVars) (prfVals ++ letVals) u
 
             let newPrfVars := #[a.toExpr, b.toExpr, vaEqb.aEqb.toExpr]
             let newPrfVals := #[vCast, v, vCastEqv]
@@ -1181,7 +1181,7 @@ def smartCast' (n : Nat) (tl tr e : PExpr) (p? : Option EExpr := none) : RecM ((
             --   dbg_trace s!"DBG[D]: EExpr.lean:858 {ret.containsFVar' (.mk "_kernel_fresh.2400".toName)}, {bod.containsFVar' (.mk "_kernel_fresh.2400".toName)}"
             pure ret
     | _, _, _, _, _ =>
-      let cast ← mkCast' `L4L.castHEq tl tr p e (prfVars ++ letVars) (prfVals ++ letVals)
+      let cast ← mkCast' (3000 + n) `L4L.castHEq tl tr p e (prfVars ++ letVars) (prfVals ++ letVals)
       -- let ret := (← getLCtx).mkLambda' (← letUseCount) lamVars cast
       let ret := expandLetsLambda (← getLCtx) lamVars lamLetVars cast
       -- if letVars.any fun l => l.fvarId!.name == "_kernel_fresh.2400".toName then
@@ -1218,10 +1218,10 @@ def smartCast' (n : Nat) (tl tr e : PExpr) (p? : Option EExpr := none) : RecM ((
   --     throw $ .other s!"cast equality does not have expected type"
   let mut (ret, eEqCaste??) := (← tlEqtr?.2.mapM (fun (p : EExpr) => do
     if nLams == 0 then
-      let cast ← mkCast' `L4L.castHEq tl.toExpr tr.toExpr p e.toExpr #[] #[]
+      let cast ← mkCast' (4000 + n) `L4L.castHEq tl.toExpr tr.toExpr p e.toExpr #[] #[]
       let lvl ← getLvl tl
-      let eEqCaste? := .some $ .rev $ .cast {A := tl, B := tr, p, e, u := lvl}
-      pure (cast.toPExpr, .some eEqCaste?)
+      -- let (true, eEqCaste?) ← checkIsDefEqCache 12345 e cast.toPExpr do pure $ (true, .some $ .rev $ .cast {A := tl, B := tr, p, e, u := lvl})  | unreachable!
+      pure (cast.toPExpr, none)
     else
       pure ((← loop nLams e.toExpr tl.toExpr tr.toExpr #[] #[] #[] #[] #[] #[] p).toPExpr, none))).getD (e, none)
 
@@ -2189,14 +2189,14 @@ def lazyDeltaReductionStep (ltn lsn : PExpr) : RecM ReductionStatus := do
         && !failedBefore (← get).failure ltn lsn
       then
         if Level.isEquivList ltn.toExpr.getAppFn.constLevels! lsn.toExpr.getAppFn.constLevels! then
-          let (defeq, usedPI) ← isDefEqArgsLean ltn lsn
+          let (defeq, _) ← isDefEqArgsLean ltn lsn
           if defeq then
-            if usedPI then
+            -- if usedPI then
               let (r, proof?) ← isDefEqApp 5 ltn lsn (tfEqsf? := none)
               if r then
                 return .bool true proof?
-            else
-              return .bool true none
+            -- else
+            --   return .bool true none
         cacheFailure ltn lsn
       deltaCont_both
 

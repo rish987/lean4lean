@@ -151,7 +151,7 @@ def replaceFType (meth : ExtMethodsR m) (fType newfType : Expr) (args : Array Ex
     | .forallE _ newDom newBody _, .forallE _ dom body _, m + 1 => 
       let idx := args.size - n
       let arg := args[idx]!.toPExpr
-      let ((true, _), newArg, argEqnewArg??) ← meth.smartCast 101 dom.toPExpr newDom.toPExpr arg | unreachable!
+      let ((true, _), newArg, argEqnewArg??) ← if not (← meth.isDefEqPure 0 dom.toPExpr newDom.toPExpr) then meth.smartCast 101 dom.toPExpr newDom.toPExpr arg else pure ((true, none), arg, .some none)| unreachable!
       -- _ ← meth.inferTypePure 5000 newArg -- sanity check TODO remove
       let (true, argEqnewArg?) ← argEqnewArg??.map (true, ·) |>.getDM (meth.isDefEq 120 arg newArg) | unreachable!
       let ret := ret.push (newArg, argEqnewArg?)

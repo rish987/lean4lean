@@ -7,8 +7,8 @@ open Lean
 
 def defFuel := 1300
 
--- def tr := true
-def tr := false
+def tr := true
+-- def tr := false
 
 mutual
 def fuelWrap (idx : Nat) (fuel : Nat) (d : CallData) : M (CallDataT d) := do
