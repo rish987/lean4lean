@@ -1096,9 +1096,9 @@ def alignLets (remLets : List LocalDeclE) (vars vals : Array Expr) (f : Array Ex
 
   loop remLets #[] #[]
 
-def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((Bool × Option EExpr) × PExpr) := do
-  let getLvl tl tr := do
-    let sort ← inferTypePure 13 tr
+def smartCast' (n : Nat) (tl tr e : PExpr) (p? : Option EExpr := none) : RecM ((Bool × Option EExpr) × PExpr × Option (Option EExpr)) := do
+  let getLvl tl := do
+    let sort ← inferTypePure 13 tl
     let sort' ← ensureSortCorePure sort tl
     pure sort'.toExpr.sortLevel!
 
@@ -1111,7 +1111,7 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
     pure $ app.replaceFVars prfVars prfVals
 
   let mkCast' nm tl tr p e (prfVars prfVals : Array Expr) := do
-    let lvl ← getLvl tl.toPExpr tr.toPExpr
+    let lvl ← getLvl tl.toPExpr
     mkCast'' nm tl tr p e prfVars prfVals lvl
 
   let rec loop remLams e tl tr (lamVars prfVars prfVals letVars letVals : Array Expr) (lamLetVars : Array (Array LocalDecl)) p : RecM Expr := do
@@ -1189,12 +1189,12 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
       pure ret
   termination_by remLams -- TODO why doesn't structural recursion on `p` work here?
 
+  let nLams := lamCount e
   let tlEqtr? ← do
     pure ()
     if let some p := p? then
       pure $ (true, .some p)
     else
-      let nLams := lamCount e
       let (tl', tr', nLams) ← try 
         alignForAll nLams tl tr
       catch ex =>
@@ -1216,10 +1216,16 @@ def smartCast' (tl tr e : PExpr) (n : Nat) (p? : Option EExpr := none) : RecM ((
   --   if not (← isDefEqPure 0 pT heq) then
   --     let (true, some tlEqtr) ← isDefEq (1000 + n) tl tr | unreachable!
   --     throw $ .other s!"cast equality does not have expected type"
-  let mut ret := (← tlEqtr?.2.mapM (fun (p : EExpr) => do
-    let nLams := lamCount e
-    pure (← loop nLams e.toExpr tl.toExpr tr.toExpr #[] #[] #[] #[] #[] #[] p).toPExpr)).getD e
-  pure $ (tlEqtr?, ret)
+  let mut (ret, eEqCaste??) := (← tlEqtr?.2.mapM (fun (p : EExpr) => do
+    if nLams == 0 then
+      let cast ← mkCast' `L4L.castHEq tl.toExpr tr.toExpr p e.toExpr #[] #[]
+      let lvl ← getLvl tl
+      let eEqCaste? := .some $ .rev $ .cast {A := tl, B := tr, p, e, u := lvl}
+      pure (cast.toPExpr, .some eEqCaste?)
+    else
+      pure ((← loop nLams e.toExpr tl.toExpr tr.toExpr #[] #[] #[] #[] #[] #[] p).toPExpr, none))).getD (e, none)
+
+  pure $ (tlEqtr?, ret, eEqCaste??)
 
 def insertInitLets (e : PExpr) : RecM PExpr := do
   let initLets ← getInitLets
@@ -1234,11 +1240,11 @@ def insertInitLets (e : PExpr) : RecM PExpr := do
 
 def smartCast (n : Nat) (tl tr e : PExpr) (p? : Option EExpr := none) : RecM (Bool × PExpr) := do
   let ret ← try
-    smartCast' tl tr e n p?
+    smartCast' n tl tr e p?
   catch ex =>
     -- dbg_trace s!"smartCast error: {n}"
     throw ex
-  pure (ret.1.1, ret.2)
+  pure (ret.1.1, ret.2.1)
 
 def maybeCast (n : Nat) (p? : Option EExpr) (typLhs typRhs e : PExpr) : RecM PExpr := do
   pure $ (← p?.mapM (fun (p : EExpr) => do
@@ -1263,7 +1269,7 @@ def isDefEqProofIrrel' (t s tType sType : PExpr) (pt? : Option EExpr) (n : Nat) 
 
 def methsR : ExtMethodsR RecM := {
     meths with
-    smartCast := smartCast
+    smartCast := smartCast'
     maybeCast := maybeCast
     isDefEqApp' := fun t s m => isDefEqApp' t s (targsEqsargs? := m)
     isDefEqProofIrrel' := isDefEqProofIrrel' (n := 2) (useRfl := true) -- need to pass `useRfl := true` because of failure of transitivity (with K-like reduction)
@@ -1403,7 +1409,7 @@ def inferLet (e : Expr) : RecPE := do
       let val := val.instantiateRev fvars
       let (valType, val'?) ← inferType 21 val 
       let val' := val'?.getD val.toPExpr
-      let ((true, pVal?), valC') ← smartCast' valType type' val' 17 |
+      let ((true, pVal?), valC', _) ← smartCast' 17 valType type' val' |
         throw <| .letTypeMismatch (← getEnv) (← getLCtx) name valType type'
       withNewLetVar 10 name type' valC' fun var => do
         let fvars := fvars.push (.fvar var)
@@ -1522,7 +1528,7 @@ def inferType' (e : Expr) (_dbg := false) : RecPE := do
       let dType := Expr.bindingDomain! fType' |>.toPExpr
       -- it can be shown that if `e` is typeable as `T`, then `T` is typeable as `Sort l`
       -- for some universe level `l`, so this use of `isDefEq` is valid
-      let ((true, pa'?), a') ← smartCast' aType dType (a'?.getD a.toPExpr) 19 |
+      let ((true, pa'?), a', _) ← smartCast' 19 aType dType (a'?.getD a.toPExpr) |
         -- if e'.isApp then if let .const `Bool.casesOn _ := e'.withApp fun f _ => f then
         -- dbg_trace s!"dbg: {(← whnf 0 dType.toExpr.getAppArgs[2]!.toPExpr).1} {(← whnf 0 aType.toExpr.getAppArgs[2]!.toPExpr).1}"
         throw <| .appTypeMismatch (← getEnv) (← getLCtx) e fType' aType

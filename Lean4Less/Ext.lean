@@ -136,7 +136,7 @@ structure TypeChecker.Context : Type where
 
 structure ExtMethodsR (m : Type → Type u) extends ExtMethods m where
   isDefEqApp' : PExpr → PExpr → Std.HashMap Nat (Option EExpr) → m (Bool × Option (EExpr × Array (Option (PExpr × PExpr × EExpr))))
-  smartCast : Nat → PExpr → PExpr → PExpr → m (Bool × PExpr)
+  smartCast : Nat → PExpr → PExpr → PExpr → m ((Bool × Option EExpr) × PExpr × Option (Option EExpr))
   maybeCast (n : Nat) (p? : Option EExpr) (typLhs typRhs e : PExpr) : m PExpr
   isDefEqProofIrrel' : PExpr → PExpr → PExpr → PExpr → Option EExpr → m (Option EExpr)
 
@@ -151,9 +151,9 @@ def replaceFType (meth : ExtMethodsR m) (fType newfType : Expr) (args : Array Ex
     | .forallE _ newDom newBody _, .forallE _ dom body _, m + 1 => 
       let idx := args.size - n
       let arg := args[idx]!.toPExpr
-      let (true, newArg) ← meth.smartCast 101 dom.toPExpr newDom.toPExpr arg | unreachable!
+      let ((true, _), newArg, argEqnewArg??) ← meth.smartCast 101 dom.toPExpr newDom.toPExpr arg | unreachable!
       -- _ ← meth.inferTypePure 5000 newArg -- sanity check TODO remove
-      let (true, argEqnewArg?) ← meth.isDefEq 120 arg newArg | unreachable!
+      let (true, argEqnewArg?) ← argEqnewArg??.map (true, ·) |>.getDM (meth.isDefEq 120 arg newArg) | unreachable!
       let ret := ret.push (newArg, argEqnewArg?)
       loop (newBody.instantiate1 newArg) (body.instantiate1 arg) m ret
     | _, _, m =>

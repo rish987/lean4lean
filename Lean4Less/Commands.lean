@@ -81,6 +81,7 @@ def patchConsts : Array Name := #[
 `L4L.lambdaHEqABUV',
 
 `L4L.castOrigHEq,
+`L4L.castOrigHEqSymm,
 
 `L4L.appHEqBinNatFn,
 `sorryAx --FIXME

@@ -318,6 +318,11 @@ def castOrigHEq {α β : Sort u} (h : HEq α β) (a : α) : HEq (castHEq h a) a 
   subst h
   rfl
 
+def castOrigHEqSymm {α β : Sort u} (h : HEq α β) (a : α) : HEq a (castHEq h a) := by
+  have h := eq_of_heq h
+  subst h
+  rfl
+
 def HEqRefl (_n : Nat) {α : Sort u} (a : α) : HEq a a := HEq.refl a
 
 end L4L

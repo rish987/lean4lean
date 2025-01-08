@@ -87,6 +87,14 @@ B    : PExpr
 b    : PExpr
 deriving Inhabited, Hashable, BEq
 
+structure CastData (EExpr : Type) where
+u    : Level
+A    : PExpr
+B    : PExpr
+e    : PExpr
+p    : EExpr
+deriving Inhabited, Hashable, BEq
+
 
 
 structure LamABData (EExpr : Type) where
@@ -374,6 +382,7 @@ inductive EExpr where
 | lvar     : LVarDataE → EExpr
 | prfIrrel : PIData EExpr → EExpr
 | sry      : SorryData → EExpr
+| cast     : CastData EExpr → EExpr
 | rev      : EExpr → EExpr -- "thunked" equality reversal
 with
   @[computed_field]
@@ -388,6 +397,7 @@ with
   | .lvar d => d.usedLets
   | .refl _ => default
   | .sry _  => default
+  | .cast _ => default
 -- with
 --   @[computed_field]
 --   data : @& EExpr → UInt64
@@ -1179,6 +1189,13 @@ def SorryData.toExpr : SorryData → EM Expr
   else
     pure $ Lean.mkAppN (.const `sorryAx [0]) #[Lean.mkAppN (.const ``HEq [u]) #[A, a, B, b], .const `Bool.false []]
 
+def CastData.toExpr : CastData EExpr → EM Expr
+| {u, A, B, e, p} => do
+  if (← rev) then
+    pure $ Lean.mkAppN (.const `L4L.castOrigHEqSymm [u]) #[A, B, ← (swapRev p.toExpr'),  e]
+  else
+    pure $ Lean.mkAppN (.const `L4L.castOrigHEq [u]) #[A, B, ← p.toExpr',  e]
+
 def EExpr.ctorName : EExpr → Name 
   | .lam .. => `lam
   | .forallE .. => `forallE
@@ -1189,6 +1206,7 @@ def EExpr.ctorName : EExpr → Name
   | .refl .. => `refl
   | .prfIrrel .. => `prfIrrel
   | .sry .. => `sry
+  | .cast .. => `cast
   | .rev .. => `rev
 
 def withCtorName (n : Name × Array Name) (m : EM T) : EM T := do
@@ -1205,7 +1223,8 @@ def EExpr.toExpr' (e : EExpr) : EM Expr :=
   | .trans d
   | .refl d
   | .prfIrrel d
-  | .sry d  => d.toExpr
+  | .sry d
+  | .cast d => d.toExpr
   | .rev e => do
     let ret ← (swapRev e.toExpr')
     pure ret
