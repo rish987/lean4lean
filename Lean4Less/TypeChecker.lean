@@ -910,6 +910,7 @@ def meths : ExtMethods RecM := {
     isDefEq := isDefEq
     isDefEqApp := fun n t s m => isDefEqApp n t s (targsEqsargs? := m)
     isDefEqPure := isDefEqPure
+    isDefEqPure' := fun n t s l => isDefEqPure n t s l
     isDefEqLean := isDefEqLean
     whnf  := whnf
     mkIdNew  := mkIdNew
@@ -2189,14 +2190,14 @@ def lazyDeltaReductionStep (ltn lsn : PExpr) : RecM ReductionStatus := do
         && !failedBefore (← get).failure ltn lsn
       then
         if Level.isEquivList ltn.toExpr.getAppFn.constLevels! lsn.toExpr.getAppFn.constLevels! then
-          let (defeq, _) ← isDefEqArgsLean ltn lsn
+          let (defeq, usedPI) ← isDefEqArgsLean ltn lsn
           if defeq then
-            -- if usedPI then
+            if true then
               let (r, proof?) ← isDefEqApp 5 ltn lsn (tfEqsf? := none)
               if r then
                 return .bool true proof?
-            -- else
-            --   return .bool true none
+            else
+              return .bool true none
         cacheFailure ltn lsn
       deltaCont_both
 

@@ -65,6 +65,7 @@ structure ExtMethods (m : Type → Type u) where
   isDefEq : Nat → PExpr → PExpr → m (Bool × Option EExpr)
   isDefEqApp : Nat → PExpr → PExpr → Std.HashMap Nat (Option EExpr) → m (Bool × Option EExpr)
   isDefEqPure : Nat → PExpr → PExpr → m Bool
+  isDefEqPure' : Nat → PExpr → PExpr → Nat → m Bool
   isDefEqLean : Expr → Expr → m Bool
   whnf  : Nat → PExpr → m (PExpr × Option EExpr)
   whnfPure  : Nat → PExpr → m PExpr

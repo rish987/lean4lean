@@ -130,6 +130,48 @@ theorem lambdaHEqUV' {A : Sort u} {U V : A → Sort v}
   subst h
   exact hfg a
 
+-- theorem revlambdaHEqUV' {A : Sort u} {U V : A → Sort v}
+--   {f : (a : A) → U a} {g : (b : A) → V b}
+--   (hfg : HEq (fun a => f a) (fun b => g b))
+--   :  (a : A) → HEq (f a) (g a) := by
+--     intro x
+--     sorry -- darn, can't be proven without appHEqUV'
+--
+-- theorem appHEqUV' {A : Sort u} {U V : A → Sort v}
+--   {f : (a : A) → U a} {g : (b : A) → V b} {a : A} {b : A}
+--   (hfg : HEq f g) (hab : HEq a b)
+--   : HEq (f a) (g b) := by
+--   have : Eq U V := by
+--     apply funext
+--     intro x
+--     exact type_eq_of_heq $ revlambdaHEqUV' hfg x
+--   subst this
+--   have h := (eq_of_heq hfg)
+--   subst h
+--   have h := (eq_of_heq hab)
+--   subst h
+--   rfl
+
+-- -- if only...
+-- axiom forallEta {A : Sort u} {U V : A → Sort v} : ((a : A) → U a) = ((b : A) → V b) → U = V
+--
+-- theorem appHEqABUV' {A B : Sort u} {U : A → Sort v} {V : B → Sort v}
+--   (hAB : HEq A B)
+--   {f : (a : A) → U a} {g : (b : B) → V b} {a : A} {b : B}
+--   (hfg : HEq f g) (hab : HEq a b)
+--   : HEq (f a) (g b) := by
+--   have h := eq_of_heq hAB
+--   subst h
+--   have : Eq U V := by
+--     have := type_eq_of_heq hfg
+--     exact forallEta this
+--   subst this
+--   have h := (eq_of_heq hfg)
+--   subst h
+--   have h := (eq_of_heq hab)
+--   subst h
+--   rfl
+
 theorem lambdaHEqUV {A : Sort u} {U V : Sort v}
   {f : (a : A) → U} {g : (b : A) → V}
   (hfg : (a : A) → HEq (f a) (g a))
