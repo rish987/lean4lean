@@ -69,6 +69,7 @@ structure Data where
 prfIrrelUses := 0
 kLikeRedUses := 0
 numSorries := 0
+axioms : NameSet := {}
 constsToData : Std.HashMap Name TypeChecker.Data := default
 
 structure State where
@@ -130,6 +131,9 @@ def addDecl (d : Declaration) (verbose := false) (allowAxiomReplace := false) : 
   if (← read).verbose then
     println s!"adding {d.name}"
   let t1 ← IO.monoMsNow
+  match d with
+  | .axiomDecl v => modify fun s => {s with data := {s.data with axioms := s.data.axioms.insert v.name}}
+  | _ => pure ()
   match (← get).env.addDecl' d (← read).opts allowAxiomReplace with
   | .ok (env, data) =>
     if data.usedKLikeReduction then
@@ -373,6 +377,7 @@ def replay (ctx : Context) (env : Environment) (decl : Option Name := none) (pri
     IO.println ""
   if printProgress && not s.data.constsToData.isEmpty then
     IO.println s!"{numToCheck} total constants typechecked"
+    IO.println s!"-- axioms encountered: {s.data.axioms.toList}"
     IO.println s!"-- {s.data.prfIrrelUses} used proof irrelevance"
     IO.println s!"-- {s.data.kLikeRedUses} used k-like reduction"
     IO.println s!"-- {s.data.numSorries} sorries encountered"
