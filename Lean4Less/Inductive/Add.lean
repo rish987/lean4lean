@@ -228,7 +228,7 @@ def checkConstructors (indTypes : Array InductiveType)
     (stats : InductiveStats) (isUnsafe : Bool) : M Unit := do
   let env ← getEnv
   for h : idx in [:indTypes.size] do
-    let indType := indTypes[idx]'h.2
+    let indType := indTypes[idx]'h.2.1
     let mut foundCtors : NameSet := {}
     for ctor in indType.ctors do
       let n := ctor.name
@@ -550,7 +550,7 @@ def run (lparams : List Name) (nparams : Nat) (types : List InductiveType)
   StateT.run' (s := 0) do
   let mut env ← getEnv
   for h : dIdx in [:indTypes.size] do
-    let indType := indTypes[dIdx]'h.2
+    let indType := indTypes[dIdx]'h.2.1
     let info := recInfos[dIdx]!
     let ty :=
       -- all of the recursors in the block share the same parameters, motives, and minor premises

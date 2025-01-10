@@ -39,7 +39,7 @@ def toCtorWhenK (rval : RecursorVal) (e : PExpr) : m (PExpr × Option (EExpr)) :
   if type.toExpr.hasExprMVar then
     let typeArgs := type.toExpr.getAppArgs
     for h : i in [rval.numParams:typeArgs.size] do
-      if (typeArgs[i]'h.2).hasExprMVar then return (e, none)
+      if (typeArgs[i]'h.2.1).hasExprMVar then return (e, none)
   let some (newCtorApp, newCtorName) := mkNullaryCtor env type rval.numParams | return (e, none)
   if let (.const ctorName _) := e.toExpr.getAppFn then
     if ctorName == newCtorName then
