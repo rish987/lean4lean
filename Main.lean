@@ -85,12 +85,10 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
   let mod : Name := p.positionalArg! "input" |>.value.toName
   let onlyConsts? := p.flag? "only" |>.map fun onlys => 
     onlys.as! (Array String)
-  let blConsts? := p.flag? "blacklist" |>.map fun bls =>
-    bls.as! (Array String)
-  let blConsts := blConsts?.getD #[] |>.map (·.toName)
   let cachedPath? := p.flag? "cached" |>.map fun sp => 
     System.FilePath.mk $ sp.as! String
   let pi : Bool := p.hasFlag "proof-irrel"
+  let dbgOnly : Bool := p.hasFlag "dbg-only"
   let klr : Bool := p.hasFlag "klike-red"
   let opts : Lean4Less.TypeCheckerOpts := {proofIrrelevance := pi, kLikeReduction := klr}
   match mod with
@@ -104,7 +102,7 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
           let mut env := env
           for (_, c) in lemmEnv.constants do
             env := add' env c
-          _ ← Lean4Less.checkL4L (onlyConsts.map (·.toName)) env (printProgress := true) (printOutput := p.hasFlag "print") (opts := opts)
+          _ ← Lean4Less.checkL4L (onlyConsts.map (·.toName)) env (printProgress := true) (printOutput := p.hasFlag "print") (opts := opts) (dbgOnly := dbgOnly)
       else
         let outDir := ((← IO.Process.getCurrentDir).join "out")
         let abortedFile := outDir.join "aborted.txt"
@@ -179,7 +177,7 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
             unless not skip do return aborted
 
             let newConstants ← d.constNames.zip d.constants |>.foldlM (init := default) fun acc (n, ci) => do
-              if not ((← get).env.contains n) && not (blConsts.any fun bn => n == bn) then
+              if not ((← get).env.contains n) then
                 pure $ acc.insert n ci
               else
                 pure $ acc
@@ -212,12 +210,12 @@ unsafe def transCmd : Cmd := `[Cli|
   FLAGS:
     -- p, print;               "Print translation of specified constants to standard output (relevant only with '-o ...')."
     -- w, write;               "Also write translation of specified constants (with dependencies) to file (relevant only with '-p')."
-    o, only : Array String; "Only translate the specified constants and their dependencies."
-    p, print; "Print translated constant specified by --only ."
-    pi, "proof-irrel"; "eliminate proof irrelevance"
-    klr, "klike-red"; "eliminate klike reduction"
+    o, only : Array String; "Only translate the specified constants and their dependencies (output to directory 'only_out')."
+    p, print; "Print translated constant specified by --only."
+    O, "dbg-only"; "(for debugging)"
+    pi, "proof-irrel"; "Eliminate proof irrelevance."
+    klr, "klike-red"; "Eliminate K-like reduction."
     c, cached : String; "Use cached library translation files from specified directory."
-    bl, blacklist : Array String; "Use cached library translation files from specified directory."
 
   ARGS:
     input : String;         "Input .lean file."

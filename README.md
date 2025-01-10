@@ -1,81 +1,136 @@
-# Lean-for-Lean
+# Lean4Less
 
-This is an implementation of the Lean 4 kernel written in (mostly) pure Lean 4.
-It is derived directly from the C++ kernel implementation, and as such likely
-shares some implementation bugs with it (it's not really an independent
-implementation), although it also benefits from the same algorithmic performance
-improvements existing in the C++ Lean kernel.
+Lean4Less is a tool for translating Lean to smaller theories (generically referred to by the name "Lean-") via the replacement of certain definitional equalities with representative axioms. It is a modification of [Lean4Lean](https://github.com/digama0/lean4lean), a port of Lean's C++ typechecker code into Lean.
 
-The project also houses some metatheory regarding the Lean
-system, in the same general direction as the
-[MetaCoq project](https://github.com/MetaCoq/metacoq/).
+The purpose of Lean4Less is to help ease the translation of proofs from Lean to other systems (e.g. Coq), but it can hopefully also be extended to enable some limited form of (simulated) extensional reasoning in Lean, as it implements a translation framework consistent with a general extensional to intensional translation (formalized by Winterhalter et. al. in [ett-to-itt](https://github.com/TheoWinterhalter/ett-to-itt), see [this related paper](https://dl.acm.org/doi/10.1145/3293880.3294095)).
+
+## Overview
+
+Lean4Less is currently capable of eliminating proof irrelevance (PI) and K-like reduction (KLR) in Lean, replacing them with a single proof irrelevance axiom:
+
+```lean
+-- proof irrelevance, represented as an axiom
+axiom prfIrrel {P : Prop} (p q : P) : p = q
+```
+
+To do so, it "patches" the terms to insert type casts (a.k.a. transports) using generated equality proofs to ensure that terms have the expected type in Lean- (when enforced by typing constraints or type annotation).
+
+For instance, the following typechecks in Lean via proof irrelevance:
+```lean
+-- `T p` is defeq to `T q` in Lean (due to proof irrelevance)
+def ex1 {P : Prop} {T : P → Type} (p q : p) (t : T p) : T q := t
+```
+By injecting typecasts, we can translate this to Lean- as follows:
+```lean
+theorem congrArg {A : Sort u} {B : Sort v} {x y : A}
+(f : A → B) (h : x = y) : f x = f y := ...
+
+def cast {A B : Sort u} (h : A = B) (a : A) : B := ...
+
+def ex1' {P : Prop} {T : P → Type} (p q : P) (t : T p) : T q :=
+  cast (congrArg T (prfIrrel p q)) t
+```
+
+As a more complex example, the following nested use of proof irrelevance:
+
+```lean
+def ex2 {P : Prop} {Q : P → Prop} {T : (p : P) → Q p → Prop}
+   (p q : p) (Qp : Q p) (Qq : Q q) (t : T p Qp) : T q Qq := t
+```
+can be translated to Lean- as:
+```lean
+-- need heterogeneous equality
+inductive HEq : {A : Sort u} → A →
+    {B : Sort u} → B → Prop where
+  | refl (a : A) : HEq a a
+
+theorem appHEq {A B : Type u}
+  {U : A → Type v} {V : B → Type v}
+  {f : (a : A) → U a} {g : (b : B) → V b}
+  {a : A} {b : B} (hAB : A = B)
+  (hUV : (a : A) → (b : B)
+    → HEq a b → HEq (U a) (V b))
+  (hfg : HEq f g) (hab : HEq a b)
+  : HEq (f a) (g b) := ...
+
+theorem eq_of_heq {A : Sort u} {a a' : A}
+  (h : HEq a a') : a = a' := ...
+
+-- (proved via `prfIrrel`)
+theorem prfIrrelPQ {P Q : Prop} (h : P = Q)
+  (p : P) (q : Q) : HEq p q := ...
+
+def ex2 {P : Prop} {Q : P → Prop} {T : (p : P) → Q p → Prop}
+   (p q : p) (Qp : Q p) (Qq : Q q) (t : T p Qp) : T q Qq :=
+  cast (eq_of_heq 
+  (appHEq (congrArg Q (eq_of_heq (prfIrrelPQ rfl p q)))
+    (fun _ _ _ => HEq.rfl)
+    (appHEq rfl ... HEq.rfl (prfIrrelPQ rfl p q))
+    (prfIrrelPQ (congrArg Q (eq_of_heq (prfIrrelPQ rfl p q)))
+      Qp Qq))) t
+```
+(in general, Lean4Less uses the `HEq` type and custom congruence lemmas -- see [this file](patch/PatchTheorems.lean) for the full list of constants introduced by Lean4Less).
 
 ## Building
 
-To compile the code, you will need [Lean](https://lean-lang.org/lean4/doc/quickstart.html), or more specifically `elan`, the Lean version manager, which will make sure you have the right version of lean as specified in the [lean-toolchain](lean-toolchain) file. Assuming you have elan, the project can be compiled with:
-
+See [here](https://lean-lang.org/lean4/doc/quickstart.html) for how to install Lean and `elan`. With `elan` installed, compile Lean4Less by running:
 ```
 lake build
 ```
 
-This builds all components but you can also build them separately:
-
-* `lake build Lean4Lean` builds the `Lean4Lean` library interface, and does not include any of the proofs.
-* `lake build lean4lean` (note the capitalization!) builds the `lean4lean` command line tool, again without building proofs.
-* `lake build Lean4Lean.Theory` contains the Lean metatheory and properties.
-* `lake build Lean4Lean.Verify` is the proof that the `Lean4Lean` implementation satisfies the `Lean4Lean.Theory` abstract specification.
+Note that one of Lean4Less's dependencies is a fork of Lean4Lean (found [here](https://github.com/rish987/lean4lean/tree/lean4less)) that it uses for output verification (as well as some optimizations during translation).
 
 ## Running
 
-After `lake build lean4lean`, the executable will be in `.lake/build/bin/lean4lean`. Because it requires some environment variables to be set for search paths which are provided by lake, you should evaluate it like `lake env .lake/build/bin/lean4lean`.
+After `lake build`, the Lean4Less executable can be found in `.lake/build/bin/lean4less`.
 
-If you run this as is (with no additional arguments), it will check every olean in the `lean4lean` package itself, which is probably not what you want. To check a different Lean package you should navigate the directory of the target project, then use `lake env path/to/lean4lean/.lake/build/bin/lean4lean <args>` to run `lean4lean` in the context of the target project. The command line arguments are:
+The command line arguments are:
 
-> `lean4lean [--fresh] [--verbose] [--compare] [MOD]`
+> `lean4less [--proof-irrel] [--klike-red] [--only const] [--print] [--cached cache_dir] [MOD]`
 
-* `MOD`: an optional lean module name, like `Lean4Lean.Verify`. If provided, the specified module will be checked (single-threaded); otherwise, all modules on the Lean search path will be checked (multithreaded).
-* `--fresh`: Only valid when a `MOD` is provided. In this mode, the module and all its imports will be rebuilt from scratch, checking all dependencies of the module. The behavior without the flag is to only check the module itself, assuming all imports are correct.
-* `--verbose`: shows the name of each declaration before adding it to the environment. Useful to know if the kernel got stuck on something.
-* `--compare`: If lean4lean takes more than a second on a given definition, we also check the C++ kernel performance to see if it is also slow on the same definition and report if lean4lean is abnormally slow in comparison.
+* `MOD`: a required lean module name to load the environment for translation, like `Init.Classical`.
+* `--proof-irrel` (`-pi`): Eliminate proof irrelevance.
+* `--klike-red` (`-klr`): Eliminate K-like reduction.
+* `--only` (`-o`): Only translate the specified constants and their dependencies (output as an `.olean` file to directory `only_out/` with a filename corresponding to the name of the constant).
+* `--print` (`-p`): Print translated constant specified by --only.
+* `--cached` (`-c`): Use cached library translation files from specified directory.
 
-## (Selected) file breakdown
+If `--only` is not specified, the translated environment is output in the directory `out/` as `.olean` files. The output file structure follows that of the input, with the addition of a `PatchPrelude.olean` module to isolate the dependencies of the [translation-specific lemmas](Lean4Less/patch/PatchTheorems.lean).
 
-* `Main.lean`: command line app
-* `Lean4Lean`: source files
-  * `Environment.lean`: library entry point
-  * `TypeChecker.lean`: main recursive function
-  * `Inductive`
-    * `Add.lean`: constructing inductive recursors
-    * `Reduce.lean`: inductive iota rules
-  * `Quot.lean`: quotient types handling
-  * `UnionFind.lean`: a union-find data structure
-  * `Std`: stuff that should exist upstream
-  * `Theory`: lean metatheory
-    * `VLevel.lean`: level expressions
-    * `VExpr.lean`: expressions (boring de Bruijn variable theorems are here)
-    * `VDecl.lean`: declarations
-    * `VEnv.lean`: environment
-    * `Meta.lean`: elaborator producing `VExpr`s
-    * `Inductive.lean`: inductive types
-    * `Quot.lean`: quotient types
-    * `Typing`
-      * `Basic.lean`: The typing relation itself
-      * `Lemmas.lean`: theorems about the typing relation
-      * `Meta.lean`: tactic for proving typing judgments
-      * `Strong.lean`: proof that you can have all the inductive hypotheses
-      * `Stratified.lean`: (experimental) stratified typing judgment
-      * `StratifiedUntyped.lean` (experimental) another stratified typing judgment
-      * `UniqueTyping.lean`: conjectures about the typing relation
-      * `ParallelReduction.lean`: (experimental) stuff related to church-rosser
-      * `Env.lean`: typing for environments
-  * `Verify`: relation between the metatheory and the kernel
-    * `Axioms.lean`: theorems about upstream opaques that shouldn't be opaque
-    * `UnionFind.lean`: proof of correctness of union-find
-    * `VLCtx.lean`: a "translation context" suitable for translating expressions
-    * `LocalContext.lean`: properties of lean's `LocalContext` type
-    * `NameGenerator.lean`: properties of the fresh name generator
-    * `Typing`
-      * `Expr.lean`: translating expressions (`TrExpr` is here)
-      * `Lemmas.lean`: properties of `TrExpr`
-      * `ConditionallyTyped.lean`: properties of expressions in caches that may be out of scope
-    * `Environment.lean`: translating environments
+If you wish to continue an interrupted translation, you can use the `-c` option, (e.g. `lean4less -pi -klr Std -c out`).
+
+To translate a different Lean package, you should navigate the directory of the target project, then use `lake env path/to/lean4lean/.lake/build/bin/lean4less <args>` to run `lean4less` in the context of the target project, for example:
+```
+ $ (cd ~/projects/mathlib4/ && lake env ~/projects/lean4less/.lake/build/bin/lean4less -klr -pi Mathlib.Data.Real.Basic)
+
+```
+
+## Verification
+
+After translation, Lean4Less will perform a verification run on the translated environment using a specialized fork of Lean4Lean, with the specified definitional equalities disabled.
+See [the README of that fork](https://github.com/rish987/lean4lean/tree/lean4less) for details on how to run it on its own.
+
+## Caveats
+* The translation unfortunately does not currently scale beyond small libraries (e.g. the Lean standard library `Std`) or lower modules in the mathlib import hierarchy (e.g. `Mathlib.Data.Ordering.Basic`). When attempting to translate higher-level modules, the translation will probably get stuck at some point/run out of memory. This is likely due to large intermediate terms appearing in the output as a consequence of K-like reduction. This issue may be alleviated through the generation of auxiliary constants as a part of translation, though this has not been implemented yet.
+* There are some instances of translation where the output can "explode" in size, particularly when annotated types must themselves be patched, resulting in a kind of "transport hell". For example, the following definition produces a very large translation:
+```lean
+inductive K : Prop where
+| mk : K
+
+def F : Bool → Type
+| true => Bool
+| _ => Unit
+
+structure S : Type where
+b : Bool
+f : F b
+
+def projTest {B : Bool → Type} (s : B (S.mk true true).2)
+   : B (@K.rec (fun _ => S) (S.mk true true) k).2 := s
+
+```
+This is an issue inherent to the translation, and so it is not possible to optimize the output to avoid it. However, it can perhaps be alleviated by minimizing unnecessary uses of proof irrelevance in the input.
+* Lean4Less may insert casts where they are not strictly necessary -- that is, on terms that are already defeq in Lean-. This is because it is based on the implementation of Lean's typechecker, where the proof irrelevance check also functions as an optimization that short-circuits further definitional equality checking on proofs of the same propositional type. To avoid inserting such unnecessary casts during translation, it may seem like a good idea to first check if proof terms are already defeq in Lean-. However, attempting this proved to be prohibitively expensive in the worst case (when they are not defeq in Lean-, and must be fully expanded to compare them completely). We compromise by [placing a low limit](https://github.com/rish987/lean4lean/blob/05a96065e79689cebf7b2d752ff71a46494a4b99/Lean4Less/TypeChecker.lean#L1258) on the maximum recursion depth for this check.
+* Attempting to eliminate just proof irrelevance and not K-like reduction as well will likely result in deep recursion (a.k.a. nontermination) at some point during output verification. It seems that this is due to the typechecker implementation performing K-like reduction too "eagerly" when proof irrelevance is disabled; further investigation is needed here.
+
+Please open an issue/ping me on Zulip if you encounter any errors during translation.

@@ -99,12 +99,12 @@ def transL4L (n : Array Name) (env? : Option Environment := none) : Lean.Elab.Co
   let env ← env?.getDM getEnv
   transL4L' n env
 
-def checkL4L (ns : Array Name) (env : Environment) (printOutput := true) (printProgress := false) (interactive := false) (opts : TypeCheckerOpts := {}) : IO Environment := do
+def checkL4L (ns : Array Name) (env : Environment) (printOutput := true) (printProgress := false) (interactive := false) (opts : TypeCheckerOpts := {}) (dbgOnly := false) : IO Environment := do
   let env ← transL4L' ns env (pp := printOutput) (printProgress := printProgress) (interactive := interactive) (opts := opts)
   let nSet := ns.foldl (init := default) fun acc n => acc.insert n
   -- unsafe replayFromEnv Lean4Lean.addDecl env.mainModule env.toMap₁ (op := "typecheck") (opts := {proofIrrelevance := false, kLikeReduction := false})
 
-  let (_, checkEnv) ← checkConstants (printErr := true) env nSet Lean4Lean.addDecl (initConsts := patchConsts) (opts := {proofIrrelevance := not opts.proofIrrelevance, kLikeReduction := not opts.kLikeReduction}) (interactive := interactive)
+  let (_, checkEnv) ← checkConstants (printErr := true) env nSet Lean4Lean.addDecl (initConsts := patchConsts) (opts := {proofIrrelevance := not opts.proofIrrelevance, kLikeReduction := not opts.kLikeReduction}) (interactive := interactive) (dbgOnly := dbgOnly)
 
   -- let env' ← transL4L' ns env
   -- for n in ns do
