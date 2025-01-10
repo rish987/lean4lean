@@ -26,11 +26,9 @@ You can also use `lake exe lean4lean --fresh Mathlib.Data.Nat.Basic` to replay a
 -/
 unsafe def runRunCmd (p : Parsed) : IO UInt32 := do
   initSearchPath (← findSysroot)
-  let onlyConsts? := p.flag? "only" |>.map fun onlys => 
-    onlys.as! (Array String)
+  -- let onlyConsts? := p.flag? "only" |>.map fun onlys => 
+  --   onlys.as! (Array String)
   let fresh : Bool := p.hasFlag "fresh"
-  let verbose : Bool := p.hasFlag "verbose"
-  let compare : Bool := p.hasFlag "compare"
   let searchPath? := p.flag? "search-path" |>.map fun sp => 
     sp.as! String
   match searchPath? with
@@ -45,14 +43,14 @@ unsafe def runRunCmd (p : Parsed) : IO UInt32 := do
     | .some mod => match mod.value.toName with
       | .anonymous => throw <| IO.userError s!"Could not resolve module: {mod}"
       | m =>
-        if let some onlyConsts := onlyConsts? then
-          Lean.withImportModules #[{module := m}] {} 0 fun env => do
-            let map := onlyConsts.foldl (init := default) fun acc n => .insert acc n.toName
-            let _ ← checkConstants (printErr := true) env map Lean4Lean.addDecl (op := "typecheck") (printProgress := true)
+        -- if let some onlyConsts := onlyConsts? then
+        --   Lean.withImportModules #[{module := m}] {} 0 fun env => do
+        --     let map := onlyConsts.foldl (init := default) fun acc n => .insert acc n.toName
+        --     let _ ← checkConstants (printErr := true) env map Lean4Lean.addDecl (op := "typecheck") (printProgress := true)
         if fresh then
-          replayFromFresh addDecl m (verbose := verbose) (compare := compare) (opts := opts)
+          replayFromFresh addDecl m (opts := opts)
         else
-          replayFromImports addDecl m (verbose := verbose) (compare := compare) (opts := opts)
+          replayFromImports addDecl m (opts := opts)
     | _ => do
       if fresh then
         throw <| IO.userError "--fresh flag is only valid when specifying a single module"
@@ -60,7 +58,7 @@ unsafe def runRunCmd (p : Parsed) : IO UInt32 := do
       let mut tasks := #[]
       for path in (← SearchPath.findAllWithExt sp "olean") do
         if let some m ← searchModuleNameOfFileName path sp then
-          tasks := tasks.push (m, ← IO.asTask (replayFromImports addDecl m verbose compare (opts := opts)))
+          tasks := tasks.push (m, ← IO.asTask (replayFromImports addDecl m (opts := opts)))
 
       let mut numDone := 0
       let mut finished : NameSet := default
@@ -88,10 +86,8 @@ unsafe def runCmd : Cmd := `[Cli|
   "Run Lean4Lean"
 
   FLAGS:
-    o, only : Array String;         "Only translate the specified constants and their dependencies."
+    -- o, only : Array String;         "Only translate the specified constants and their dependencies."
     f, fresh;                       "Typecheck imported modules"
-    v, verbose;                     "Verbose mode"
-    c, compare;                     "Compare Lean4Lean and kernel runtimes"
     s, "search-path" : String;      "Set search path directory"
     npi, "no-proof-irrel";          "Disable proof irrelevance"
     nklr, "no-klike-red";           "Disable k-like reduction"
