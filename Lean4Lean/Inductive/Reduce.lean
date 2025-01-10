@@ -25,7 +25,7 @@ def toCtorWhenK (rval : RecursorVal) (e : Expr) : m (Expr × Bool) := do
   if appType.hasExprMVar then
     let appTypeArgs := appType.getAppArgs
     for h : i in [rval.numParams:appTypeArgs.size] do
-      if (appTypeArgs[i]'h.2).hasExprMVar then return (e, false)
+      if (appTypeArgs[i]'h.2.1).hasExprMVar then return (e, false)
   let some (newCtorApp, newCtorName) := mkNullaryCtor env appType rval.numParams | return (e, false)
   unless ← isDefEq appType (← inferType newCtorApp) do return (e, false)
   if let (.const ctorName _) := e.getAppFn then

@@ -724,7 +724,7 @@ def tryEtaStructCore (t s : Expr) : RecM Bool := do
       let tType ← inferType 73 t
       if !(← isValidProj fInfo.induct idx t tType) then
         return false -- TODO would combining these conditions break the short-circuiting of the evaluation of `isValidProj`?
-    unless ← isDefEq 64 (.proj fInfo.induct idx t) (args[i]'h.2) do return false
+    unless ← isDefEq 64 (.proj fInfo.induct idx t) (args[i]'h.2.1) do return false
   return true
 
 def tryEtaStruct (t s : Expr) : RecM Bool :=
