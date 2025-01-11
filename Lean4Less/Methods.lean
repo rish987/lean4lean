@@ -241,6 +241,9 @@ def isDefEq (t s : PExpr) (lps : List Name) : MB :=
 def isDefEqPure (t s : PExpr) (lps : List Name) : M Bool :=
   withReader ({ · with lparams := lps }) (Inner.isDefEqPure 87 t s).run
 
+def whnfPure (e : PExpr) (lps : List Name) : M PExpr :=
+  withReader ({ · with lparams := lps }) (Inner.whnfPure 99 e).run
+
 @[inherit_doc ensureSortCore]
 def ensureSort (t : PExpr) (lps : List Name) (s := t) : MEE := 
   withReader ({ · with lparams := lps }) $ RecM.run do 

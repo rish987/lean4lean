@@ -13,6 +13,7 @@ import Lean4Less.Commands
 
 open Lean
 open Lean4Lean
+open Lean4Less
 open Cli
 
 open private add markQuotInit from Lean.Environment
@@ -95,6 +96,7 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
     | .anonymous => throw <| IO.userError s!"Could not resolve module: {mod}"
     | m =>
       let (lemmEnv, success) ← Lean.Elab.runFrontend (include_str "patch" / "PatchTheorems.lean") default default `Patch -- TODO how to add PatchTheorems.lean as a lake dependency?
+      let overrides := Lean4Less.getOverrides lemmEnv
       if not success then
         throw $ IO.userError $ "elab of patching defs failed"
       if let some onlyConsts := onlyConsts? then
@@ -144,8 +146,10 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
           saveModuleData modPath n mod
 
         IO.println s!">>init module"
-        let patchConsts ← getDepConstsEnv lemmEnv Lean4Less.patchConsts
-        let (env, aborted) ← replay (Lean4Less.addDecl (opts := opts)) {newConstants := patchConsts, opts := {}} (← mkEmptyEnvironment) (printProgress := true) (op := "patch") (aborted := aborted)
+        let patchConsts ← getDepConstsEnv lemmEnv Lean4Less.patchConsts overrides
+        dbg_trace s!"DBG[88]: Main.lean:149 {patchConsts.keys}"
+        let (env, aborted) ← replay (Lean4Less.addDecl (opts := opts)) {newConstants := patchConsts, opts := {}, overrides} (← mkEmptyEnvironment) (printProgress := true) (op := "patch") (aborted := aborted)
+        dbg_trace s!"DBG[86]: Main.lean:150 (after let (env, aborted) ← replay (Lean4Less…)"
         mkMod #[] env patchPreludeModName aborted
 
         let (aborted, s) ← ForEachModuleM.run env do
@@ -176,13 +180,25 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
                 pure false
             unless not skip do return aborted
 
-            let newConstants ← d.constNames.zip d.constants |>.foldlM (init := default) fun acc (n, ci) => do
+            let (newConstants, overrides) ← d.constNames.zip d.constants |>.foldlM (init := (default, Lean4Less.getOverrides env)) fun (accNewConstants, accOverrides) (n, ci) => do
               if not ((← get).env.contains n) then
-                pure $ acc.insert n ci
+                if let some n' := constOverrides[n]? then
+                  if let some ci' := lemmEnv.find? n' then
+                    let accOverrides := accOverrides.insert n ci'
+
+                    let overrideDeps ← getDepConstsEnv lemmEnv #[n'] overrides
+                    let mut accNewConstants := accNewConstants
+                    for (dep, depi) in overrideDeps do
+                      if not ((← get).env.contains dep) then
+                        accNewConstants := accNewConstants.insert dep depi
+                    pure (accNewConstants.insert n ci, accOverrides)
+                  else
+                    panic! "could not find override `{n'}` for '{n}'"
+                else pure (accNewConstants.insert n ci, accOverrides)
               else
-                pure $ acc
+                pure $ (accNewConstants, accOverrides)
             IO.println s!">>{dn} module [{(← get).count}/{numMods}]"
-            let (env, aborted) ← replay (Lean4Less.addDecl (opts := opts)) {newConstants := newConstants, opts := {}} (← get).env (printProgress := true) (op := "patch") (aborted := aborted)
+            let (env, aborted) ← replay (Lean4Less.addDecl (opts := opts)) {newConstants := newConstants, opts := {}, overrides} (← get).env (printProgress := true) (op := "patch") (aborted := aborted)
             let imports := if dn == `Init.Prelude then
                 #[{module := `Init.PatchPrelude}] ++ d.imports
               else
@@ -192,6 +208,7 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
             modify fun s => {s with env}
             pure aborted
         let env := s.env
+        dbg_trace s!"DBG[87]: Main.lean:204 (after let env := s.env)"
         replayFromEnv Lean4Lean.addDecl m env.toMap₁ (op := "typecheck") (opts := {proofIrrelevance := not opts.proofIrrelevance, kLikeReduction := not opts.kLikeReduction})
         -- forEachModule' (imports := #[m]) (init := env) fun e dn d => do
         --   -- let newConstants := d.constNames.zip d.constants |>.foldl (init := default) fun acc (n, ci) => acc.insert n ci

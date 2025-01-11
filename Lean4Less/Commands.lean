@@ -40,7 +40,10 @@ The set of all constants used to patch terms, in linearised order based on
 dependencies in the patched versions of their types/values.
 -/
 def patchConsts : Array Name := #[
-`L4L.eq_of_heq,
+`L4L.prfIrrel,
+`L4L.forallEqUV',
+`L4L.appArgEq,
+`eq_of_heq,
 `cast,
 `L4L.HEqRefl,
 `L4L.castHEq,
@@ -51,7 +54,6 @@ def patchConsts : Array Name := #[
 `Eq,
 `Eq.refl,
 
-`L4L.prfIrrel,
 `L4L.prfIrrelHEq,
 `L4L.prfIrrelHEqPQ,
 
@@ -87,9 +89,26 @@ def patchConsts : Array Name := #[
 `sorryAx --FIXME
 ]
 
+def constOverrides' : Array (Name × Name) := #[
+  (`eq_of_heq, `L4L.eq_of_heq),
+  (`Nat.eq_or_lt_of_le, `L4L.Nat.eq_or_lt_of_le)
+]
+def constOverrides : Std.HashMap Name Name := constOverrides'.foldl (init := default) fun acc (n, n') => acc.insert n n'
+
+-- def getOverrides (env : Environment) (overrides : Std.HashMap Name Name) : Std.HashMap Name ConstantInfo :=
+def getOverrides (env : Environment) : Std.HashMap Name ConstantInfo :=
+  constOverrides.fold (init := default) fun acc n n' =>
+    if env.contains n then
+      if let some ci := env.find? n' then
+        acc.insert n ci
+      else
+        panic! "could not find override `{n'}` for '{n}'"
+    else
+      acc
+
 def transL4L' (ns : Array Name) (env : Environment) (pp := false) (printProgress := false) (interactive := false) (opts : TypeCheckerOpts := {}) : IO Environment := do
   let map := ns.foldl (init := default) fun acc n => .insert acc n
-  let (_, newEnv) ← checkConstants (printErr := true) env map (@Lean4Less.addDecl (opts := opts)) (initConsts := patchConsts) (op := "patch") (printProgress := printProgress) (interactive := interactive)
+  let (_, newEnv) ← checkConstants (printErr := true) env map (@Lean4Less.addDecl (opts := opts)) (initConsts := patchConsts) (op := "patch") (printProgress := printProgress) (interactive := interactive) (overrides := getOverrides env)
   for n in ns do
     if pp then
       ppConst newEnv n
@@ -104,7 +123,7 @@ def checkL4L (ns : Array Name) (env : Environment) (printOutput := true) (printP
   let nSet := ns.foldl (init := default) fun acc n => acc.insert n
   -- unsafe replayFromEnv Lean4Lean.addDecl env.mainModule env.toMap₁ (op := "typecheck") (opts := {proofIrrelevance := false, kLikeReduction := false})
 
-  let (_, checkEnv) ← checkConstants (printErr := true) env nSet Lean4Lean.addDecl (initConsts := patchConsts) (opts := {proofIrrelevance := not opts.proofIrrelevance, kLikeReduction := not opts.kLikeReduction}) (interactive := interactive) (dbgOnly := dbgOnly)
+  let (_, checkEnv) ← checkConstants (printErr := true) env nSet Lean4Lean.addDecl (initConsts := patchConsts) (opts := {proofIrrelevance := not opts.proofIrrelevance, kLikeReduction := not opts.kLikeReduction}) (interactive := interactive) (dbgOnly := dbgOnly) (overrides := default)
 
   -- let env' ← transL4L' ns env
   -- for n in ns do
@@ -121,10 +140,10 @@ elab "#trans_l4l " i:ident : command => do
   _ ← transL4L #[i.getId]
 
 elab "#check_only " i:ident : command => do
-  _ ← checkConstants (printErr := true) (← getEnv) (.insert default i.getId) (Lean4Lean.addDecl (verbose := true)) (opts := {}) (interactive := true)
+  _ ← checkConstants (printErr := true) (← getEnv) (.insert default i.getId) (Lean4Lean.addDecl (verbose := true)) (opts := {}) (interactive := true) (overrides := getOverrides (← getEnv))
 
 elab "#check_off " i:ident : command => do
-  _ ← checkConstants (printErr := true) (← getEnv) (.insert default i.getId) Lean4Lean.addDecl (opts := {proofIrrelevance := false, kLikeReduction := false}) (interactive := true)
+  _ ← checkConstants (printErr := true) (← getEnv) (.insert default i.getId) Lean4Lean.addDecl (opts := {proofIrrelevance := false, kLikeReduction := false}) (interactive := true) (overrides := getOverrides (← getEnv))
 
 elab "#check_l4l " i:ident : command => do
   _ ← checkL4L #[i.getId] (← getEnv) (interactive := true)

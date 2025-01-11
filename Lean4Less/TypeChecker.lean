@@ -2032,7 +2032,9 @@ private def _whnf' (_e : Expr) (cheapK := false) : RecEE := do
           pure none
       return (e', eEqe'?)
   let rec loop le eEqle?
-  | 0 => throw .deterministicTimeout
+  | 0 =>
+    dbg_trace s!"DBG[65]: TypeChecker.lean:2035 (after | 0 =>)"
+    throw .deterministicTimeout
   | fuel+1 => do
     let env ← getEnv
     let (ler, leEqler?) ← whnfCore' le (cheapK := cheapK)
@@ -2236,7 +2238,9 @@ Otherwise, defers to the calling function with these normal forms.
 -/
 def lazyDeltaReduction (tn sn : PExpr) : RecM ReductionStatus := loop tn sn none none 1000 where
   loop ltn lsn (tnEqltn? snEqlsn? : Option EExpr)
-  | 0 => throw .deterministicTimeout
+  | 0 =>
+    dbg_trace s!"DBG[66]: TypeChecker.lean:2241 (after | 0 =>)"
+    throw .deterministicTimeout
   | fuel+1 => do
     let (r, proof?) ← isDefEqOffset ltn lsn
     if r != .undef then

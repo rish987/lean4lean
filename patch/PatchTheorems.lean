@@ -28,7 +28,8 @@ theorem forallEqUV' {A : Sort u} {U V : A → Sort v}
   subst this
   rfl
 
-theorem eq_of_heq {A : Sort u} {a b : A} (h : HEq a b) : @Eq A a b := -- NOTE: this lemma has been manually translated to Lean⁻
+-- overrides stdlib's definition of `eq_of_heq`; NOTE: this lemma has been manually translated to Lean⁻
+theorem eq_of_heq {A : Sort u} {a b : A} (h : HEq a b) : @Eq A a b :=
   -- TODO clean this up
   let_fun this := fun (A B : Sort u) (a : A) (b : B) (hab : HEq a b) =>
     @HEq.rec A a
@@ -58,8 +59,7 @@ theorem eq_of_heq {A : Sort u} {a b : A} (h : HEq a b) : @Eq A a b := -- NOTE: t
 theorem forallHEqABUV' {A B : Sort u} {U : A → Sort v} {V : B → Sort v}
   (hAB : HEq A B) (hUV : (a : A) → (b : B) → HEq a b → HEq (U a) (V b))
   : HEq ((a : A) → U a) ((b : B) → V b) := by
-  have h := eq_of_heq hAB -- TODO define a macro for this
-  subst h
+  subst hAB -- TODO define a macro for this
   have : Eq U V := by
     apply funext
     intro x
@@ -81,8 +81,7 @@ theorem forallHEqUV' {A : Sort u} {U V : A → Sort v}
   (hUV : (a : A) → HEq (U a) (V a))
   : HEq ((a : A) → U a) ((b : A) → V b) := by
   refine forallHEqABUV' HEq.rfl fun a b hab => ?_
-  have h := eq_of_heq hab
-  subst h
+  subst hab
   exact hUV a
 
 theorem forallHEqAB {A B : Sort u} {U : Sort v} (hAB : HEq A B)
@@ -95,8 +94,7 @@ theorem lambdaHEqABUV' {A B : Sort u} {U : A → Sort v} {V : B → Sort v}
   (f : (a : A) → U a) (g : (b : B) → V b)
   (hAB : HEq A B) (hfg : (a : A) → (b : B) → HEq a b → HEq (f a) (g b))
   : HEq (fun a => f a) (fun b => g b) := by
-  have h := eq_of_heq hAB
-  subst h
+  subst hAB
   have : Eq U V := by
     apply funext
     intro x
@@ -121,8 +119,7 @@ theorem lambdaHEqUV' {A : Sort u} {U V : A → Sort v}
   : HEq (fun a => f a) (fun b => g b) := by
   apply lambdaHEqABUV' _ _ HEq.rfl
   intro a b hab
-  have h := eq_of_heq hab
-  subst h
+  subst hab
   exact hfg a
 
 theorem lambdaHEqUV {A : Sort u} {U V : Sort v}
@@ -163,10 +160,8 @@ theorem lambdaHEq {A : Sort u} {U : Sort v}
 --     intro x
 --     exact type_eq_of_heq $ revlambdaHEqUV' hfg x
 --   subst this
---   have h := (eq_of_heq hfg)
---   subst h
---   have h := (eq_of_heq hab)
---   subst h
+--   subst hfg
+--   subst hab
 --   rfl
 
 -- -- if only...
@@ -177,16 +172,13 @@ theorem lambdaHEq {A : Sort u} {U : Sort v}
 --   {f : (a : A) → U a} {g : (b : B) → V b} {a : A} {b : B}
 --   (hfg : HEq f g) (hab : HEq a b)
 --   : HEq (f a) (g b) := by
---   have h := eq_of_heq hAB
---   subst h
+--   subst hAB
 --   have : Eq U V := by
 --     have := type_eq_of_heq hfg
 --     exact forallEta this
 --   subst this
---   have h := (eq_of_heq hfg)
---   subst h
---   have h := (eq_of_heq hab)
---   subst h
+--   subst hfg
+--   subst hab
 --   rfl
 
 theorem appHEqABUV' {A B : Sort u} {U : A → Sort v} {V : B → Sort v}
@@ -194,17 +186,14 @@ theorem appHEqABUV' {A B : Sort u} {U : A → Sort v} {V : B → Sort v}
   {f : (a : A) → U a} {g : (b : B) → V b} {a : A} {b : B}
   (hfg : HEq f g) (hab : HEq a b)
   : HEq (f a) (g b) := by
-  have h := eq_of_heq hAB
-  subst h
+  subst hAB
   have : Eq U V := by
     apply funext
     intro x
     exact eq_of_heq $ hUV x x HEq.rfl
   subst this
-  have h := (eq_of_heq hfg)
-  subst h
-  have h := (eq_of_heq hab)
-  subst h
+  subst hfg
+  subst hab
   rfl
 
 theorem appHEqABUV {A B : Sort u} {U V : Sort v}
@@ -305,22 +294,34 @@ theorem prfIrrelHEq {P : Prop} (p q : P) : HEq p q := by
   exact prfIrrel _ _
 
 theorem prfIrrelHEqPQ {P Q : Prop} (hPQ : HEq P Q) (p : P) (q : Q) : HEq p q := by
-  have h := eq_of_heq hPQ
-  subst h
+  subst hPQ
   exact prfIrrelHEq _ _
 
 def castHEq {α β : Sort u} (h : HEq α β) (a : α) : β := cast (eq_of_heq h) a
 
 def castOrigHEq {α β : Sort u} (h : HEq α β) (a : α) : HEq (castHEq h a) a := by
-  have h := eq_of_heq h
   subst h
   rfl
 
 def castOrigHEqSymm {α β : Sort u} (h : HEq α β) (a : α) : HEq a (castHEq h a) := by
-  have h := eq_of_heq h
   subst h
   rfl
 
 def HEqRefl (_n : Nat) {α : Sort u} (a : α) : HEq a a := HEq.refl a
+
+theorem Nat.eq_or_lt_of_le {n m: Nat} (h : LE.le n m) : Or (Eq n m) (LT.lt n m) :=
+  match n, h with
+  | .zero, _ =>
+    match m with
+    | .zero => Or.inl rfl
+    | .succ _ => Or.inr (Nat.succ_le_succ (Nat.zero_le _))
+  | .succ n, h =>
+    match m, h with
+    | .zero, h => absurd h (Nat.not_succ_le_zero _)
+    | .succ m, h => 
+      have : LE.le n m := Nat.le_of_succ_le_succ h
+      match Nat.eq_or_lt_of_le this with
+      | Or.inl h => Or.inl (h ▸ rfl)
+      | Or.inr h => Or.inr (Nat.succ_le_succ h)
 
 end L4L

@@ -154,6 +154,35 @@ inductive TT : Nat → Type where
 
 def Kex (k : K) (t : TT 0) : TT (@K.rec (fun _ => Nat) 0 k) := t
 -- #check_l4l Kex
+--
+--
+theorem my_eq_or_lt_of_le {n m: Nat} (h : LE.le n m) : Or (Eq n m) (LT.lt n m) :=
+  match n, h with
+  | .zero, _ =>
+    match m with
+    | .zero => Or.inl rfl
+    | .succ _ => Or.inr (Nat.succ_le_succ (Nat.zero_le _))
+  | .succ n, h =>
+    match m, h with
+    | .zero, h => absurd h (Nat.not_succ_le_zero _)
+    | .succ m, h => 
+      have : LE.le n m := Nat.le_of_succ_le_succ h
+      match Nat.eq_or_lt_of_le this with
+      | Or.inl h => Or.inl (h ▸ rfl)
+      | Or.inr h => Or.inr (Nat.succ_le_succ h)
+
+  -- | zero,   zero,   _ => Or.inl rfl
+  -- | zero,   succ _, _ => Or.inr (Nat.succ_le_succ (Nat.zero_le _))
+  -- | succ _, zero,   h => absurd h (not_succ_le_zero _)
+  -- | succ n, succ m, h =>
+  --   have : LE.le n m := Nat.le_of_succ_le_succ h
+  --   match Nat.eq_or_lt_of_le this with
+  --   | Or.inl h => Or.inl (h ▸ rfl)
+  --   | Or.inr h => Or.inr (succ_le_succ h)
+-- variable (x y : Nat) (hxy : x ≤ y)
+-- set_option pp.explicit true in
+-- -- #print Nat.gcd
+-- #reduce (proofs := true) my_eq_or_lt_of_le hxy
 
 axiom k : K 
 axiom k' : K 
