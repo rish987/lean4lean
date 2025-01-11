@@ -18,6 +18,7 @@ partial def Lean.Name.isCStage : Name → Bool
 namespace Deps
   structure Context where
     env        : Environment
+    overrides : Std.HashMap Name ConstantInfo
 
   structure State where
     map : Std.HashMap Name ConstantInfo := {}
@@ -34,7 +35,28 @@ namespace Deps
     for name in names do
       match ((← get).map.get? name) with
       | .none =>
-        let some const := (← read).env.find? name | throw $ IO.userError s!"could not find constant \"{name}\" for translation, verify that it exists in the Lean input"
+        let some const ← 
+          if let some ci := (← read).overrides[name]? then
+            let newCi := match ci with
+            | .axiomInfo    v =>
+              let newV := {v with name}
+              ConstantInfo.axiomInfo newV
+            | .defnInfo     v =>
+              let newV := {v with name}
+              ConstantInfo.defnInfo newV
+            | .thmInfo      v => 
+              let newV := {v with name}
+              ConstantInfo.thmInfo newV
+            | .opaqueInfo   v =>
+              let newV := {v with name}
+              ConstantInfo.opaqueInfo newV
+            | .quotInfo     _ => panic! "unsupported override"
+            | .inductInfo   _ => panic! "unsupported override"
+            | .ctorInfo     _ => panic! "unsupported override"
+            | .recInfo      _ => panic! "unsupported override"
+            pure $ .some newCi
+          else
+            pure $ (← read).env.find? name | throw $ IO.userError s!"could not find constant \"{name}\" for translation, verify that it exists in the Lean input"
         modify fun s => { s with map := s.map.insert name const }
         let mut deps := #[]
         if name == ``String then deps := deps.push ``Char.ofNat

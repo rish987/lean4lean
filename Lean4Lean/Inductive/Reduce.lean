@@ -71,6 +71,9 @@ def inductiveReduceRec [Monad m] (env : Environment) (e : Expr)
   if kLikeReduction then
     if info.k then
       (major, usedK) ← toCtorWhenK env whnf inferType isDefEq info major
+  -- else
+  --   if info.k then
+  --     dbg_trace s!"DBG[68]: Reduce.lean:75 aborted k for {recFn}"
   -- dbg_trace s!"DBG[28]: Reduce.lean:74: major={major}"
   match ← whnf 4 major with
   | .lit l => major := l.toConstructor

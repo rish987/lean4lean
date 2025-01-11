@@ -72,13 +72,13 @@ def checkPrimitiveDef (env : Environment) (v : DefinitionVal) : M Bool := do
     -- div : Nat → Nat → Nat
     unless ← TypeChecker.isDefEq v.type (.arrow nat (.arrow nat nat)) do fail
     return true -- TODO
-  -- | ``Nat.gcd => -- TODO parameterize
-  --   unless env.contains ``Nat.mod && v.levelParams.isEmpty do fail
-  --   -- gcd : Nat → Nat → Nat
-  --   unless ← TypeChecker.isDefEq v.type (.arrow nat (.arrow nat nat)) do fail
-  --   let gcd := mkApp2 v.value
-  --   unless ← defeq1 (gcd zero x) x do fail
-  --   unless ← defeq2 (gcd (succ y) x) (gcd (_mod x (succ y)) (succ y)) do fail
+  | ``Nat.gcd => -- TODO parameterize
+    unless env.contains ``Nat.mod && v.levelParams.isEmpty do fail
+    -- gcd : Nat → Nat → Nat
+    unless ← TypeChecker.isDefEq v.type (.arrow nat (.arrow nat nat)) do fail
+    let gcd := mkApp2 v.value
+    unless ← defeq1 (gcd zero x) x do fail
+    unless ← defeq2 (gcd (succ y) x) (gcd (_mod x (succ y)) (succ y)) do fail
   | ``Nat.beq =>
     unless env.contains ``Nat && env.contains ``Bool && v.levelParams.isEmpty do fail
     -- beq : Nat → Nat → Bool

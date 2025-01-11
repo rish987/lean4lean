@@ -62,6 +62,7 @@ namespace Lean4Lean
 structure Context where
   opts : TypeCheckerOpts := {}
   newConstants : Std.HashMap Name ConstantInfo
+  overrides : Std.HashMap Name ConstantInfo := default
   verbose := false
   compare := false
 
@@ -208,7 +209,7 @@ and add it to the environment.
 partial def replayConstant (name : Name) (addDeclFn' : Declaration → M Unit) (printProgress? : Bool := false) (op : String := "typecheck") : M Unit := do
   if (← get).aborted.contains name then
     return
-  let postAddDecl := do
+  let postAddDecl n := do
     modify fun s => {s with numChecked := s.numChecked + 1}
     if printProgress? then
       printProgress op
@@ -220,7 +221,35 @@ partial def replayConstant (name : Name) (addDeclFn' : Declaration → M Unit) (
   let addDeclFn := fun decl => do
     preAddDecl decl.name
     try
-      let some ci := (← read).newConstants[name]? | unreachable!
+      let (ci, newDecl) :=
+        if let some ci := (← read).newConstants[name]? then
+          if let some ci' := (← read).overrides[name]? then
+            let (newCi, newDecl) := match ci' with
+            | .axiomInfo    v =>
+              let newV := {v with name := ci.name}
+              let newCi := ConstantInfo.axiomInfo newV
+              (newCi, Declaration.axiomDecl newV)
+            | .defnInfo     v =>
+              let newV := {v with name := ci.name}
+              let newCi := ConstantInfo.defnInfo newV
+              (newCi, Declaration.defnDecl newV)
+            | .thmInfo      v => 
+              let newV := {v with name := ci.name}
+              let newCi := ConstantInfo.thmInfo newV
+              (newCi, Declaration.thmDecl newV)
+            | .opaqueInfo   v =>
+              let newV := {v with name := ci.name}
+              let newCi := ConstantInfo.opaqueInfo newV
+              (newCi, Declaration.opaqueDecl newV)
+            | .quotInfo     _ => panic! "unsupported override"
+            | .inductInfo   _ => panic! "unsupported override"
+            | .ctorInfo     _ => panic! "unsupported override"
+            | .recInfo      _ => panic! "unsupported override"
+            (newCi, newDecl)
+          else
+            (ci, decl)
+        else
+          unreachable!
       let mut deps := ci.getUsedConstants
       let abortedDeps : Lean.NameSet := (deps.intersectBy (fun _ _ _ => ()) (← get).aborted)
       if not abortedDeps.isEmpty then
@@ -228,7 +257,8 @@ partial def replayConstant (name : Name) (addDeclFn' : Declaration → M Unit) (
           { s with aborted := s.aborted.insert name }
         IO.println s!"\n{name} aborted due to aborted dependencies"
         return
-      addDeclFn' decl
+      
+      addDeclFn' newDecl
     catch e =>
       match e with
       | .otherError 165846 m => -- 165846 is the abort code
@@ -238,7 +268,7 @@ partial def replayConstant (name : Name) (addDeclFn' : Declaration → M Unit) (
       | _ =>
         dbg_trace s!"Error in {decl.name}"
         throw e
-    postAddDecl
+    postAddDecl decl.name
 
   if ← isTodo name then
     -- dbg_trace s!"Processing deps: {name}"
@@ -289,11 +319,11 @@ partial def replayConstant (name : Name) (addDeclFn' : Declaration → M Unit) (
       -- to the constructors generated when we replay the inductives.
       | .ctorInfo info =>
         modify fun s => { s with postponedConstructors := s.postponedConstructors.insert info.name }
-        postAddDecl
+        postAddDecl name.toString
       -- Similarly we postpone checking recursors.
       | .recInfo info =>
         modify fun s => { s with postponedRecursors := s.postponedRecursors.insert info.name }
-        postAddDecl
+        postAddDecl name.toString
       | .quotInfo _ =>
         addDeclFn (Declaration.quotDecl)
       modify fun s => { s with pending := s.pending.erase name }
@@ -342,7 +372,7 @@ def _root_.Lean.Environment.toMap₂ (env : Environment) : Environment :=
   env.withConsts fun c => {c with map₂ := newMap, map₁ := default}
 
 /-- "Replay" some constants into an `Environment`, sending them to the kernel for checking. -/
-def replay (ctx : Context) (env : Environment) (decl : Option Name := none) (printProgress : Bool := false) (op : String := "typecheck") (aborted : NameSet := default): IO (Environment × NameSet) := do
+def replay (ctx : Context) (env : Environment) (decl : Option Name := none) (printProgress : Bool := false) (op : String := "typecheck") (aborted : NameSet := default) : IO (Environment × NameSet) := do
   let env := env.toMap₁.withConsts fun c => {c with stage₁ := false}
   let mut remaining : NameSet := ∅
   let mut numToCheck : Nat := 0
