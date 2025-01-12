@@ -161,7 +161,8 @@ def mkAppEqProof (TLam SLam : PExpr) (TVarLams SVarLams : Array ((Array Nat) × 
           else
             -- assert! ← meth.isDefEqPure 212 A B
             pure none
-        else pure none
+        else
+          pure none
       else pure none
 
     let sort ← meth.inferTypePure 213 A
@@ -285,9 +286,9 @@ def binAbs (max : Nat) (tfT' sfT' : Expr) (lambda : Bool) : m
         f none tDomsVars sDomsVars tDoms sDoms tDomsEqsDoms
 
     let cont tBod sBod := do 
-      let (true, tBodEqsBod?) ← meth.usesPrfIrrel tBod.toPExpr sBod.toPExpr |
+      let (true, tBodEqsBod?) ← meth.isDefEq 0 tBod.toPExpr sBod.toPExpr |
         return none
-      withMaybeAbs tBod sBod tBodEqsBod? fun newtsBod? tDomsVars sDomsVars tDoms sDoms tDomsEqsDoms => do
+      withMaybeAbs tBod sBod tBodEqsBod?.isSome fun newtsBod? tDomsVars sDomsVars tDoms sDoms tDomsEqsDoms => do
         let (newtBod, newsBod) := newtsBod?.getD (tBod, sBod)
         let mut newDomVars := #[]
         for tsvar in origDomVars do
@@ -317,7 +318,7 @@ def binAbs (max : Nat) (tfT' sfT' : Expr) (lambda : Bool) : m
               for (tvar', svar') in origDomVarsRefs.get! (tvar, svar) do
                 refs := refs.insert (tvar', svar')
 
-          let (true, tDomEqsDom?) ← meth.usesPrfIrrel tDom.toPExpr sDom.toPExpr | -- FIXME only check usesPrfIrrel here, no need to compute patched term
+          let (true, tDomEqsDom?) ← meth.isDefEq 0 tDom.toPExpr sDom.toPExpr | -- FIXME only check usesPrfIrrel here, no need to compute patched term
             return none
 
           let cont' idt ids := do
@@ -325,7 +326,7 @@ def binAbs (max : Nat) (tfT' sfT' : Expr) (lambda : Bool) : m
             let sBod := sBod.instantiate1 (.fvar ids)
             let origDomVarsRefs := origDomVarsRefs.insert (idt, ids) refs
             let origDomVars := origDomVars.push (idt, ids)
-            withMaybeAbs tDom sDom tDomEqsDom? (fun newtsDom? tDomsVars sDomsVars tDoms sDoms tDomsEqsDoms => do
+            withMaybeAbs tDom sDom tDomEqsDom?.isSome (fun newtsDom? tDomsVars sDomsVars tDoms sDoms tDomsEqsDoms => do
                 if let some (newtDom, newsDom) := newtsDom? then
                   let origDomVarsAbs := origDomVarsAbs.push (idt, ids)
                   meth.withNewFVar 208 tName newtDom.toPExpr tBi fun idnewt => do
@@ -340,7 +341,7 @@ def binAbs (max : Nat) (tfT' sfT' : Expr) (lambda : Bool) : m
               tName sName
 
           meth.withNewFVar 207 tName tDom.toPExpr tBi fun idt => do
-            if tDomEqsDom? then
+            if tDomEqsDom?.isSome then
               meth.withNewFVar 210 sName sDom.toPExpr sBi fun ids => do
                 let sort ← meth.inferTypePure 221 tDom.toPExpr
                 let .sort lvl := (← meth.ensureSortCorePure sort tDom).toExpr | unreachable!

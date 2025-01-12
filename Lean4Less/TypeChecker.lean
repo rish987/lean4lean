@@ -609,14 +609,15 @@ def mkLet (T v : PExpr) : RecM (PExpr × LocalDeclE × Option (FVarId × Nat)) :
   pure ((Expr.fvar decl.fvarId).toPExpr, decl, lastVar?)
 
 def checkIsDefEqCache (_n : Nat) (t s : PExpr) (m : RecB) : RecB := do
-  if let some (lv, decl, lastVar?) := (← get).isDefEqCache.get? (t, s) then -- TODO let var abstraction optimization
-    if not ((← getLCtx).containsFVar (Expr.fvar decl.fvarId)) then
-      addLVarToCtx decl lastVar?
-    return (true, .some $ lv)
-  else if let some (lv, decl, lastVar?) := (← get).isDefEqCache.get? (s, t) then
-    if not ((← getLCtx).containsFVar (Expr.fvar decl.fvarId)) then
-      addLVarToCtx decl lastVar? -- TODO add reversed let variable to context instead?
-    return (true, .some $ .rev lv)
+  if not (← readThe Context).noCache then
+    if let some (lv, decl, lastVar?) := (← get).isDefEqCache.get? (t, s) then -- TODO let var abstraction optimization
+      if not ((← getLCtx).containsFVar (Expr.fvar decl.fvarId)) then
+        addLVarToCtx decl lastVar?
+      return (true, .some $ lv)
+    else if let some (lv, decl, lastVar?) := (← get).isDefEqCache.get? (s, t) then
+      if not ((← getLCtx).containsFVar (Expr.fvar decl.fvarId)) then
+        addLVarToCtx decl lastVar? -- TODO add reversed let variable to context instead?
+      return (true, .some $ .rev lv)
   let (result, p?) ← m
   let newp? ←
     if result then
@@ -938,6 +939,7 @@ def meths : ExtMethods RecM := {
     checkExprCache := @checkExprCache
     usesPrfIrrel := usesPrfIrrel
     isDefEqLambda := isDefEqLambda
+    withNoCache := withNoCache
   }
 
 def methsA : ExtMethodsA RecM := {
@@ -2081,10 +2083,7 @@ def isDefEqProofIrrel (t s : PExpr) : RecLB := do
   if ret then
     if true then
       let tEqs? ←
-        if (← readThe Context).opts.proofIrrelevance then
-          isDefEqProofIrrel' t s tType sType pt? 1
-        else
-          pure none
+        isDefEqProofIrrel' t s tType sType pt? 1
       pure (.true, tEqs?)
     else
       pure (.true, none)

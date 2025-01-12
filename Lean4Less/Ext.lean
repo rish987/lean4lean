@@ -95,6 +95,7 @@ structure ExtMethods (m : Type → Type u) where
   checkExprCache (e : PExpr) (T? : Option PExpr := none) : m PExpr
   usesPrfIrrel (t s : Expr) : m (Bool × Bool)
   isDefEqLambda (t s : PExpr) : m (Bool × Option EExpr)
+  withNoCache {T : Type} : m T → m T
 
 structure TypeCheckerOpts where
   proofIrrelevance := true

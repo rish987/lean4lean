@@ -40,8 +40,8 @@ match fuel with
       | .inferTypePure e => inferTypePure' e
     -- if recDepth > 500 then
     --   dbg_trace s!"DBG[3]: {d.name}, {fuel}, {idx}"
-    if (← get).numCalls > 1000000 then
-      throw $ .other "translation aborted"
+    -- if (← get).numCalls > 1000000 then
+    --   throw $ .other "translation aborted"
     modify fun s => {s with numCalls := s.numCalls + 1} 
     let s ← get
     -- let newFuel := 
