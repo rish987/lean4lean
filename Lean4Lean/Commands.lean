@@ -13,7 +13,7 @@ def getDepConstsEnv (env : Environment) (consts : Array Name) (overrides : Std.H
   let mut (_, {map := map, ..}) ← ((Deps.namedConstDeps consts).toIO { options := default, fileName := "", fileMap := default } {env} {env, overrides})
   pure map
 
-def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn : Declaration → M Unit) (initConsts : Array Name := #[]) (printErr := false) (opts : TypeCheckerOpts := {}) (op : String := "typecheck") (printProgress := false) (interactive : Bool := false) (dbgOnly := false) (overrides : Std.HashMap Name ConstantInfo) : IO (Lean.NameSet × Environment) := do
+def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn : Declaration → M Unit) (initConsts : Array Name := #[]) (printErr := false) (opts : TypeCheckerOpts := {}) (op : String := "typecheck") (printProgress := false) (interactive : Bool := false) (dbgOnly := false) (overrides : Std.HashMap Name ConstantInfo) (deps := true) (write := true) : IO (Lean.NameSet × Environment) := do
   let mut onlyConstsToTrans : Lean.NameSet := default
 
   -- constants that should be skipped on account of already having been typechecked
@@ -43,16 +43,23 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn :
         for skipConst in skippedConsts do
           map := map.erase skipConst
 
-        let rp := do
+        let rp modEnv := do
           if dbgOnly then
-            let (env, _) ← replay addDeclFn {newConstants := map.erase const, overrides, opts := {}} modEnv (printProgress := printProgress)
+            let (env, _) ← replay addDeclFn {newConstants := map.erase const, overrides, opts := opts} modEnv (printProgress := printProgress) (op := op)
             pure env
           else
-            let (env, _) ← replay addDeclFn {newConstants := map, overrides, opts := {}} modEnv (printProgress := printProgress)
-            pure env
+            if deps then
+              let (env, _) ← replay addDeclFn {newConstants := map, overrides, opts} modEnv (printProgress := printProgress) (op := op)
+              pure env
+            else
+              let mut modEnv := modEnv
+              for (_, ci) in map.erase const |>.toList do
+                modEnv := add modEnv ci
+              let (env, _) ← replay addDeclFn {newConstants := Std.HashMap.insert default const (map.get! const), overrides, opts} modEnv (printProgress := printProgress) (op := op)
+              pure env
 
         if (not interactive) && (not (initConsts.contains const)) && consts.size == 1 && const != `temp then
-          let outName := (const.toString) ++ s!".olean"
+          let outName := (if dbgOnly then const.toString ++ "_dbg" else const.toString) ++ s!".olean"
           let outDir := ((← IO.Process.getCurrentDir).join "only_out")
           IO.FS.createDirAll outDir
           let outPath := outDir.join outName
@@ -66,13 +73,14 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn :
               modEnv := add modEnv const
             modEnv := modEnv.setMainModule module
           else
-            modEnv ← rp
-            writeModule modEnv.toMap₂ outPath
+            modEnv ← rp modEnv
+            if write then
+              writeModule modEnv.toMap₂ outPath
         else
-          modEnv ← rp
+          modEnv ← rp modEnv
 
         if dbgOnly then
-          (modEnv, _) ← replay addDeclFn {newConstants := Std.HashMap.insert default const (map.get! const), overrides, opts} modEnv (printProgress := printProgress)
+          (modEnv, _) ← replay addDeclFn {newConstants := Std.HashMap.insert default const (map.get! const), overrides, opts} modEnv (printProgress := printProgress) (op := op)
         skipConsts := skipConsts.union mapConsts -- TC success, so want to skip in future runs (already in environment)
       let onlyConstsToTrans := onlyConstsToTrans.insert const
       pure (modEnv, skipConsts, errConsts, onlyConstsToTrans)
