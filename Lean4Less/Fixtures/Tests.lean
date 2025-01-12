@@ -179,9 +179,9 @@ theorem my_eq_or_lt_of_le {n m: Nat} (h : LE.le n m) : Or (Eq n m) (LT.lt n m) :
   --   match Nat.eq_or_lt_of_le this with
   --   | Or.inl h => Or.inl (h ▸ rfl)
   --   | Or.inr h => Or.inr (succ_le_succ h)
--- variable (x y : Nat) (hxy : x ≤ y)
--- set_option pp.explicit true in
--- -- #print Nat.gcd
+variable (x y : Nat) (hxy : x ≤ y)
+set_option pp.explicit true in
+-- #print Nat.gcd
 -- #reduce (proofs := true) my_eq_or_lt_of_le hxy
 
 axiom k : K 

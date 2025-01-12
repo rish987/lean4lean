@@ -767,9 +767,7 @@ def isDefEqForall' (t s : PExpr) (numBinds : Nat) (f : Option EExpr → RecM (Op
     | _, tBody, sBody =>
       pure (#[], tBody.toPExpr, sBody.toPExpr)
   let (datas, tBody, sBody) ← getData t.toExpr s.toExpr numBinds
-  ttrace s!"DBG[9]: TypeChecker.lean:710 (after let (datas, tBody, sBody) ← getData t.…)"
   isDefEqBinder datas tBody sBody fun Ua Vx UaEqVx? as ds => do
-    ttrace s!"DBG[10]: TypeChecker.lean:712 (after isDefEqBinder datas tBody sBody fun Ua V…)"
     let mut UaEqVx? := UaEqVx?
     let mut Ua := Ua
     let mut Vx := Vx
@@ -1714,7 +1712,7 @@ def reduceBinNatOp (op : Name) (f : Nat → Nat → Nat) (a b : PExpr) : RecM (O
   let result := (Expr.lit <| .natVal <| f v1 v2).toPExpr
   let app := Lean.mkAppN (.const op []) #[a, b] |>.toPExpr
   let app' := Lean.mkAppN (.const op []) #[a', b'] |>.toPExpr
-  let sorryProof? ← if op == `Nat.gcd then
+  let sorryProof? ← if op == `Nat.gcd && (← readThe Context).opts.kLikeReduction then
       dbg_trace s!"dbg: GCD used: {v1} {v2}"
       pure $ .some $ .sry {u := 1, A := nat, a := a', B := nat, b := b'}
     else 
@@ -1775,6 +1773,15 @@ def reduceNat (e : PExpr) : RecM (Option (PExpr × Option EExpr)) := do
     if f == ``Nat.mul then return ← reduceBinNatOp ``Nat.mul Nat.mul a.toPExpr b.toPExpr
     if f == ``Nat.pow then return ← reduceBinNatOp ``Nat.pow Nat.pow a.toPExpr b.toPExpr
     if f == ``Nat.gcd then 
+      unless (← readThe Context).opts.kLikeReduction do return ← reduceBinNatOp ``Nat.gcd Nat.gcd a.toPExpr b.toPExpr
+      let (a', _) := (← whnf 36 a.toPExpr)
+      let (b', _) := (← whnf 37 b.toPExpr)
+      let abort :=
+        throw $ .other "translation aborted"
+      let some v1 := natLitExt? a' | return none
+      let some v2 := natLitExt? b' | return none
+      if v1 > 300 || v2 > 300 then
+        abort
       -- trace s!"dbg: GCD averted: {natLitExt? (← whnf 0 a.toPExpr).1} {natLitExt? (← whnf 0 a.toPExpr).1}"
       return none
       -- return ← reduceBinNatOp ``Nat.gcd Nat.gcd a.toPExpr b.toPExpr
@@ -2033,7 +2040,6 @@ private def _whnf' (_e : Expr) (cheapK := false) : RecEE := do
       return (e', eEqe'?)
   let rec loop le eEqle?
   | 0 =>
-    dbg_trace s!"DBG[65]: TypeChecker.lean:2035 (after | 0 =>)"
     throw .deterministicTimeout
   | fuel+1 => do
     let env ← getEnv
@@ -2387,7 +2393,7 @@ def isDefEqCore' (t s : PExpr) : RecM (Bool × (Option EExpr)) := do
   | .proj tTypeName ti te, .proj _ si se =>
     if ti == si then
       if !(unsafe ptrEq ti si) then
-        -- dbg_trace s!"ptrEq mismatch 5"
+        -- ttrace s!"ptrEq mismatch 5"
         pure ()
       -- optimized by above functions using `cheapProj = true`
       let (r, teEqse?) ← isDefEq 78 te.toPExpr se.toPExpr
@@ -2416,10 +2422,10 @@ def isDefEqCore' (t s : PExpr) : RecM (Bool × (Option EExpr)) := do
   let (sn'', sn'Eqsn''?) ← whnfCore 80 sn'
   if (tn'' == tn' && sn'' == sn') then
     if !(unsafe ptrEq tn'' tn') then
-      -- dbg_trace s!"ptrEq mismatch 1"
+      -- ttrace s!"ptrEq mismatch 1"
       pure ()
     if !(unsafe ptrEq sn'' sn') then
-      -- dbg_trace s!"ptrEq mismatch 2"
+      -- ttrace s!"ptrEq mismatch 2"
       pure ()
     pure ()
   else

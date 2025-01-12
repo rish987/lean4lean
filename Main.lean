@@ -147,9 +147,7 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
 
         IO.println s!">>init module"
         let patchConsts ← getDepConstsEnv lemmEnv Lean4Less.patchConsts overrides
-        dbg_trace s!"DBG[88]: Main.lean:149 {patchConsts.keys}"
         let (env, aborted) ← replay (Lean4Less.addDecl (opts := opts)) {newConstants := patchConsts, opts := {}, overrides} (← mkEmptyEnvironment) (printProgress := true) (op := "patch") (aborted := aborted)
-        dbg_trace s!"DBG[86]: Main.lean:150 (after let (env, aborted) ← replay (Lean4Less…)"
         mkMod #[] env patchPreludeModName aborted
 
         let (aborted, s) ← ForEachModuleM.run env do
@@ -208,7 +206,6 @@ unsafe def runTransCmd (p : Parsed) : IO UInt32 := do
             modify fun s => {s with env}
             pure aborted
         let env := s.env
-        dbg_trace s!"DBG[87]: Main.lean:204 (after let env := s.env)"
         replayFromEnv Lean4Lean.addDecl m env.toMap₁ (op := "typecheck") (opts := {proofIrrelevance := not opts.proofIrrelevance, kLikeReduction := not opts.kLikeReduction})
         -- forEachModule' (imports := #[m]) (init := env) fun e dn d => do
         --   -- let newConstants := d.constNames.zip d.constants |>.foldl (init := default) fun acc (n, ci) => acc.insert n ci

@@ -309,19 +309,4 @@ def castOrigHEqSymm {α β : Sort u} (h : HEq α β) (a : α) : HEq a (castHEq h
 
 def HEqRefl (_n : Nat) {α : Sort u} (a : α) : HEq a a := HEq.refl a
 
-theorem Nat.eq_or_lt_of_le {n m: Nat} (h : LE.le n m) : Or (Eq n m) (LT.lt n m) :=
-  match n, h with
-  | .zero, _ =>
-    match m with
-    | .zero => Or.inl rfl
-    | .succ _ => Or.inr (Nat.succ_le_succ (Nat.zero_le _))
-  | .succ n, h =>
-    match m, h with
-    | .zero, h => absurd h (Nat.not_succ_le_zero _)
-    | .succ m, h => 
-      have : LE.le n m := Nat.le_of_succ_le_succ h
-      match Nat.eq_or_lt_of_le this with
-      | Or.inl h => Or.inl (h ▸ rfl)
-      | Or.inr h => Or.inr (Nat.succ_le_succ h)
-
 end L4L

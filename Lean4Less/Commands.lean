@@ -86,13 +86,30 @@ def patchConsts : Array Name := #[
 `L4L.castOrigHEqSymm,
 
 `L4L.appHEqBinNatFn,
+-- `L4L.Nat.eq_or_lt_of_le,
 `sorryAx --FIXME
 ]
 
 def constOverrides' : Array (Name × Name) := #[
-  (`eq_of_heq, `L4L.eq_of_heq),
-  (`Nat.eq_or_lt_of_le, `L4L.Nat.eq_or_lt_of_le)
+  (`eq_of_heq, `L4L.eq_of_heq)
+  -- , (`Nat.eq_or_lt_of_le, `L4L.Nat.eq_or_lt_of_le)
 ]
+
+-- theorem Nat.eq_or_lt_of_le {n m: Nat} (h : LE.le n m) : Or (Eq n m) (LT.lt n m) :=
+--   match n, h with
+--   | .zero, _ =>
+--     match m with
+--     | .zero => Or.inl rfl
+--     | .succ _ => Or.inr (Nat.succ_le_succ (Nat.zero_le _))
+--   | .succ n, h =>
+--     match m, h with
+--     | .zero, h => absurd h (Nat.not_succ_le_zero _)
+--     | .succ m, h => 
+--       have : LE.le n m := Nat.le_of_succ_le_succ h
+--       match Nat.eq_or_lt_of_le this with
+--       | Or.inl h => Or.inl (h ▸ rfl)
+--       | Or.inr h => Or.inr (Nat.succ_le_succ h)
+
 def constOverrides : Std.HashMap Name Name := constOverrides'.foldl (init := default) fun acc (n, n') => acc.insert n n'
 
 -- def getOverrides (env : Environment) (overrides : Std.HashMap Name Name) : Std.HashMap Name ConstantInfo :=
