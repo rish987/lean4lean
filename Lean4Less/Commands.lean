@@ -123,9 +123,9 @@ def getOverrides (env : Environment) : Std.HashMap Name ConstantInfo :=
     else
       acc
 
-def transL4L' (ns : Array Name) (env : Environment) (pp := false) (printProgress := false) (interactive := false) (opts : TypeCheckerOpts := {}) : IO Environment := do
+def transL4L' (ns : Array Name) (env : Environment) (pp := false) (printProgress := false) (interactive := false) (opts : TypeCheckerOpts := {}) (dbgOnly := false) : IO Environment := do
   let map := ns.foldl (init := default) fun acc n => .insert acc n
-  let (_, newEnv) ← checkConstants (printErr := true) env map (@Lean4Less.addDecl (opts := opts)) (initConsts := patchConsts) (op := "patch") (printProgress := printProgress) (interactive := interactive) (overrides := getOverrides env)
+  let (_, newEnv) ← checkConstants (printErr := true) env map (@Lean4Less.addDecl (opts := opts)) (initConsts := patchConsts) (op := "patch") (printProgress := printProgress) (interactive := interactive) (overrides := getOverrides env) (dbgOnly := dbgOnly)
   for n in ns do
     if pp then
       ppConst newEnv n
@@ -136,11 +136,12 @@ def transL4L (n : Array Name) (env? : Option Environment := none) : Lean.Elab.Co
   transL4L' n env
 
 def checkL4L (ns : Array Name) (env : Environment) (printOutput := true) (printProgress := false) (interactive := false) (opts : TypeCheckerOpts := {}) (dbgOnly := false) : IO Environment := do
-  let env ← transL4L' ns env (pp := printOutput) (printProgress := printProgress) (interactive := interactive) (opts := opts)
+  let env ← transL4L' ns env (pp := printOutput) (printProgress := printProgress) (interactive := interactive) (opts := opts) (dbgOnly := dbgOnly)
+  let ns := ns
   let nSet := ns.foldl (init := default) fun acc n => acc.insert n
   -- unsafe replayFromEnv Lean4Lean.addDecl env.mainModule env.toMap₁ (op := "typecheck") (opts := {proofIrrelevance := false, kLikeReduction := false})
 
-  let (_, checkEnv) ← checkConstants (printErr := true) env nSet Lean4Lean.addDecl (initConsts := patchConsts) (opts := {proofIrrelevance := not opts.proofIrrelevance, kLikeReduction := not opts.kLikeReduction}) (interactive := interactive) (dbgOnly := dbgOnly) (overrides := default)
+  let (_, checkEnv) ← checkConstants (printErr := true) env nSet Lean4Lean.addDecl (printProgress := printProgress) (initConsts := patchConsts) (opts := {proofIrrelevance := not opts.proofIrrelevance, kLikeReduction := not opts.kLikeReduction}) (interactive := interactive) (dbgOnly := false) (overrides := default) (deps := false) (write := false)
 
   -- let env' ← transL4L' ns env
   -- for n in ns do
