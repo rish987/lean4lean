@@ -602,8 +602,18 @@ def reduceNat (e : Expr) : RecM (Option Expr) := do
     if f == ``Nat.sub then return ← reduceBinNatOp Nat.sub a b
     if f == ``Nat.mul then return ← reduceBinNatOp Nat.mul a b
     if f == ``Nat.pow then return ← reduceBinNatOp Nat.pow a b
-    -- if f == ``Nat.gcd then
-    --   return ← reduceBinNatOp Nat.gcd a b
+    if f == ``Nat.gcd then
+      unless not (← readThe Context).opts.kLikeReduction do return ← reduceBinNatOp Nat.gcd a b
+      let a' := (← whnf 27 a)
+      let b' := (← whnf 28 b)
+      let abort :=
+        throw $ .other "typechecking aborted"
+      let some v1 := rawNatLitExt? a' | return none
+      let some v2 := rawNatLitExt? b' | return none
+      if v1 > 300 || v2 > 300 then
+        abort
+      -- trace s!"dbg: GCD averted: {natLitExt? (← whnf 0 a.toPExpr).1} {natLitExt? (← whnf 0 a.toPExpr).1}"
+      return none
     if f == ``Nat.mod then return ← reduceBinNatOp Nat.mod a b
     if f == ``Nat.div then return ← reduceBinNatOp Nat.div a b
     if f == ``Nat.beq then return ← reduceBinNatPred Nat.beq a b
@@ -624,7 +634,8 @@ def whnf' (e : Expr) : RecM Expr := do
   if let some r := (← get).whnfCache[e]? then
     return r
   let rec loop t
-  | 0 => throw .deterministicTimeout
+  | 0 =>
+    throw .deterministicTimeout
   | fuel+1 => do
     let env ← getEnv
     let t' ← whnfCore' t
@@ -819,7 +830,8 @@ def isDefEqOffset (t s : Expr) : RecM LBool := do
 
 def lazyDeltaReduction (tn sn : Expr) : RecM ReductionStatus := loop tn sn 1000 where
   loop tn sn
-  | 0 => throw .deterministicTimeout
+  | 0 =>
+    throw .deterministicTimeout
   | fuel+1 => do
     let r ← isDefEqOffset tn sn
     if r != .undef then return .bool (r == .true)

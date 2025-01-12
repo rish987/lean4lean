@@ -73,6 +73,7 @@ def checkPrimitiveDef (env : Environment) (v : DefinitionVal) : M Bool := do
     unless ← TypeChecker.isDefEq v.type (.arrow nat (.arrow nat nat)) do fail
     return true -- TODO
   | ``Nat.gcd => -- TODO parameterize
+    unless (← read).opts.kLikeReduction do return true -- will abort at translation of terms w/ large GCD computations
     unless env.contains ``Nat.mod && v.levelParams.isEmpty do fail
     -- gcd : Nat → Nat → Nat
     unless ← TypeChecker.isDefEq v.type (.arrow nat (.arrow nat nat)) do fail

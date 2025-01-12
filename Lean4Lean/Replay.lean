@@ -391,9 +391,7 @@ def replay (ctx : Context) (env : Environment) (decl : Option Name := none) (pri
       | none =>
         let tryReplay n :=
           try
-            if (← get).aborted.contains n then
-              IO.println s!"\n{n} aborted (on aborted list)"
-            else
+            if not ((← get).aborted.contains n) then
               replayConstant n addDeclFn printProgress op
           catch
           | e => 
