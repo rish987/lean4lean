@@ -21,7 +21,7 @@ def addAxiom (env : Environment) (v : AxiomVal) (check := true) :
   if check then
     _ ← (checkConstantVal env v.toConstantVal).run env
       (safety := if v.isUnsafe then .unsafe else .safe)
-  return add env (.axiomInfo v)
+  return ofKernelEnv (add env.toKernelEnv (.axiomInfo v))
 
 def addDefinition (env : Environment) (v : DefinitionVal) (check := true) :
     Except KernelException Environment := do

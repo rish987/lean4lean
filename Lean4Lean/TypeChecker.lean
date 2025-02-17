@@ -281,7 +281,7 @@ def whnfCore (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr :=
 
 def reduceRecursor (e : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) := do
   let env ← getEnv
-  if env.header.quotInit then
+  if env.toKernelEnv.quotInit then
     if let some r ← quotReduceRec e whnf then
       return r
   let whnf' e := if cheapRec then whnfCore e cheapRec cheapProj else whnf e

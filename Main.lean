@@ -294,24 +294,24 @@ unsafe def main (args : List String) : IO UInt32 := do
         throw <| IO.userError s!"Could not resolve module: {arg}"
       else
         pure mod
-  let mut targetModules := #[]
   let sp ← searchPathRef.get
-  for target in targets do
-    let mut found := false
-    for path in (← SearchPath.findAllWithExt sp "olean") do
-      if let some m := (← searchModuleNameOfFileName path sp) then
-        if target.isPrefixOf m then
-          targetModules := targetModules.push m
-          found := true
-    if not found then
-      throw <| IO.userError s!"Could not find any oleans for: {target}"
   if fresh then
-    if targetModules.size != 1 then
-      throw <| IO.userError "--fresh flag is only valid when specifying a single module"
-    for m in targetModules do
-      if verbose then IO.println s!"replaying {m} with --fresh"
-      replayFromFresh m verbose compare
+    if targets.length != 1 then
+      throw <| IO.userError s!"--fresh flag is only valid when specifying a single module"
+    let m := targets[0]!
+    if verbose then IO.println s!"replaying {m} with --fresh"
+    replayFromFresh m verbose compare
   else
+    let mut targetModules := #[]
+    for target in targets do
+      let mut found := false
+      for path in (← SearchPath.findAllWithExt sp "olean") do
+        if let some m := (← searchModuleNameOfFileName path sp) then
+          if target == m || (not fresh && target.isPrefixOf m) then
+            targetModules := targetModules.push m
+            found := true
+      if not found then
+        throw <| IO.userError s!"Could not find any oleans for: {target}"
     let mut tasks := #[]
     for m in targetModules do
       tasks := tasks.push (m, ← IO.asTask (replayFromImports m verbose compare))

@@ -5,7 +5,7 @@ namespace Lean.Environment
 def get (env : Environment) (n : Name) : Except KernelException ConstantInfo :=
   match env.find? n with
   | some ci => pure ci
-  | none => throw <| .unknownConstant env n
+  | none => throw <| .unknownConstant env.toKernelEnv n
 
 def checkDuplicatedUnivParams : List Name → Except KernelException Unit
   | [] => pure ()
@@ -17,11 +17,11 @@ def checkDuplicatedUnivParams : List Name → Except KernelException Unit
 
 def checkNoMVar (env : Environment) (n : Name) (e : Expr) : Except KernelException Unit := do
   if e.hasMVar then
-    throw <| .declHasMVars env n e
+    throw <| .declHasMVars env.toKernelEnv n e
 
 def checkNoFVar (env : Environment) (n : Name) (e : Expr) : Except KernelException Unit := do
   if e.hasFVar then
-    throw <| .declHasFVars env n e
+    throw <| .declHasFVars env.toKernelEnv n e
 
 def checkNoMVarNoFVar (env : Environment) (n : Name) (e : Expr) : Except KernelException Unit := do
   checkNoMVar env n e
@@ -37,7 +37,7 @@ def primitives : NameSet := .ofList [
 def checkName (env : Environment) (n : Name)
     (allowPrimitive := false) : Except KernelException Unit := do
   if env.contains n then
-    throw <| .alreadyDeclared env n
+    throw <| .alreadyDeclared env.toKernelEnv n
   unless allowPrimitive do
     if primitives.contains n then
       throw <| .other s!"unexpected use of primitive name {n}"

@@ -1,4 +1,5 @@
 import Batteries.Data.UnionFind.Basic
+import Lean.Expr
 
 namespace Lean
 

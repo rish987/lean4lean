@@ -142,13 +142,13 @@ def declareInductiveTypes
     (levelParams : List Name) (numParams : Nat) (indTypes : Array InductiveType)
     (numNested : Nat) (isUnsafe : Bool) (env : Environment) : Environment :=
   let all := indTypes.map (·.name) |>.toList
-  let infos := indTypes.zipWith stats.nindices fun indType numIndices =>
-    .inductInfo { indType with
+  let infos := indTypes.zipWith (bs := stats.nindices) fun indType numIndices =>
+    ConstantInfo.inductInfo { indType with
       levelParams, numParams, numIndices, all, numNested, isUnsafe
       ctors := indType.ctors.map (·.name)
       isRec := isRec indTypes stats.indConsts
       isReflexive := isReflexive indTypes stats.indConsts }
-  infos.foldl add env
+  Environment.ofKernelEnv (infos.foldl add env.toKernelEnv)
 
 def isValidIndAppIdx (stats : InductiveStats) (t : Expr) (i : Nat) : Bool :=
   t.withApp fun I args => Id.run do
@@ -229,6 +229,11 @@ def checkConstructors (indTypes : Array InductiveType) (lparams : List Name)
           throw <| .other s!"invalid return type for '{n}'"
       loop t 0 1000
 
+@[simp, specialize] def _root_.List.foldlIdx (f : Nat → α → β → α) (init : α) : List β → (start : _ := 0) → α
+  | [], _ => init
+  | b :: l, i => foldlIdx f (f i init b) l (i+1)
+
+
 def declareConstructors (stats : InductiveStats) (levelParams : List Name)
     (indTypes : Array InductiveType) (isUnsafe : Bool)
     (env : Environment) : Environment :=
@@ -239,7 +244,7 @@ def declareConstructors (stats : InductiveStats) (levelParams : List Name)
         | .forallE _ _ body _ => arity (i+1) body
         | _ => i
       let arity := arity 0 type
-      add env <| .ctorInfo {
+      Environment.ofKernelEnv $ add env.toKernelEnv <| .ctorInfo {
         levelParams, type, cidx, isUnsafe
         name := ctor.name
         induct := indType.name
@@ -472,7 +477,7 @@ def run (lparams : List Name) (nparams : Nat) (types : List InductiveType)
       lctx.mkForall #[info.major] <|
       .app (mkAppN info.motive info.indices) info.major
     let rules ← mkRecRules indTypes elimLevel stats dIdx motives minors
-    env := add env <| .recInfo {
+    env := Environment.ofKernelEnv $ add env.toKernelEnv <| .recInfo {
       name := mkRecName indType.name
       levelParams := getRecLevelParams elimLevel lparams
       type := ty.inferImplicit 1000 false -- note: flag has reversed polarity from C++
@@ -721,7 +726,7 @@ def Environment.addInductive (env : Environment) (lparams : List Name) (nparams 
   if numNested = 0 then return env'
   let allIndNames := types.map (·.name)
   let (recNames', recNameMap') := mkAuxRecNameMap env' types
-  (·.2) <$> StateT.run (s := env) do
+  (·.2) <$> StateT.run (s := env.toKernelEnv) do
   let processRec recName := do
     let newRecName := recNameMap'.findD recName recName
     let some (.recInfo recInfo) := env'.find? recName | unreachable!
@@ -731,7 +736,7 @@ def Environment.addInductive (env : Environment) (lparams : List Name) (nparams 
       let newCtorName := if newRecName == recName then rule.ctor else
         res.restoreCtorName env' rule.ctor
       return { rule with ctor := newCtorName, rhs := newRhs }
-    (← MonadState.get).checkName newRecName
+    (ofKernelEnv (← MonadState.get)).checkName newRecName
     modify (add · <| .recInfo { recInfo with
       name := newRecName, type := newRecType, all := allIndNames, rules := newRules })
   for indType in types do

@@ -5,6 +5,12 @@ import Lean4Lean.LocalContext
 
 namespace Lean
 
+instance : Coe Kernel.Environment Environment where
+  coe e := Lean.Environment.ofKernelEnv e
+
+instance : Coe Environment Kernel.Environment where
+  coe e := e.toKernelEnv
+
 open private add markQuotInit from Lean.Environment
 
 abbrev ExprBuildT (m) := ReaderT LocalContext <| ReaderT NameGenerator m
@@ -33,7 +39,7 @@ def checkEqType (env : Environment) : Except KernelException Unit := do
           fail "unexpected type for 'Eq' type constructor"
 
 def Environment.addQuot (env : Environment) : Except KernelException Environment := do
-  if env.header.quotInit then return env
+  if env.toKernelEnv.quotInit then return env
   checkEqType env
   ExprBuildT.run do
   let u := .param `u
