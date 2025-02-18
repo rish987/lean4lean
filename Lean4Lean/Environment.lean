@@ -4,27 +4,27 @@ import Lean4Lean.Inductive.Add
 import Lean4Lean.Primitive
 
 namespace Lean
-namespace Environment
-open TypeChecker
+namespace Kernel.Environment
+open Lean.TypeChecker
 
 open private add from Lean.Environment
 
-def checkConstantVal (env : Environment) (v : ConstantVal) (allowPrimitive := false) : M Unit := do
+def checkConstantVal (env : Kernel.Environment) (v : ConstantVal) (allowPrimitive := false) : M Unit := do
   checkName env v.name allowPrimitive
   checkDuplicatedUnivParams v.levelParams
   checkNoMVarNoFVar env v.name v.type
-  let sort ← check v.type v.levelParams
+  let sort ← TypeChecker.check v.type v.levelParams
   _ ← ensureSort sort v.type
 
-def addAxiom (env : Environment) (v : AxiomVal) (check := true) :
-    Except KernelException Environment := do
+def addAxiom (env : Kernel.Environment) (v : AxiomVal) (check := true) :
+    Except KernelException Kernel.Environment := do
   if check then
     _ ← (checkConstantVal env v.toConstantVal).run env
       (safety := if v.isUnsafe then .unsafe else .safe)
-  return ofKernelEnv (add env.toKernelEnv (.axiomInfo v))
+  return (add env (.axiomInfo v))
 
-def addDefinition (env : Environment) (v : DefinitionVal) (check := true) :
-    Except KernelException Environment := do
+def addDefinition (env : Kernel.Environment) (v : DefinitionVal) (check := true) :
+    Except KernelException Kernel.Environment := do
   if let .unsafe := v.safety then
     -- Meta definition can be recursive.
     -- So, we check the header, add, and then type check the body.
@@ -35,7 +35,7 @@ def addDefinition (env : Environment) (v : DefinitionVal) (check := true) :
       checkNoMVarNoFVar env' v.name v.value
       M.run env' (safety := .unsafe) (lctx := {}) do
         let valType ← TypeChecker.check v.value v.levelParams
-        if !(← isDefEq valType v.type) then
+        if !(← TypeChecker.isDefEq valType v.type) then
           throw <| .declTypeMismatch env' (.defnDecl v) valType
     return env'
   else
@@ -44,12 +44,12 @@ def addDefinition (env : Environment) (v : DefinitionVal) (check := true) :
         checkConstantVal env v.toConstantVal (← checkPrimitiveDef env v)
         checkNoMVarNoFVar env v.name v.value
         let valType ← TypeChecker.check v.value v.levelParams
-        if !(← isDefEq valType v.type) then
+        if !(← TypeChecker.isDefEq valType v.type) then
           throw <| .declTypeMismatch env (.defnDecl v) valType
     return add env (.defnInfo v)
 
-def addTheorem (env : Environment) (v : TheoremVal) (check := true) :
-    Except KernelException Environment := do
+def addTheorem (env : Kernel.Environment) (v : TheoremVal) (check := true) :
+    Except KernelException Kernel.Environment := do
   if check then
     -- TODO(Leo): we must add support for handling tasks here
     M.run env (safety := .safe) (lctx := {}) do
@@ -58,22 +58,22 @@ def addTheorem (env : Environment) (v : TheoremVal) (check := true) :
       checkConstantVal env v.toConstantVal
       checkNoMVarNoFVar env v.name v.value
       let valType ← TypeChecker.check v.value v.levelParams
-      if !(← isDefEq valType v.type) then
+      if !(← TypeChecker.isDefEq valType v.type) then
         throw <| .declTypeMismatch env (.thmDecl v) valType
   return add env (.thmInfo v)
 
-def addOpaque (env : Environment) (v : OpaqueVal) (check := true) :
-    Except KernelException Environment := do
+def addOpaque (env : Kernel.Environment) (v : OpaqueVal) (check := true) :
+    Except KernelException Kernel.Environment := do
   if check then
     M.run env (safety := .safe) (lctx := {}) do
       checkConstantVal env v.toConstantVal
       let valType ← TypeChecker.check v.value v.levelParams
-      if !(← isDefEq valType v.type) then
+      if !(← TypeChecker.isDefEq valType v.type) then
         throw <| .declTypeMismatch env (.opaqueDecl v) valType
   return add env (.opaqueInfo v)
 
-def addMutual (env : Environment) (vs : List DefinitionVal) (check := true) :
-    Except KernelException Environment := do
+def addMutual (env : Kernel.Environment) (vs : List DefinitionVal) (check := true) :
+    Except KernelException Kernel.Environment := do
   let v₀ :: _ := vs | throw <| .other "invalid empty mutual definition"
   if let .safe := v₀.safety then
     throw <| .other "invalid mutual definition, declaration is not tagged as unsafe/partial"
@@ -92,20 +92,33 @@ def addMutual (env : Environment) (vs : List DefinitionVal) (check := true) :
       for v in vs do
         checkNoMVarNoFVar env' v.name v.value
         let valType ← TypeChecker.check v.value v.levelParams
-        if !(← isDefEq valType v.type) then
+        if !(← TypeChecker.isDefEq valType v.type) then
           throw <| .declTypeMismatch env' (.mutualDefnDecl vs) valType
   return env'
+end Kernel.Environment
+
+namespace Environment
+
+open private updateBaseAfterKernelAdd from Lean.Environment
 
 /-- Type check given declaration and add it to the environment -/
-def addDecl' (env : Environment) (decl : @& Declaration) (check := true) :
+def addDecl' (env' : Environment) (decl : @& Declaration) (check := true) :
     Except KernelException Environment := do
-  match decl with
-  | .axiomDecl v => addAxiom env v check
-  | .defnDecl v => addDefinition env v check
-  | .thmDecl v => addTheorem env v check
-  | .opaqueDecl v => addOpaque env v check
-  | .mutualDefnDecl v => addMutual env v check
-  | .quotDecl => addQuot env
+  let env := env'.toKernelEnv
+  let newEnv ← match decl with
+  | .axiomDecl v =>
+    env.addAxiom v check
+  | .defnDecl v =>
+    env.addDefinition v check
+  | .thmDecl v =>
+    env.addTheorem v check
+  | .opaqueDecl v =>
+    env.addOpaque v check
+  | .mutualDefnDecl v =>
+    env.addMutual v check
+  | .quotDecl =>
+    env.addQuot
   | .inductDecl lparams nparams types isUnsafe =>
-    let allowPrimitive ← checkPrimitiveInductive env lparams nparams types isUnsafe
-    addInductive env lparams nparams types isUnsafe allowPrimitive
+    let allowPrimitive ← env.checkPrimitiveInductive lparams nparams types isUnsafe
+    env.addInductive lparams nparams types isUnsafe allowPrimitive
+  return updateBaseAfterKernelAdd env' newEnv
