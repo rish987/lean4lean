@@ -69,6 +69,10 @@ structure Context where
 structure Data where
 prfIrrelUses := 0
 kLikeRedUses := 0
+structEtaUses := 0
+structRedUses := 0
+etaUses := 0
+unitEtaUses := 0
 numSorries := 0
 axioms : NameSet := {}
 constsToData : Std.HashMap Name TypeChecker.Data := default
@@ -141,14 +145,30 @@ def addDecl (d : Declaration) (verbose := false) (allowAxiomReplace := false) : 
   | _ => pure ()
   match env.addDecl' d (← read).opts allowAxiomReplace with
   | .ok (newEnv, data) =>
-    if data.usedKLikeReduction then
-      if verbose then
-        println s!"{d.name} used K-like reduction"
-      modify fun s => {s with data := {s.data with kLikeRedUses := s.data.kLikeRedUses + 1}}
     if data.usedProofIrrelevance then
       if verbose then
         println s!"{d.name} used proof irrelevance"
       modify fun s => {s with data := {s.data with prfIrrelUses := s.data.prfIrrelUses + 1}}
+    if data.usedKLikeReduction then
+      if verbose then
+        println s!"{d.name} used K-like reduction"
+      modify fun s => {s with data := {s.data with kLikeRedUses := s.data.kLikeRedUses + 1}}
+    if data.usedStructEta then
+      if verbose then
+        println s!"{d.name} used struct eta"
+      modify fun s => {s with data := {s.data with structEtaUses := s.data.structEtaUses + 1}}
+    if data.usedStructReduction then
+      if verbose then
+        println s!"{d.name} used struct-like reduction"
+      modify fun s => {s with data := {s.data with structRedUses := s.data.structRedUses + 1}}
+    if data.usedEta then
+      if verbose then
+        println s!"{d.name} used eta"
+      modify fun s => {s with data := {s.data with etaUses := s.data.etaUses + 1}}
+    if data.usedUnitEta then
+      if verbose then
+        println s!"{d.name} used unit eta"
+      modify fun s => {s with data := {s.data with unitEtaUses := s.data.unitEtaUses + 1}}
     modify fun s => {s with data := {s.data with numSorries := s.data.numSorries + data.numSorries}}
 
     match d with
@@ -415,6 +435,10 @@ def replay (ctx : Context) (_env : Kernel.Environment) (decl : Option Name := no
     IO.println s!"-- axioms encountered: {s.data.axioms.toList}"
     IO.println s!"-- {s.data.prfIrrelUses} used proof irrelevance"
     IO.println s!"-- {s.data.kLikeRedUses} used k-like reduction"
+    IO.println s!"-- {s.data.structEtaUses} used struct eta"
+    IO.println s!"-- {s.data.structRedUses} used struct-like reduction"
+    IO.println s!"-- {s.data.etaUses} used eta"
+    IO.println s!"-- {s.data.unitEtaUses} used unit eta"
     IO.println s!"-- {s.data.numSorries} sorries encountered"
     -- if let some onlyConsts := onlyConsts? then
     --   for const in onlyConsts do

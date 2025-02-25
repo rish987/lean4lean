@@ -33,15 +33,15 @@ def toCtorWhenK (rval : RecursorVal) (e : Expr) : m (Expr × Bool) := do
       if ← isDefEq e newCtorApp then return (e, false)
   return (newCtorApp, true)
 
-def expandEtaStruct (eType e : Expr) : Expr :=
+def expandEtaStruct (eType e : Expr) : Expr × Bool :=
   eType.withApp fun I args => Id.run do
-  let .const I ls := I | return e
-  let some ctor := getFirstCtor env I | return e
+  let .const I ls := I | return (e, false)
+  let some ctor := getFirstCtor env I | return (e, false)
   let some (.ctorInfo info) := env.find? ctor | unreachable!
   let mut result := mkAppRange (.const ctor ls) 0 info.numParams args
   for i in [:info.numFields] do
     result := .app result (.proj I i e)
-  pure result
+  pure (result, true)
 
 def isStructureLike' (env : Kernel.Environment) (constName : Name) : Bool :=
   match env.find? constName with
@@ -53,12 +53,12 @@ def isConstructorApp?' (env : Kernel.Environment) (e : Expr) : Option Name := do
   let .ctorInfo _ ← env.find? fn | none
   return fn
 
-def toCtorWhenStruct (inductName : Name) (e : Expr) : m Expr := do
+def toCtorWhenStruct (inductName : Name) (e : Expr) : m (Expr × Bool) := do
   if !isStructureLike' env inductName || (isConstructorApp?' env e).isSome then
-    return e
+    return (e, false)
   let eType ← whnf 2 (← inferType e)
-  if !eType.getAppFn.isConstOf inductName then return e
-  if (← whnf 3 (← inferType eType)) == .prop then return e
+  if !eType.getAppFn.isConstOf inductName then return (e, false)
+  if (← whnf 3 (← inferType eType)) == .prop then return (e, false)
   return expandEtaStruct env eType e
 
 def getRecRuleFor (rval : RecursorVal) (major : Expr) : Option RecursorRule := do
@@ -68,7 +68,7 @@ def getRecRuleFor (rval : RecursorVal) (major : Expr) : Option RecursorRule := d
 set_option linter.unusedVariables false in
 def inductiveReduceRec [Monad m] (env : Kernel.Environment) (e : Expr)
     (whnf : Nat → Expr → m Expr) (trace : String → m Unit) (inferType : Expr → m Expr) (inferType' : Expr → m Expr) (isDefEq : Expr → Expr → m Bool) (kLikeReduction : Bool := true) :
-    m (Option (Expr × Bool)) := do
+    m (Option (Expr × Bool × Bool)) := do
   let .const recFn ls := e.getAppFn | return none
   let some (.recInfo info) := env.find? recFn | return none
   let recArgs := e.getAppArgs
@@ -76,6 +76,7 @@ def inductiveReduceRec [Monad m] (env : Kernel.Environment) (e : Expr)
   let some major' := recArgs[majorIdx]? | return none
   let mut major := major'
   let mut usedK := false
+  let mut usedStructEta := false
   -- let e' := mkAppN e.getAppFn recArgs[:majorIdx + 1]
   -- let eType' ← inferType' e
   if kLikeReduction then
@@ -87,7 +88,8 @@ def inductiveReduceRec [Monad m] (env : Kernel.Environment) (e : Expr)
   -- dbg_trace s!"DBG[28]: Reduce.lean:74: major={major}"
   match ← whnf 4 major with
   | .lit l => major := l.toConstructor
-  | e => major ← toCtorWhenStruct env whnf inferType info.getMajorInduct e
+  | e =>
+    (major, usedStructEta) ← toCtorWhenStruct env whnf inferType info.getMajorInduct e
   let some rule := getRecRuleFor info major | return none
   let majorArgs := major.getAppArgs
   if rule.nfields > majorArgs.size then return none
@@ -97,6 +99,6 @@ def inductiveReduceRec [Monad m] (env : Kernel.Environment) (e : Expr)
   rhs := mkAppRange rhs (majorArgs.size - rule.nfields) majorArgs.size majorArgs
   if majorIdx + 1 < recArgs.size then
     rhs := mkAppRange rhs (majorIdx + 1) recArgs.size recArgs
-  return (rhs, usedK)
+  return (rhs, usedK, usedStructEta)
 
 end

@@ -15,6 +15,10 @@ abbrev InferCache := ExprMap Expr
 structure TypeChecker.Data where
 usedProofIrrelevance : Bool := false
 usedKLikeReduction : Bool := false
+usedStructEta : Bool := false
+usedStructReduction : Bool := false
+usedEta : Bool := false
+usedUnitEta : Bool := false
 numSorries : Nat := 0
 usedFVarEq : Bool := false
 maxRecursionDepth : Nat := 0
@@ -472,9 +476,11 @@ def reduceRecursor (e : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) :
     if let some r ← quotReduceRec e (whnf 21) then
       return r
   let whnf' n e := if cheapRec then whnfCore (2000 + n) e cheapRec cheapProj else whnf (1000 + n) e
-  if let some (r, usedKLikeReduction) ← inductiveReduceRec env e whnf' atrace (inferType 23) (inferType 23 (inferOnly := false)) (isDefEq 55) (← readThe Context).opts.kLikeReduction then
+  if let some (r, usedKLikeReduction, usedStructEta) ← inductiveReduceRec env e whnf' atrace (inferType 23) (inferType 23 (inferOnly := false)) (isDefEq 55) (← readThe Context).opts.kLikeReduction then
     if usedKLikeReduction then
       modify fun s => {s with data := {s.data with usedKLikeReduction := true}}
+    if usedStructEta then
+      modify fun s => {s with data := {s.data with usedStructReduction := true}}
     return r
   return none
 
@@ -910,12 +916,18 @@ def isDefEqCore' (t s : Expr) : RecM Bool := do
     return ← isDefEqCore 47 tnn snn
 
   if ← isDefEqApp tn sn then return true
-  if ← tryEtaExpansion tn sn then return true
-  if ← tryEtaStruct tn sn then return true
+  if ← tryEtaExpansion tn sn then
+    modify fun s => {s with data := {s.data with usedEta := true}}
+    return true
+  if ← tryEtaStruct tn sn then
+    modify fun s => {s with data := {s.data with usedStructEta := true}}
+    return true
   let r ← tryStringLitExpansion tn sn
   if r != .undef then
     return r == .true
-  if ← isDefEqUnitLike tn sn then return true
+  if ← isDefEqUnitLike tn sn then
+    modify fun s => {s with data := {s.data with usedUnitEta := true}}
+    return true
   return false
 
 end Inner
