@@ -15,6 +15,9 @@ abbrev InferCache := ExprMap Expr
 structure TypeChecker.Data where
 usedProofIrrelevance : Bool := false
 usedKLikeReduction : Bool := false
+usedStructEta : Bool := false
+usedEta : Bool := false
+usedUnitEta : Bool := false
 numSorries : Nat := 0
 usedFVarEq : Bool := false
 maxRecursionDepth : Nat := 0
@@ -912,12 +915,18 @@ def isDefEqCore' (t s : Expr) : RecM Bool := do
     return ← isDefEqCore 47 tnn snn
 
   if ← isDefEqApp tn sn then return true
-  if ← tryEtaExpansion tn sn then return true
-  if ← tryEtaStruct tn sn then return true
+  if ← tryEtaExpansion tn sn then
+    modify fun s => {s with data := {s.data with usedEta := true}}
+    return true
+  if ← tryEtaStruct tn sn then
+    modify fun s => {s with data := {s.data with usedStructEta := true}}
+    return true
   let r ← tryStringLitExpansion tn sn
   if r != .undef then
     return r == .true
-  if ← isDefEqUnitLike tn sn then return true
+  if ← isDefEqUnitLike tn sn then
+    modify fun s => {s with data := {s.data with usedUnitEta := true}}
+    return true
   return false
 
 end Inner
