@@ -4,16 +4,16 @@ import Lean4Lean.Inductive.Add
 import Lean4Lean.Primitive
 
 namespace Lean
-namespace Environment
+namespace Kernel.Environment
 open TypeChecker
 
-open private add from Lean.Environment
+open private Lean.Kernel.Environment.add from Lean.Environment
 
-def checkConstantVal (env : Environment) (v : ConstantVal) (allowPrimitive := false) : M Unit := do
-  checkName env v.name allowPrimitive
+def checkConstantVal (env : Kernel.Environment) (v : ConstantVal) (allowPrimitive := false) : M Unit := do
+  env.checkName v.name allowPrimitive
   checkDuplicatedUnivParams v.levelParams
   checkNoMVarNoFVar env v.name v.type
-  let sort ← check v.type v.levelParams
+  let sort ← TypeChecker.check v.type v.levelParams
   _ ← ensureSort sort v.type
 
 def addAxiom (env : Environment) (v : AxiomVal) (opts : TypeCheckerOpts := {}) :
@@ -21,7 +21,7 @@ def addAxiom (env : Environment) (v : AxiomVal) (opts : TypeCheckerOpts := {}) :
   -- dbg_trace s!"\nAxiom encountered: {v.name}"
   let (_, s) ← (checkConstantVal env v.toConstantVal).run env
     (safety := if v.isUnsafe then .unsafe else .safe) (opts := opts)
-  return (add env (.axiomInfo v), s.data)
+  return (env.add (.axiomInfo v), s.data)
 
 def addDefinition (env : Environment) (v : DefinitionVal) (opts : TypeCheckerOpts := {}) (allowAxiomReplace := false) :
     Except KernelException (Environment × Data) := do
@@ -29,12 +29,12 @@ def addDefinition (env : Environment) (v : DefinitionVal) (opts : TypeCheckerOpt
     -- Meta definition can be recursive.
     -- So, we check the header, add, and then type check the body.
     _ ← (checkConstantVal env v.toConstantVal).run env (safety := .unsafe)
-    let env' := add env (.opaqueInfo {v with isUnsafe := false})
+    let env' := env.add (.opaqueInfo {v with isUnsafe := false})
     checkNoMVarNoFVar env' v.name v.value
     let (ret, s) ← M.run env' (safety := .unsafe) (lctx := {}) (opts := opts) do
       try
         let valType ← TypeChecker.check v.value v.levelParams
-        if !(← isDefEq valType v.type) then
+        if !(← TypeChecker.isDefEq valType v.type) then
           throw <| .declTypeMismatch env' (.defnDecl v) valType
       catch e =>
         if allowAxiomReplace then
@@ -42,14 +42,14 @@ def addDefinition (env : Environment) (v : DefinitionVal) (opts : TypeCheckerOpt
         else
           throw e
       pure (.defnInfo v)
-    return (add env ret, s.data)
+    return (env.add ret, s.data)
   else
     let (ret, s) ← M.run env (safety := .safe) (lctx := {}) (opts := opts) do
       checkConstantVal env v.toConstantVal (← checkPrimitiveDef env v)
       checkNoMVarNoFVar env v.name v.value
       try
         let valType ← TypeChecker.check v.value v.levelParams
-        if !(← isDefEq valType v.type) then
+        if !(← TypeChecker.isDefEq valType v.type) then
           throw <| .declTypeMismatch env (.defnDecl v) valType
       catch e =>
         if allowAxiomReplace then
@@ -57,7 +57,7 @@ def addDefinition (env : Environment) (v : DefinitionVal) (opts : TypeCheckerOpt
         else
           throw e
       pure (.defnInfo v)
-    return (add env ret, s.data)
+    return (env.add ret, s.data)
 
 def addTheorem (env : Environment) (v : TheoremVal) (opts : TypeCheckerOpts := {}) (allowAxiomReplace := false) :
     Except KernelException (Environment × Data) := do
@@ -69,7 +69,7 @@ def addTheorem (env : Environment) (v : TheoremVal) (opts : TypeCheckerOpts := {
     checkNoMVarNoFVar env v.name v.value
     try
       let valType ← TypeChecker.check v.value v.levelParams
-      if !(← isDefEq valType v.type) then
+      if !(← TypeChecker.isDefEq valType v.type) then
         throw <| .declTypeMismatch env (.thmDecl v) valType
     catch e =>
       if allowAxiomReplace then
@@ -77,16 +77,16 @@ def addTheorem (env : Environment) (v : TheoremVal) (opts : TypeCheckerOpts := {
       else
         throw e
     pure (.thmInfo v)
-  return (add env ret, s.data)
+  return (env.add ret, s.data)
 
 def addOpaque (env : Environment) (v : OpaqueVal) (opts : TypeCheckerOpts := {}) :
     Except KernelException (Environment × Data) := do
   let (_, s) ← M.run env (safety := .safe) (lctx := {}) (opts := opts) do
     checkConstantVal env v.toConstantVal
     let valType ← TypeChecker.check v.value v.levelParams
-    if !(← isDefEq valType v.type) then
+    if !(← TypeChecker.isDefEq valType v.type) then
       throw <| .declTypeMismatch env (.opaqueDecl v) valType
-  return (add env (.opaqueInfo v), s.data)
+  return (env.add (.opaqueInfo v), s.data)
 
 def addMutual (env : Environment) (vs : List DefinitionVal) (opts : TypeCheckerOpts := {}) :
     Except KernelException (Environment × Data) := do
@@ -101,12 +101,12 @@ def addMutual (env : Environment) (vs : List DefinitionVal) (opts : TypeCheckerO
       checkConstantVal env v.toConstantVal
   let mut env' := env
   for v in vs do
-    env' := add env' (.opaqueInfo {v with isUnsafe := false})
+    env' := env'.add (.opaqueInfo {v with isUnsafe := false})
   let (_, s) ← M.run env' (safety := v₀.safety) (lctx := {}) (opts := opts) do
     for v in vs do
       checkNoMVarNoFVar env' v.name v.value
       let valType ← TypeChecker.check v.value v.levelParams
-      if !(← isDefEq valType v.type) then
+      if !(← TypeChecker.isDefEq valType v.type) then
         throw <| .declTypeMismatch env' (.mutualDefnDecl vs) valType
   return (env', s.data)
 
@@ -122,4 +122,4 @@ def addDecl' (env : Environment) (decl : @& Declaration) (opts : TypeCheckerOpts
   | .quotDecl => pure (← addQuot env, {})
   | .inductDecl lparams nparams types isUnsafe =>
     let allowPrimitive ← checkPrimitiveInductive env lparams nparams types isUnsafe opts
-    pure (← addInductive env lparams nparams types isUnsafe allowPrimitive opts, {})
+    pure (← env.addInductive lparams nparams types isUnsafe allowPrimitive opts, {})

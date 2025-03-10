@@ -6,8 +6,19 @@ open Lean
 
 namespace Lean4Lean
 
-open private add from Lean.Environment
-open private Environment.mk from Lean.Environment
+open private Lean.Environment.mk from Lean.Environment
+open private Lean.Kernel.Environment.mk from Lean.Environment
+open private Lean.Kernel.Environment.extensions from Lean.Environment
+open private Lean.Kernel.Environment.extraConstNames from Lean.Environment
+open private Lean.Environment.asyncConsts from Lean.Environment
+open private Lean.Environment.asyncCtx? from Lean.Environment
+open private Lean.Environment.realizedImportedConsts? from Lean.Environment
+open private Lean.Environment.realizedLocalConsts from Lean.Environment
+open private Lean.Kernel.Environment.add from Lean.Environment
+
+def updateBaseAfterKernelAdd (env : Environment) (kernel : Kernel.Environment) : Environment :=
+  let newKernel := Lean.Kernel.Environment.mk kernel.constants kernel.quotInit kernel.diagnostics kernel.const2ModIdx (Lean.Kernel.Environment.extensions kernel) (Lean.Kernel.Environment.extraConstNames kernel) kernel.header
+  Lean.Environment.mk newKernel (.pure kernel) (Lean.Environment.asyncConsts env) (Lean.Environment.asyncCtx? env) (Lean.Environment.realizedImportedConsts? env) (Lean.Environment.realizedLocalConsts env)
 
 def getDepConstsEnv (env : Environment) (consts : Array Name) (overrides : Std.HashMap Name ConstantInfo) : IO $ Std.HashMap Name ConstantInfo := do
   let mut (_, {map := map, ..}) ← ((Deps.namedConstDeps consts).toIO { options := default, fileName := "", fileMap := default } {env} {env, overrides})
@@ -45,18 +56,18 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn :
 
         let rp modEnv := do
           if dbgOnly then
-            let (env, _) ← replay addDeclFn {newConstants := map.erase const, overrides, opts := opts} modEnv (printProgress := printProgress) (op := op)
-            pure env
+            let (env', _) ← replay addDeclFn {newConstants := map.erase const, overrides, opts := opts} modEnv.toKernelEnv (printProgress := printProgress) (op := op)
+            pure $ updateBaseAfterKernelAdd modEnv env'
           else
             if deps then
-              let (env, _) ← replay addDeclFn {newConstants := map, overrides, opts} modEnv (printProgress := printProgress) (op := op)
-              pure env
+              let (env, _) ← replay addDeclFn {newConstants := map, overrides, opts} modEnv.toKernelEnv (printProgress := printProgress) (op := op)
+              pure $ updateBaseAfterKernelAdd modEnv env
             else
               let mut modEnv := modEnv
               for (_, ci) in map.erase const |>.toList do
-                modEnv := add modEnv ci
-              let (env, _) ← replay addDeclFn {newConstants := Std.HashMap.insert default const (map.get! const), overrides, opts} modEnv (printProgress := printProgress) (op := op)
-              pure env
+                modEnv := updateBaseAfterKernelAdd modEnv (modEnv.toKernelEnv.add ci)
+              let (env, _) ← replay addDeclFn {newConstants := Std.HashMap.insert default const (map.get! const), overrides, opts} modEnv.toKernelEnv (printProgress := printProgress) (op := op)
+              pure $ updateBaseAfterKernelAdd modEnv env
 
         if (not interactive) && (not (initConsts.contains const)) && consts.size == 1 && const != `temp then
           let outName := (if dbgOnly then const.toString ++ "_dbg" else const.toString) ++ s!".olean"
@@ -70,17 +81,18 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn :
               |>.run (s := { moduleNameSet := ({} : NameHashSet).insert module })
             modEnv ← finalizeImport s #[{module}] {} 0
             for const in mod.constants do
-              modEnv := add modEnv const
+              modEnv := updateBaseAfterKernelAdd modEnv (modEnv.toKernelEnv.add const)
             modEnv := modEnv.setMainModule module
           else
             modEnv ← rp modEnv
             if write then
-              writeModule modEnv.toMap₂ outPath
+              writeModule (modEnv) outPath
         else
           modEnv ← rp modEnv
 
         if dbgOnly then
-          (modEnv, _) ← replay addDeclFn {newConstants := Std.HashMap.insert default const (map.get! const), overrides, opts} modEnv (printProgress := printProgress) (op := op)
+          let (modEnv', _) ← replay addDeclFn {newConstants := Std.HashMap.insert default const (map.get! const), overrides, opts} modEnv.toKernelEnv (printProgress := printProgress) (op := op)
+          modEnv := updateBaseAfterKernelAdd modEnv modEnv'
         skipConsts := skipConsts.union mapConsts -- TC success, so want to skip in future runs (already in environment)
       let onlyConstsToTrans := onlyConstsToTrans.insert const
       pure (modEnv, skipConsts, errConsts, onlyConstsToTrans)
