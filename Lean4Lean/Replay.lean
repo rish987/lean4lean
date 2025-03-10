@@ -74,7 +74,8 @@ axioms : NameSet := {}
 constsToData : Std.HashMap Name TypeChecker.Data := default
 
 structure State where
-  env : Environment
+  env : Kernel.Environment
+  mainModule : Name
   data : Data := {}
   printNewLine := false
   numToCheck : Nat
@@ -124,19 +125,22 @@ def isTodo (name : Name) : M Bool := do
 /-- Use the current `Environment` to throw a `KernelException`. -/
 def throwKernelException (ex : KernelException) : M α := do
     let ctx := { fileName := "", options := pp.match.set (pp.rawOnError.set {} true) false, fileMap := default }
-    let state := { env := (← get).env }
+    let state := { env := Lean.Environment.ofKernelEnv (← get).env }
     Prod.fst <$> (Lean.Core.CoreM.toIO · ctx state) do Lean.throwKernelException ex
+
+  -- { env with checked := .pure kernel, checkedWithoutAsync := { kernel with extensions := env.checkedWithoutAsync.extensions } }
 
 /-- Add a declaration, possibly throwing a `KernelException`. -/
 def addDecl (d : Declaration) (verbose := false) (allowAxiomReplace := false) : M Unit := do
+  let env := (← get).env
   if (← read).verbose then
     println s!"adding {d.name}"
   let t1 ← IO.monoMsNow
   match d with
   | .axiomDecl v => modify fun s => {s with data := {s.data with axioms := s.data.axioms.insert v.name}}
   | _ => pure ()
-  match (← get).env.addDecl' d (← read).opts allowAxiomReplace with
-  | .ok (env, data) =>
+  match env.addDecl' d (← read).opts allowAxiomReplace with
+  | .ok (newEnv, data) =>
     if data.usedKLikeReduction then
       if verbose then
         println s!"{d.name} used K-like reduction"
@@ -167,12 +171,12 @@ def addDecl (d : Declaration) (verbose := false) (allowAxiomReplace := false) : 
         | .error ex => throwKernelException ex
         if (t2 - t1) > 2 * (t3 - t2) then
           println
-            s!"{(← get).env.mainModule}:{d.name}: lean took {t3 - t2}, lean4lean took {t2 - t1}"
+            s!"{(← get).mainModule}:{d.name}: lean took {t3 - t2}, lean4lean took {t2 - t1}"
         else
-          println s!"{(← get).env.mainModule}:{d.name}: lean4lean took {t2 - t1}"
+          println s!"{(← get).mainModule}:{d.name}: lean4lean took {t2 - t1}"
       else
-        println s!"{(← get).env.mainModule}:{d.name}: lean4lean took {t2 - t1}"
-    modify fun s => { s with env := env }
+        println s!"{(← get).mainModule}:{d.name}: lean4lean took {t2 - t1}"
+    modify fun s => { s with env := newEnv }
   | .error ex =>
     throwKernelException ex
 
@@ -358,22 +362,17 @@ def checkPostponedRecursors : M Unit := do
 
 variable (addDeclFn : Declaration → M Unit)
 
-open private Environment.mk from Lean.Environment
+open private Lean.Environment.mk from Lean.Environment
+open private Lean.Kernel.Environment.extensions from Lean.Environment
+open private Lean.Kernel.Environment.extraConstNames from Lean.Environment
+open private Lean.Kernel.Environment.mk from Lean.Environment
 
-def _root_.Lean.Environment.withConsts (env : Environment) (f : ConstMap → ConstMap): Environment :=
-  Environment.mk env.const2ModIdx (f env.constants) env.extensions env.extraConstNames env.header
-
-def _root_.Lean.Environment.toMap₁ (env : Environment) : Environment :=
-  let newMap₁ :=  env.constants.map₂.foldl (init := env.constants.map₁) fun acc n c => acc.insert n c
-  env.withConsts fun c => {c with map₁ := newMap₁, map₂ := default}
-
-def _root_.Lean.Environment.toMap₂ (env : Environment) : Environment :=
-  let newMap :=  env.constants.map₁.fold (init := env.constants.map₂) fun acc n c => acc.insert n c
-  env.withConsts fun c => {c with map₂ := newMap, map₁ := default}
+def _root_.Lean.Kernel.Environment.withConsts (env : Kernel.Environment) (f : ConstMap → ConstMap): Kernel.Environment :=
+  Lean.Kernel.Environment.mk (f env.constants) env.quotInit env.diagnostics env.const2ModIdx (Lean.Kernel.Environment.extensions env) (Lean.Kernel.Environment.extraConstNames env) env.header
 
 /-- "Replay" some constants into an `Environment`, sending them to the kernel for checking. -/
-def replay (ctx : Context) (env : Environment) (decl : Option Name := none) (printProgress : Bool := false) (op : String := "typecheck") (aborted : NameSet := default) : IO (Environment × NameSet) := do
-  let env := env.toMap₁.withConsts fun c => {c with stage₁ := false}
+def replay (ctx : Context) (_env : Kernel.Environment) (decl : Option Name := none) (printProgress : Bool := false) (op : String := "typecheck") (aborted : NameSet := default) (mainModule : Name := `NONE) : IO (Kernel.Environment × NameSet) := do
+  let env := _env.withConsts fun c => {c with stage₁ := false}
   let mut remaining : NameSet := ∅
   let mut numToCheck : Nat := 0
   for (n, ci) in ctx.newConstants.toList do
@@ -384,7 +383,7 @@ def replay (ctx : Context) (env : Environment) (decl : Option Name := none) (pri
       numToCheck := numToCheck + 1
   -- if let some onlyConsts := onlyConsts? then
   --   numToCheck := (← getDepConsts ctx.newConstants onlyConsts).size
-  let (_, s) ← StateRefT'.run (s := { env, remaining, numToCheck, aborted }) do
+  let (_, s) ← StateRefT'.run (s := { env, remaining, numToCheck, aborted, mainModule }) do
     ReaderT.run (r := ctx) do
       match decl with
       | some d => replayConstant d addDeclFn (op := op)
@@ -432,17 +431,18 @@ unsafe def replayFromImports (module : Name) (verbose := false) (compare := fals
   let mut newConstants := {}
   for name in mod.constNames, ci in mod.constants do
     newConstants := newConstants.insert name ci
-  let (env', _) ← replay addDeclFn { newConstants, verbose, compare, opts } env
-  env'.freeRegions
+  let (_, _) ← replay addDeclFn { newConstants, verbose, compare, opts } env.toKernelEnv (mainModule := env.mainModule)
+  -- FIXME is this being done correctly?
+  env.freeRegions
   region.free
 
-unsafe def replayFromInit'' (module : Name) (initEnv : Environment) (newConstants : Std.HashMap Name ConstantInfo) (f : Environment → IO Unit) (op : String := "typecheck")
+unsafe def replayFromInit'' (module : Name) (initEnv : Environment) (newConstants : Std.HashMap Name ConstantInfo) (f : Kernel.Environment → IO Unit) (op : String := "typecheck")
     (verbose := false) (compare := false) (decl : Option Name := none) (opts : TypeCheckerOpts := {}) (printProgress := true) : IO Unit := do
     let ctx := { newConstants, verbose, compare, opts }
-    let (env, _) ← replay addDeclFn ctx (initEnv.setMainModule module) (op := op) (decl := decl) (printProgress := printProgress)
+    let (env, _) ← replay addDeclFn ctx (initEnv.toKernelEnv) (op := op) (decl := decl) (printProgress := printProgress) (mainModule := module)
     f env
 
-unsafe def replayFromInit' (module : Name) (initEnv : Environment) (f : Environment → IO Unit) (op : String := "typecheck")
+unsafe def replayFromInit' (module : Name) (initEnv : Environment) (f : Kernel.Environment → IO Unit) (op : String := "typecheck")
     (verbose := false) (compare := false) (decl : Option Name := none) (opts : TypeCheckerOpts := {}) : IO Unit := do
   IO.println s!"loading module \"{module}\"..."
   Lean.withImportModules #[{module}] {} 0 fun env => do
@@ -476,7 +476,7 @@ unsafe def replayFromInit (module : Name) (initEnv : Environment) (op : String :
     (verbose := false) (compare := false) (decl : Option Name := none) (opts : TypeCheckerOpts := {}) : IO Unit := do
   discard <| replayFromInit' addDeclFn module initEnv (fun _ => pure ()) op verbose compare decl opts
 
-unsafe def replayFromFresh' (module : Name) (f : Environment → IO Unit) (op : String := "typecheck")
+unsafe def replayFromFresh' (module : Name) (f : Kernel.Environment → IO Unit) (op : String := "typecheck")
     (verbose := false) (compare := false) (decl : Option Name := none) (opts : TypeCheckerOpts := {}) : IO Unit := do
   replayFromInit' addDeclFn module (← mkEmptyEnvironment) f (op := op) (verbose := verbose) (compare := compare) (decl := decl) (opts := opts)
 
