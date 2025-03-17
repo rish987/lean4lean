@@ -111,7 +111,7 @@ def addMutual (env : Environment) (vs : List DefinitionVal) (opts : TypeCheckerO
   return (env', s.data)
 
 /-- Type check given declaration and add it to the environment -/
-def addDecl' (env : Environment) (decl : @& Declaration) (opts : TypeCheckerOpts) (allowAxiomReplace := false) :
+def addDecl' (env : Environment) (indTypeOnly := false) (decl : @& Declaration) (opts : TypeCheckerOpts) (allowAxiomReplace := false) :
     Except KernelException (Environment × Data) := do
   match decl with
   | .axiomDecl v => addAxiom env v opts
@@ -119,7 +119,7 @@ def addDecl' (env : Environment) (decl : @& Declaration) (opts : TypeCheckerOpts
   | .thmDecl v => addTheorem env v opts allowAxiomReplace
   | .opaqueDecl v => addOpaque env v opts
   | .mutualDefnDecl v => addMutual env v opts
-  | .quotDecl => pure (← addQuot env, {})
+  | .quotDecl => pure (← addQuot env Lean.Kernel.Environment.add, {})
   | .inductDecl lparams nparams types isUnsafe =>
     let allowPrimitive ← checkPrimitiveInductive env lparams nparams types isUnsafe opts
-    pure (← env.addInductive lparams nparams types isUnsafe allowPrimitive opts, {})
+    pure (← env.addInductive lparams nparams types isUnsafe allowPrimitive opts (typesOnly := indTypeOnly), {})

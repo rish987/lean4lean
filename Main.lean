@@ -39,6 +39,7 @@ unsafe def runRunCmd (p : Parsed) : IO UInt32 := do
   let proofIrrelevance := not $ p.hasFlag "no-proof-irrel"
   let kLikeReduction := not $ p.hasFlag "no-klike-red"
   let opts := {proofIrrelevance, kLikeReduction}
+  let addDecl := fun d b => @Lean4Lean.addDecl d b
   match p.positionalArg? "input" with
     | .some mod => match mod.value.toName with
       | .anonymous => throw <| IO.userError s!"Could not resolve module: {mod}"

@@ -5,7 +5,7 @@ import Lean4Lean.LocalContext
 
 namespace Lean
 
-open private Lean.Kernel.Environment.add markQuotInit from Lean.Environment
+open private markQuotInit from Lean.Environment
 
 abbrev ExprBuildT (m) := ReaderT LocalContext <| ReaderT NameGenerator m
 
@@ -32,7 +32,7 @@ def checkEqType (env : Kernel.Environment) : Except KernelException Unit := do
         if info.type != ((← read).mkForall #[α, a] <| mkApp3 (.const ``Eq [.param u]) α a a) then
           fail "unexpected type for 'Eq' type constructor"
 
-def Kernel.Environment.addQuot (env : Kernel.Environment) : Except KernelException Kernel.Environment := do
+def Kernel.Environment.addQuot (env : Kernel.Environment) (add : Kernel.Environment → ConstantInfo → Kernel.Environment) : Except KernelException Kernel.Environment := do
   if env.quotInit then return env
   checkEqType env
   ExprBuildT.run do
@@ -40,13 +40,13 @@ def Kernel.Environment.addQuot (env : Kernel.Environment) : Except KernelExcepti
   LwithLocalDecl `α (.sort u) .implicit fun α => do
   let env ← LwithLocalDecl `r (.arrow α (.arrow α .prop)) .default fun r => do
     -- constant Quot.{u} {α : Sort u} (r : α → α → Prop) : Sort u
-    let env := env.add <| .quotInfo {
+    let env := add env <| .quotInfo {
       name := ``Quot, kind := .type, levelParams := [`u]
       type := (← read).mkForall #[α, r] <| .sort u
     }
     LwithLocalDecl `a α .default fun a => do
       -- constant Quot.mk.{u} {α : Sort u} (r : α → α → Prop) (a : α) : @Quot.{u} α r
-      return env.add <| .quotInfo {
+      return add env <| .quotInfo {
         name := ``Quot.mk, kind := .ctor, levelParams := [`u]
         type := (← read).mkForall #[α, r, a] <| mkApp2 (.const ``Quot [u]) α r
       }
@@ -62,7 +62,7 @@ def Kernel.Environment.addQuot (env : Kernel.Environment) : Except KernelExcepti
     let sanity := (← read).mkForall #[a, b] <| .arrow rab fa_eq_fb
     -- constant Quot.lift.{u, v} {α : Sort u} {r : α → α → Prop} {β : Sort v} (f : α → β) :
     --   (∀ a b : α, r a b → f a = f b) → @Quot.{u} α r → β
-    return env.add <| .quotInfo {
+    return add env <| .quotInfo {
       name := ``Quot.lift, kind := .lift, levelParams := [`u, `v]
       type := (← read).mkForall #[α, r, β, f] <| .arrow sanity <| .arrow quot_r β
     }
@@ -72,7 +72,7 @@ def Kernel.Environment.addQuot (env : Kernel.Environment) : Except KernelExcepti
   LwithLocalDecl `q quot_r .implicit fun q => do
   -- constant Quot.ind.{u} {α : Sort u} {r : α → α → Prop} {β : @Quot.{u} α r → Prop} :
   --   (∀ a : α, β (@Quot.mk.{u} α r a)) → ∀ q : @Quot.{u} α r, β q */
-  let env := env.add <| .quotInfo {
+  let env := add env <| .quotInfo {
     name := ``Quot.ind, kind := .ind, levelParams := [`u]
     type := (← read).mkForall #[α, r, β] <|
       .forallE `mk all_quot ((← read).mkForall #[q] <| .app β q) .default

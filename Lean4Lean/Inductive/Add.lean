@@ -56,14 +56,15 @@ def getType (fvar : Expr) : M Expr :=
 def checkName (name : Name) : M Unit := fun c => c.env.checkName name c.allowPrimitive
 
 def checkInductiveTypes
-    (lparams : List Name) (nparams : Nat) (indTypes : Array InductiveType)
+    (lparams : List Name) (nparams : Nat) (indTypes : Array InductiveType) (typesOnly : Bool) (mainTypes : NameSet)
     (k : InductiveStats → M α) : M α := do
   let rec loopInd dIdx stats : M α := do
     if _h : dIdx < indTypes.size then
       let indType := indTypes[dIdx]
       let env := (← read).env
       let type := indType.type
-      checkName indType.name
+      if typesOnly || not (mainTypes.contains indType.name) then
+        checkName indType.name
       checkName (mkRecName indType.name)
       env.checkNoMVarNoFVar indType.name type
       _ ← check type lparams
@@ -141,7 +142,7 @@ def isReflexive (indTypes : Array InductiveType) (indConsts : Array Expr) : Bool
 def declareInductiveTypes
     (stats : InductiveStats)
     (levelParams : List Name) (numParams : Nat) (indTypes : Array InductiveType)
-    (isUnsafe : Bool) (numNested : Nat) (env : Kernel.Environment) : Kernel.Environment :=
+    (isUnsafe : Bool) (numNested : Nat) (typesOnly : Bool) (mainTypes : NameSet) (env : Kernel.Environment) : Kernel.Environment :=
   let all := indTypes.map (·.name) |>.toList
   let infos := indTypes.zipWith (bs := stats.nindices) fun indType numIndices =>
     ConstantInfo.inductInfo { indType with
@@ -149,6 +150,7 @@ def declareInductiveTypes
       ctors := indType.ctors.map (·.name)
       isRec := isRec indTypes stats.indConsts
       isReflexive := isReflexive indTypes stats.indConsts }
+  let infos := if typesOnly then infos else (infos.filter (fun i => not (mainTypes.contains i.name)))
   infos.foldl Lean.Kernel.Environment.add env
 
 def isValidIndAppIdx (stats : InductiveStats) (t : Expr) (i : Nat) : Bool :=
@@ -442,12 +444,17 @@ def mkRecRules (indTypes : Array InductiveType) (elimLevel : Level) (stats : Ind
   return rules.toList
 
 def run (lparams : List Name) (nparams : Nat) (types : List InductiveType)
-    (numNested : Nat) : M Kernel.Environment := do
+    (numNested : Nat) (typesOnly : Bool) (mainTypes : NameSet) : M Kernel.Environment := do
   let isUnsafe := (← read).safety != .safe
   let indTypes := types.toArray
   Kernel.Environment.checkDuplicatedUnivParams lparams
-  checkInductiveTypes lparams nparams indTypes fun stats => do
-  withEnv (declareInductiveTypes stats lparams nparams indTypes isUnsafe numNested) do
+  checkInductiveTypes lparams nparams indTypes typesOnly mainTypes fun stats => do
+  let withDeclTypes? m := do
+    withEnv (declareInductiveTypes stats lparams nparams indTypes isUnsafe numNested typesOnly mainTypes) do
+      if typesOnly then
+        pure $ ← TypeChecker.getKEnv
+      else m
+  withDeclTypes? do
   checkConstructors indTypes lparams stats isUnsafe
   withEnv (declareConstructors stats lparams indTypes isUnsafe) do
   let elimLevel ← getElimLevel stats lparams indTypes
@@ -692,18 +699,14 @@ def run (nparams : Nat) (types : List InductiveType) : M Result := do
   loop 0 1000
 end ElimNestedInductive
 
-def mkAuxRecNameMap (env' : Kernel.Environment) (types : List InductiveType) :
+def mkAuxRecNameMap (types : List InductiveType) (newNames : List Name) :
     List Name × NameMap Name := Id.run do
   let mainType :: _ := types | unreachable!
-  let ntypes := types.length
   let mainName := mainType.name
-  let some (.inductInfo mainInfo) := env'.find? mainName | unreachable!
-  let allNames := mainInfo.all
-  assert! allNames.length > ntypes
   let mut oldRecNames := #[]
   let mut recMap : NameMap Name := {}
   let mut nextIdx := 1
-  for indName in allNames.drop ntypes do
+  for indName in newNames do
     let oldRecName := mkRecName indName
     let newRecName := (mkRecName mainName).appendIndexAfter nextIdx
     nextIdx := nextIdx + 1
@@ -712,20 +715,23 @@ def mkAuxRecNameMap (env' : Kernel.Environment) (types : List InductiveType) :
   return (oldRecNames.toList, recMap)
 
 def Kernel.Environment.addInductive (env : Kernel.Environment) (lparams : List Name) (nparams : Nat)
-    (types : List InductiveType) (isUnsafe allowPrimitive : Bool) (opts : TypeCheckerOpts) :
+    (types : List InductiveType) (typesOnly := false) (isUnsafe allowPrimitive : Bool) (opts : TypeCheckerOpts) :
     Except KernelException Kernel.Environment := do
   let res ← ElimNestedInductive.run nparams types env
     |>.run' { lvls := lparams.map .param, newTypes := types.toArray }
   let numNested := res.aux2nested.size
-  let env' ← AddInductive.run lparams nparams res.types numNested
+  let allIndNames := types.map (·.name)
+  let mainTypes := .ofList allIndNames
+  let newTypes := (res.types.map (·.name)).drop types.length
+  let env' ← AddInductive.run lparams nparams res.types numNested typesOnly mainTypes
     { env, allowPrimitive, safety := if isUnsafe then .unsafe else .safe, opts}
   if numNested == 0 then return env'
-  let allIndNames := types.map (·.name)
-  let (recNames', recNameMap') := mkAuxRecNameMap env' types
+  let (recNames', recNameMap') := mkAuxRecNameMap types newTypes
   (·.2) <$> StateT.run (s := env) do
   let processRec recName := do
     let newRecName := recNameMap'.findD recName recName
-    let some (.recInfo recInfo) := env'.find? recName | unreachable!
+    let some (.recInfo recInfo) := env'.find? recName |
+      unreachable!
     let newRecType := res.restoreNested env' recInfo.type recNameMap'
     let newRules ← recInfo.rules.mapM fun rule => do
       let newRhs := res.restoreNested env' rule.rhs recNameMap'
@@ -737,10 +743,13 @@ def Kernel.Environment.addInductive (env : Kernel.Environment) (lparams : List N
       name := newRecName, type := newRecType, all := allIndNames, rules := newRules })
   for indType in types do
     let some (.inductInfo ind) := env'.find? indType.name | unreachable!
-    modify (fun e => e.add <| .inductInfo { ind with all := allIndNames })
-    for ctorName in ind.ctors do
-      let some (.ctorInfo ctor) := env'.find? ctorName | unreachable!
-      let newType := res.restoreNested env' ctor.type
-      modify (fun e => e.add <| .ctorInfo { ctor with type := newType })
-    processRec (mkRecName indType.name)
-  recNames'.forM processRec
+    if typesOnly then
+      modify (fun e => e.add <| .inductInfo { ind with all := allIndNames })
+    else
+      for ctorName in ind.ctors do
+        let some (.ctorInfo ctor) := env'.find? ctorName | unreachable!
+        let newType := res.restoreNested env' ctor.type
+        modify (fun e => e.add <| .ctorInfo { ctor with type := newType })
+      processRec (mkRecName indType.name)
+  if not typesOnly then
+    recNames'.forM processRec
