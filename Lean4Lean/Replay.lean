@@ -298,27 +298,27 @@ partial def replayConstant (name : Name) (addDeclFn' : Declaration → (b : Bool
         let nparams := info.numParams
         let all ← info.all.mapM fun n => do pure <| ((← read).newConstants.get! n)
         for o in all do
+          modify fun s =>
+            { s with remaining := s.remaining.erase o.name, pending := s.pending.erase o.name }
+        let ctorInfo ← all.mapM fun ci => do
+          pure (ci, ← ci.inductiveVal!.ctors.mapM fun n => do
+            pure ((← read).newConstants.get! n))
+        let types : List InductiveType := ctorInfo.map fun ⟨ci, ctors⟩ =>
+          { name := ci.name
+            type := ci.type
+            ctors := ctors.map fun ci => { name := ci.name, type := ci.type } }
+        addDeclFn (Declaration.inductDecl lparams nparams types false) true
+        -- Make sure we are really finished with the constructors.
+        for o in all do
           -- There is exactly one awkward special case here:
           -- `String` is a primitive type, which depends on `Char.ofNat` to exist
           -- because the kernel treats the existence of the `String` type as license
           -- to use string literals, which use `Char.ofNat` internally. However
           -- this definition is not transitively reachable from the declaration of `String`.
           if o.name == ``String then replayConstant ``Char.ofNat @addDeclFn' (op := op)
-          modify fun s =>
-            { s with remaining := s.remaining.erase o.name, pending := s.pending.erase o.name }
-        let ctorInfo ← all.mapM fun ci => do
-          pure (ci, ← ci.inductiveVal!.ctors.mapM fun n => do
-            pure ((← read).newConstants.get! n))
-        -- Make sure we are really finished with the constructors.
         for (_, ctors) in ctorInfo do
           for ctor in ctors do
             replayConstants ctor.getUsedConstants @addDeclFn' (op := op)
-        let types : List InductiveType := ctorInfo.map fun ⟨ci, ctors⟩ =>
-          { name := ci.name
-            type := ci.type
-            ctors := ctors.map fun ci => { name := ci.name, type := ci.type } }
-        addDeclFn (Declaration.inductDecl lparams nparams types false) true
-        replayConstants (.ofList info.ctors) @addDeclFn' printProgress? (op := op)
         addDeclFn (Declaration.inductDecl lparams nparams types false) false
       -- We postpone checking constructors,
       -- and at the end make sure they are identical
