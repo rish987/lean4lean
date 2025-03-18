@@ -64,6 +64,7 @@ def CallDataT : CallData → Type
 structure TypeCheckerOpts where
   proofIrrelevance := true
   kLikeReduction := true
+  univs := true
 
 structure TypeChecker.Context where
   dbg : Nat := 0

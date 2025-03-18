@@ -217,6 +217,7 @@ partial def replayConstant (name : Name) (addDeclFn' : Declaration → (b : Bool
     modify fun s => {s with numChecked := s.numChecked + 1}
     if printProgress? then
       printProgress op
+    -- dbg_trace s!"DBG[15]: Replay.lean:219 {n}, {(← get).env.constants.contains `Lean.Name.str}"
 
   let preAddDecl n := do
     if printProgress? then
@@ -281,6 +282,7 @@ partial def replayConstant (name : Name) (addDeclFn' : Declaration → (b : Bool
     let mut deps := ci.getUsedConstants
     if let .quotInfo _ := ci then
       deps := deps.insert `Eq
+    -- dbg_trace s!"DBG[14]: Replay.lean:283 {name}: {deps.toList}"
     replayConstants deps @addDeclFn' printProgress? (op := op)
     -- Check that this name is still pending: a mutual block may have taken care of it.
     if (← get).pending.contains name then

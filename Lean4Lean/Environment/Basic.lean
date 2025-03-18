@@ -2,7 +2,14 @@ import Lean.Environment
 
 namespace Lean.Kernel.Environment
 
-def get (env : Kernel.Environment) (n : Name) : Except KernelException ConstantInfo :=
+def L4L.SortType : Expr := .forallE `l (.const `L4L.Level []) (.app (.const `L4L.Sort []) (.app (.const `L4L.Level.succ []) (.bvar 0))) .default
+
+def L4L.SortDef : ConstantInfo :=
+  .axiomInfo {name := `L4L.Sort, levelParams := [], type := L4L.SortType , isUnsafe := false}
+
+def get (env : Kernel.Environment) (n : Name) : Except KernelException ConstantInfo := do
+  if n == `L4L.Sort then
+    return L4L.SortDef
   match env.find? n with
   | some ci => pure ci
   | none => throw <| .unknownConstant env n
