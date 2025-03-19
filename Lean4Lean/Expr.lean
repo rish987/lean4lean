@@ -3,6 +3,8 @@ import Lean.Environment
 namespace Lean.Expr
 
 def prop : Expr := .sort .zero
+def propL : Expr := .app (.const `L4L.Sort []) (.const `L4L.Level.zero [])
+def typeL : Expr := .app (.const `L4L.Sort []) (.app (.const `L4L.Level.succ []) (.const `L4L.Level.zero []))
 
 def arrow (d b : Expr) : Expr := .forallE `a d b .default
 

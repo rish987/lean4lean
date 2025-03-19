@@ -18,7 +18,7 @@ structure RecInfo where
 structure InductiveStats where
   lctx : LocalContext := {}
   levels : List Level
-  resultLevel : Level
+  resultSort : Expr
   nindices : Array Nat := #[]
   indConsts : Array Expr
   params : Array Expr
@@ -54,6 +54,15 @@ def getType (fvar : Expr) : M Expr :=
   return ((← getLCtx).get! fvar.fvarId!).type
 
 def checkName (name : Name) : M Unit := fun c => c.env.checkName name c.allowPrimitive
+
+def isNeverZero! : Expr → Bool
+  | .const `L4L.Level.zero .. => false
+  | (.app (.const `L4L.Level.succ ..) _) => true
+  | .app (.app (.const `L4L.Level.param ..) _) _=> false
+  | .app (.app (.const `L4L.Level.max ..) l₁) l₂ => isNeverZero! l₁ || isNeverZero! l₂
+  | .app (.app (.const `L4L.Level.imax ..) _) l₂ => isNeverZero! l₂
+  | (.app (.const `L4L.Level.inst ..) l) => isNeverZero! l
+  | _ => unreachable!
 
 def checkInductiveTypes
     (lparams : List Name) (nparams : Nat) (indTypes : Array InductiveType) (typesOnly : Bool) (mainTypes : NameSet)
@@ -95,11 +104,16 @@ def checkInductiveTypes
       loop stats (← whnf type) 0 0 1000 fun type stats nindices => do
       let type ← ensureSort type
       let mut stats := stats
-      let resultLevel := type.sortLevel!
+      let resultSort := type
       if stats.indConsts.isEmpty then
         let lctx := (← read).lctx
-        stats := { stats with lctx, resultLevel, isNotZero := resultLevel.isNeverZero }
-      else if !resultLevel.isEquiv stats.resultLevel then
+        let isNotZero := if (← Inner.elimUnivs) then
+            isNeverZero! resultSort.appArg!
+          else 
+            let resultLevel := resultSort.sortLevel!
+            resultLevel.isNeverZero
+        stats := { stats with lctx, resultSort, isNotZero }
+      else if not $ ← isDefEq resultSort stats.resultSort then
         throw <| .other "mutually inductive types must live in the same universe"
       stats := { stats with
         nindices := stats.nindices.push nindices
@@ -221,9 +235,9 @@ def checkConstructors (indTypes : Array InductiveType) (lparams : List Name)
             loop (body.instantiate1 param) (i + 1) fuel
           else
             let s ← ensureType dom
-            unless stats.resultLevel.isZero || stats.resultLevel.geq' s.sortLevel! do
-              throw <| .other s!"universe level of type_of(arg #{i + 1
-                }) of '{n}' is too big for the corresponding inductive datatype"
+            -- unless (← isDefEq stats.resultSort .prop) || stats.resultLevel.geq' s.sortLevel! do
+            --   throw <| .other s!"universe level of type_of(arg #{i + 1
+            --     }) of '{n}' is too big for the corresponding inductive datatype"
             if !isUnsafe then
               checkPositivity stats dom n i
             LwithLocalDecl name dom.consumeTypeAnnotations bi fun arg => do
@@ -251,7 +265,7 @@ def declareConstructors (stats : InductiveStats) (levelParams : List Name)
       }
 
 /-- Return true if recursor can map into any universe -/
-def isLargeEliminator (stats : InductiveStats) (indTypes : Array InductiveType) : M Bool := do
+def isLargeEliminator' (stats : InductiveStats) (indTypes : Array InductiveType) : M Bool := do
   if stats.isNotZero then return true
   let #[indType] := indTypes | return false
   match indType.ctors with
@@ -264,13 +278,18 @@ def isLargeEliminator (stats : InductiveStats) (indTypes : Array InductiveType) 
         LwithLocalDecl name dom.consumeTypeAnnotations bi fun arg => do
           let mut toCheck := toCheck
           if i ≥ stats.params.size then
-            if !(← ensureType dom).sortLevel!.isZero then
+            if not $ ← isDefEq (← ensureType dom) .prop then
               toCheck := toCheck.push arg
           loop (body.instantiate1 arg) (i + 1) toCheck fuel
       else
         return toCheck.all type.getAppArgs.contains
     loop ctor.type 0 #[] 1000
   | _ => return false
+
+def isLargeEliminator (stats : InductiveStats) (indTypes : Array InductiveType) : M Bool := do
+  let ret ← isLargeEliminator' stats indTypes
+
+  pure ret
 
 partial -- TODO: remove
 def getElimLevel (stats : InductiveStats) (lparams : List Name) (indTypes : Array InductiveType) :
@@ -283,7 +302,7 @@ def getElimLevel (stats : InductiveStats) (lparams : List Name) (indTypes : Arra
 
 def isKTarget (stats : InductiveStats) (indTypes : Array InductiveType) : M Bool := do
   let #[indType] := indTypes | return false
-  unless stats.resultLevel.isZero do return false
+  unless (← isDefEq stats.resultSort .prop) do return false
   let [ctor] := indType.ctors | return false
   let rec loop i
     | .forallE _ _ body _ => i < stats.params.size && loop (i + 1) body

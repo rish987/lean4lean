@@ -38,7 +38,8 @@ unsafe def runRunCmd (p : Parsed) : IO UInt32 := do
   | _ => initSearchPath (← findSysroot)
   let proofIrrelevance := not $ p.hasFlag "no-proof-irrel"
   let kLikeReduction := not $ p.hasFlag "no-klike-red"
-  let opts := {proofIrrelevance, kLikeReduction}
+  let univs := not $ p.hasFlag "no-univs"
+  let opts := {proofIrrelevance, kLikeReduction, univs}
   let addDecl := fun d b => @Lean4Lean.addDecl d b
   match p.positionalArg? "input" with
     | .some mod => match mod.value.toName with
@@ -92,6 +93,7 @@ unsafe def runCmd : Cmd := `[Cli|
     s, "search-path" : String;      "Set search path directory"
     npi, "no-proof-irrel";          "Disable proof irrelevance"
     nklr, "no-klike-red";           "Disable k-like reduction"
+    nu, "no-univs";                 "Disable specialized universe syntax"
     -- o, only : Array String; "Only translate the specified constants and their dependencies."
 
   ARGS:

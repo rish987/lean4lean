@@ -195,11 +195,29 @@ def whnf (n : Nat) (e : Expr) : RecM Expr := fun m => m.whnf n e
 @[inline] def withCallId [MonadWithReaderOf Context m] (id : Nat) (dbgCallId : Option Nat := none) (x : m α) : m α :=
   withReader (fun c => {c with callId := id, dbgCallId}) x
 
-def ensureSortCore (e s : Expr) : RecM Expr := do
-  if e.isSort then return e
-  let e ← whnf 1 e
-  if e.isSort then return e
+def elimUnivs : M Bool := do
+  return not (← readThe Context).opts.univs
+
+def _root_.Lean.Expr.isSortL (e : Expr) : RecM Bool := do
+  if ← elimUnivs then
+    match e with
+    | .app (.const `L4L.Sort []) _ => pure true
+    | _       => pure false
+  else pure e.isSort
+
+def ensureSortCore (_e s : Expr) : RecM Expr := do
+  if ← _e.isSortL then return _e
+  let e ← whnf 1 _e
+  if ← e.isSortL then return e
+  dbg_trace s!"DBG[69]: TypeChecker.lean:211 {_e}, {e}"
   throw <| .typeExpected (← getKEnv) (← getLCtx) s
+
+def _root_.Lean.Expr.sortLevelL! : Expr → Expr
+  | .app (.const `L4L.Sort []) l => l
+  | _      => panic! "sort expected"
+
+def mkLevelIMaxL (u v : Expr) : Expr :=
+  Lean.mkAppN (.const `L4L.Level.imax []) #[u, v]
 
 def ensureForallCore (e s : Expr) : RecM Expr := do
   if e.isForall then return e
@@ -266,6 +284,25 @@ def inferForall (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] #[] e wher
     let r ← inferType 6 (e.instantiateRev fvars) inferOnly
     let s ← ensureSortCore r e
     return .sort <| us.foldr mkLevelIMax' s.sortLevel!
+
+def inferForallL (e : Expr) (inferOnly : Bool) : RecM Expr := do
+  if ← elimUnivs then
+    let rec loop fvars us : Expr → RecM Expr
+    | .forallE name dom body bi => do
+      let d := dom.instantiateRev fvars
+      let t1 ← ensureSortCore (← inferType 5 d inferOnly) d
+      let us := us.push t1.sortLevelL!
+      let id := ⟨← mkId d⟩
+      withLCtx ((← getLCtx).mkLocalDecl id name d bi) do
+        let fvars := fvars.push (.fvar id)
+        loop fvars us body
+    | e => do
+      let r ← inferType 6 (e.instantiateRev fvars) inferOnly
+      let s ← ensureSortCore r e
+      return .app (.const `L4L.Sort []) <| us.foldr mkLevelIMaxL s.sortLevelL!
+    loop #[] #[] e
+  else
+    inferForall e inferOnly
 
 def isDefEqCore (n : Nat) (t s : Expr) : RecM Bool := fun m => m.isDefEqCore n t s
 
@@ -334,8 +371,8 @@ def inferLet (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] #[] e where
         usedFVars := usedFVars.push fvar
     return (← getLCtx).mkForall fvars r
 
-def isProp (e : Expr) : RecM Bool :=
-  return (← whnf 12 (← inferType 13 e)) == .prop
+def isProp (e : Expr) : RecM Bool := do
+  isDefEq 0 (← whnf 12 (← inferType 13 e)) .prop
 
 def isValidProj (typeName : Name) (idx : Nat) (struct structType : Expr) : RecM Bool := do
   let type ← whnf 14 structType
@@ -437,7 +474,7 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
         modify fun s => {s with data := {s.data with numSorries := s.data.numSorries + 1}} -- FIXME some better syntax for this?
       inferConstant (← readThe Context) c ls inferOnly
     | .lam .. => inferLambda e inferOnly
-    | .forallE .. => inferForall e inferOnly
+    | .forallE .. => inferForallL e inferOnly
     | .app f a =>
       if inferOnly then
         inferApp e
@@ -452,7 +489,6 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
 
         -- trace s!"{(← rctx).callId}, {← callStackToStr}, {e.getAppArgs.size}, {e.getAppFn} \n\n{dType}\n\n{aType}"
         if !(← isDefEq 54 dType aType) then
-          -- dbg_trace s!"DBG[1]: TypeChecker.lean:418 \n{← whnf 0 dType}\n\n{← whnf 0 aType}\n\n{a}\n\n {e}"
           throw <| .appTypeMismatch (← getKEnv) (← getLCtx) e fType aType
         -- trace s!"{(← rctx).callId}"
         pure <| fType.bindingBody!.instantiate1 a
@@ -466,7 +502,6 @@ def whnfCore (n : Nat) (e : Expr) (cheapRec := false) (cheapProj := false) : Rec
   fun m => m.whnfCore n e cheapRec cheapProj
 
 def reduceRecursor (e : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) := do
-  -- atrace s!"DBG[17]: TypeChecker.lean:445 (after def reduceRecursor (e : Expr) (cheapRec …)"
   --
   let env ← getKEnv
   if env.quotInit then
@@ -498,6 +533,9 @@ def isLetFVar (lctx : LocalContext) (fvar : FVarId) : Bool :=
   lctx.find? fvar matches some (.ldecl ..)
 
 def whnfCore' (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr := do
+  if ← elimUnivs then
+    if let .sort 1 := e then
+      return .typeL
   match e with
   | .bvar .. | .sort .. | .mvar .. | .forallE .. | .const .. | .lam .. | .lit .. => return e
   | .mdata _ e => return ← whnfCore' e cheapRec cheapProj
@@ -513,7 +551,11 @@ def whnfCore' (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr :=
   | .bvar .. | .sort .. | .mvar .. | .forallE .. | .const .. | .lam .. | .lit ..
   | .mdata .. => unreachable!
   | .fvar _ => return ← whnfFVar e cheapRec cheapProj
-  | .app .. =>
+  | .app _f _a =>
+    if ← elimUnivs then
+      if let (.app (.const `L4L.Level.param []) _) := _f then
+        if let (.app (.const `L4L.Level.inst []) l) := _a then
+          return ← save <| ← whnfCore 0 l
     e.withAppRev fun f0 rargs => do
     let f ← whnfCore 75 f0 cheapRec cheapProj
     if let .lam _ _ body _ := f then
@@ -623,12 +665,12 @@ def reduceNat (e : Expr) : RecM (Option Expr) := do
 def whnf' (e : Expr) : RecM Expr := do
   -- Do not cache easy cases
   match e with
-  | .bvar .. | .sort .. | .mvar .. | .forallE .. | .lit .. => return e
+  | .bvar .. | .mvar .. | .forallE .. | .lit .. => return e
   | .mdata _ e => return ← whnf' e
   | .fvar id =>
     if !isLetFVar (← getLCtx) id then
       return e
-  | .lam .. | .app .. | .const .. | .letE .. | .proj .. => pure ()
+  | .lam .. | .sort .. | .app .. | .const .. | .letE .. | .proj .. => pure ()
   -- check cache
   if let some r := (← get).whnfCache[e]? then
     return r
@@ -752,6 +794,7 @@ def isDefEqApp (t s : Expr) : RecM Bool := do
 
 def isDefEqProofIrrel (t s : Expr) : RecM LBool := do
   let tType ← inferType 34 t
+  if s == .prop || s == .propL then return .undef
   if !(← isProp tType) then return .undef
   let ret ← toLBoolM <| isDefEq 67 tType (← inferType 35 s)
   return ret
@@ -869,6 +912,8 @@ def isDefEqUnitLike (t s : Expr) : RecM Bool := do
   isDefEqCore 44 tType (← inferType 45 s)
 
 def isDefEqCore' (t s : Expr) : RecM Bool := do
+  if let .app (.app (.const `L4L.Level.param []) _) _ := t then
+    dbg_trace s!"DBG[88]: TypeChecker.lean:918 {← whnfCore 0 t}, {s}"
   let r ← quickIsDefEq t s (useHash := true)
   if r != .undef then
     return r == .true
