@@ -394,7 +394,7 @@ def replay (ctx : Context) (_env : Kernel.Environment) (decl : Option Name := no
   let (_, s) ← StateRefT'.run (s := { env, remaining, numToCheck, aborted, mainModule }) do
     ReaderT.run (r := ctx) do
       match decl with
-      | some d => replayConstant d addDeclFn (op := op)
+      | some d => replayConstant d addDeclFn (op := op) (printProgress? := printProgress)
       | none =>
         let tryReplay n :=
           try
