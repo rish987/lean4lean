@@ -68,6 +68,7 @@ def CallDataT : CallData → Type
 structure TypeCheckerOpts where
   proofIrrelevance := true
   kLikeReduction := true
+  structLikeReduction := true
 
 structure TypeChecker.Context where
   dbg : Nat := 0
@@ -476,7 +477,7 @@ def reduceRecursor (e : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) :
     if let some r ← quotReduceRec e (whnf 21) then
       return r
   let whnf' n e := if cheapRec then whnfCore (2000 + n) e cheapRec cheapProj else whnf (1000 + n) e
-  if let some (r, usedKLikeReduction, usedStructEta) ← inductiveReduceRec env e whnf' atrace (inferType 23) (inferType 23 (inferOnly := false)) (isDefEq 55) (← readThe Context).opts.kLikeReduction then
+  if let some (r, usedKLikeReduction, usedStructEta) ← inductiveReduceRec env e whnf' atrace (inferType 23) (inferType 23 (inferOnly := false)) (isDefEq 55) (← readThe Context).opts.kLikeReduction (← readThe Context).opts.structLikeReduction then
     if usedKLikeReduction then
       modify fun s => {s with data := {s.data with usedKLikeReduction := true}}
     if usedStructEta then

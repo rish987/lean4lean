@@ -67,7 +67,7 @@ def getRecRuleFor (rval : RecursorVal) (major : Expr) : Option RecursorRule := d
 
 set_option linter.unusedVariables false in
 def inductiveReduceRec [Monad m] (env : Kernel.Environment) (e : Expr)
-    (whnf : Nat → Expr → m Expr) (trace : String → m Unit) (inferType : Expr → m Expr) (inferType' : Expr → m Expr) (isDefEq : Expr → Expr → m Bool) (kLikeReduction : Bool := true) :
+    (whnf : Nat → Expr → m Expr) (trace : String → m Unit) (inferType : Expr → m Expr) (inferType' : Expr → m Expr) (isDefEq : Expr → Expr → m Bool) (kLikeReduction : Bool := true) (structLikeReduction : Bool := true) :
     m (Option (Expr × Bool × Bool)) := do
   let .const recFn ls := e.getAppFn | return none
   let some (.recInfo info) := env.find? recFn | return none
@@ -88,8 +88,7 @@ def inductiveReduceRec [Monad m] (env : Kernel.Environment) (e : Expr)
   -- dbg_trace s!"DBG[28]: Reduce.lean:74: major={major}"
   match ← whnf 4 major with
   | .lit l => major := l.toConstructor
-  | e =>
-    (major, usedStructEta) ← toCtorWhenStruct env whnf inferType info.getMajorInduct e
+  | e => (major, usedStructEta) ← if structLikeReduction then toCtorWhenStruct env whnf inferType info.getMajorInduct e else pure (e, false)
   let some rule := getRecRuleFor info major | return none
   let majorArgs := major.getAppArgs
   if rule.nfields > majorArgs.size then return none
