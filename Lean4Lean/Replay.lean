@@ -391,11 +391,11 @@ def _root_.Lean.Kernel.Environment.withConsts (env : Kernel.Environment) (f : Co
   Lean.Kernel.Environment.mk (f env.constants) env.quotInit env.diagnostics env.const2ModIdx (Lean.Kernel.Environment.extensions env) (Lean.Kernel.Environment.extraConstNames env) env.header
 
 def _root_.Lean.Kernel.Environment.toMap₁ (env : Kernel.Environment) : Kernel.Environment :=
-  let newMap₁ :=  env.constants.map₂.foldl (init := env.constants.map₁) fun acc n c => acc.insert n c
+  let newMap₁ := env.constants.map₂.foldl (init := env.constants.map₁) fun acc n c => acc.insert n c
   env.withConsts fun c => {c with map₁ := newMap₁, map₂ := default}
 
 def _root_.Lean.Kernel.Environment.toMap₂ (env : Kernel.Environment) : Kernel.Environment :=
-  let newMap :=  env.constants.map₁.fold (init := env.constants.map₂) fun acc n c => acc.insert n c
+  let newMap := env.constants.map₁.fold (init := env.constants.map₂) fun acc n c => acc.insert n c
   env.withConsts fun c => {c with map₂ := newMap, map₁ := default}
 
 /-- "Replay" some constants into an `Environment`, sending them to the kernel for checking. -/
@@ -416,7 +416,7 @@ def replay (ctx : Context) (_env : Kernel.Environment) (decl : Option Name := no
       match decl with
       | some d => replayConstant d addDeclFn (op := op) (printProgress? := printProgress)
       | none =>
-        let tryReplay n :=
+        let tryReplay n := do
           try
             if not ((← get).aborted.contains n) then
               replayConstant n addDeclFn printProgress op

@@ -37,6 +37,7 @@ structure TypeChecker.State where
   eqvManager : EquivManager := {}
   numCalls : Nat := 0
   failure : Std.HashSet (Expr × Expr) := {}
+  dbgMsgs : Array String := #[]
 
 inductive CallData where
 |  isDefEqCore : Expr → Expr → CallData
@@ -81,6 +82,7 @@ structure TypeChecker.Context where
   -/
   eqFVars : Std.HashSet (FVarId × FVarId) := {}
   safety : DefinitionSafety := .safe
+  -- dbgMsgs : Array String := #[]
   callId : Nat := 0
   trace : Bool := false
   dbgCallId : Option Nat := none
@@ -109,6 +111,8 @@ instance : MonadLCtx M where
 instance (priority := low) : MonadWithReaderOf LocalContext M where
   withReader f := withReader fun s => { s with lctx := f s.lctx }
 
+-- instance (priority := low) : MonadWithReaderOf (Array String) M where
+--   withReader f := withReader fun s => { s with dbgMsgs := f s.dbgMsgs }
 def mkNewId : M Name := do
   let nid := (← get).nid
   modify fun st => { st with nid := st.nid + 1 }
@@ -180,6 +184,9 @@ inductive ReductionStatus where
 
 namespace Inner
 
+def printCallStack : RecM String := do
+  pure $ toString $ (← readThe Context).callStack.map fun d => s!"{d.1}"
+
 def whnf (n : Nat) (e : Expr) : RecM Expr := fun m => m.whnf n e
 
 @[inline] def withLCtx [MonadWithReaderOf LocalContext m] (lctx : LocalContext) (x : m α) : m α :=
@@ -198,6 +205,9 @@ def whnf (n : Nat) (e : Expr) : RecM Expr := fun m => m.whnf n e
 
 @[inline] def withCallId [MonadWithReaderOf Context m] (id : Nat) (dbgCallId : Option Nat := none) (x : m α) : m α :=
   withReader (fun c => {c with callId := id, dbgCallId}) x
+
+-- @[inline] def withDbgMsg [MonadWithReaderOf (Array String) m] (msg : String) (x : m α) : m α :=
+--   withReader (fun msgs => msgs.push msg) x
 
 def ensureSortCore (e s : Expr) : RecM Expr := do
   if e.isSort then return e
@@ -695,9 +705,9 @@ def isDefEqForall (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
   | t, s => isDefEq 59 (t.instantiateRev subst) (s.instantiateRev subst)
 
 def quickIsDefEq (t s : Expr) (useHash := false) : RecM LBool := do
-  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 a9 (eqvManager := m)) =>
+  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 (eqvManager := m)) =>
     let (b, m) := m.isEquiv useHash t s
-    (b, .mk a1 a2 a3 a4 a5 a6 a7 a8 a9 (eqvManager := m))
+    (b, .mk a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 (eqvManager := m))
   then return .true
   match t, s with
   | .lam .., .lam .. => toLBoolM <| isDefEqLambda t s
@@ -890,12 +900,35 @@ def isDefEqCore' (t s : Expr) : RecM Bool := do
     if r != .undef then
     return r == .true
 
+  -- if (← readThe Context).opts.proofIrrelevance then
   if (← readThe Context).opts.proofIrrelevance then
     let r ← isDefEqProofIrrel tn sn
     if r != .undef then
       if r == .true then
         modify fun s => {s with data := {s.data with usedProofIrrelevance := true}}
       return r == .true
+  else
+    if !(← isDefEq 61 (← inferType 0 tn) (← inferType 0 sn)) then return false
+    if false then
+      let r ← isDefEqProofIrrel tn sn
+      if r == .true then
+        let msg := s!"DBG: {t} == {s}"
+        modify fun s => {s with dbgMsgs := s.dbgMsgs.push msg}
+      else if r == .false then
+        let msg := s!"DBG: {t} != {s}, {← printCallStack}"
+        modify fun s => {s with dbgMsgs := s.dbgMsgs.push msg}
+  -- let withDbg m := do
+  --   if dbg then
+  --     dbg_trace s!"DBG[58]: TypeChecker.lean:904 {t}, {s}"
+  --     withDbgMsg s!"DBG[58]: TypeChecker.lean:904 {t}, {s}" m
+  --   else
+  --     m
+    -- withDbgMsg s!"DBG[58]: TypeChecker.lean:904 {t}, {s}" m
+
+  -- withDbg do
+
+  -- let ret := do
+  --   pure ()
 
   match ← lazyDeltaReduction tn sn with
   | .continue .. => unreachable!

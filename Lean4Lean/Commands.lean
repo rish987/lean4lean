@@ -15,10 +15,16 @@ open private Lean.Environment.asyncCtx? from Lean.Environment
 open private Lean.Environment.realizedImportedConsts? from Lean.Environment
 open private Lean.Environment.realizedLocalConsts from Lean.Environment
 open private Lean.Kernel.Environment.add from Lean.Environment
+open private Lean.Kernel.Environment.mk from Lean.Environment
 
 def updateBaseAfterKernelAdd (env : Environment) (kernel : Kernel.Environment) : Environment :=
   let newKernel := Lean.Kernel.Environment.mk kernel.constants kernel.quotInit kernel.diagnostics (env.toKernelEnv.const2ModIdx) (Lean.Kernel.Environment.extensions env.toKernelEnv) (Lean.Kernel.Environment.extraConstNames kernel) (env.toKernelEnv.header)
   Lean.Environment.mk newKernel (.pure newKernel) (Lean.Environment.asyncConsts env) (Lean.Environment.asyncCtx? env) (Lean.Environment.realizedImportedConsts? env) (Lean.Environment.realizedLocalConsts env)
+
+def updateConst2ModIdx (env : Kernel.Environment) (const2ModIdx : Std.HashMap Name ModuleIdx) : Kernel.Environment := Id.run $ do
+  let mut newConst2ModIdx := env.const2ModIdx.union const2ModIdx
+  let newKernel := Lean.Kernel.Environment.mk env.constants env.quotInit env.diagnostics newConst2ModIdx (Lean.Kernel.Environment.extensions env) (Lean.Kernel.Environment.extraConstNames env) (env.header)
+  pure newKernel
 
 def getDepConstsEnv (env : Environment) (consts : Array Name) (overrides : Std.HashMap Name ConstantInfo) : IO $ Std.HashMap Name ConstantInfo := do
   let mut (_, {map := map, ..}) ← ((Deps.namedConstDeps consts).toIO { options := default, fileName := "", fileMap := default } {env} {env, overrides})
@@ -32,6 +38,13 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn :
   -- constants that should throw an error if encountered on account of having previously failed to typecheck
   let mut errConsts : Lean.NameSet := default
   let mut modEnv := updateBaseAfterKernelAdd env (← Lean.mkEmptyEnvironment).toKernelEnv
+  -- let modData ← mkModuleData modEnv
+  -- let (_, s) ← importModulesCore modData.imports
+  --   |>.run (s := { moduleNameSet := ({} : NameHashSet).insert modEnv.mainModule })
+  -- for h : modIdx in [0:s.moduleData.size] do
+  --   let mod := s.moduleData[modIdx]
+  --   if mod.constants.any (·.name == `Std.DTreeMap.Internal.Impl.balanceR!_eq_balance!) || mod.constNames.any (· == `Std.DTreeMap.Internal.Impl.balanceR!_eq_balance!) || mod.extraConstNames.any (· == `Std.DTreeMap.Internal.Impl.balanceR!_eq_balance!) then
+  --     dbg_trace s!"DBG[57]: Commands.lean:91 {mod.constants.any (·.name == `Std.DTreeMap.Internal.Impl.balanceR!_eq_balance!)}, {mod.constNames.any (· == `Std.DTreeMap.Internal.Impl.balanceR!_eq_balance!)}, {mod.extraConstNames.any (· == `Std.DTreeMap.Internal.Impl.balanceR!_eq_balance!)}"
 
   let loop const modEnv skipConsts errConsts onlyConstsToTrans printProgress := do
     try
@@ -87,11 +100,20 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn :
           else
             modEnv ← rp modEnv
             if write then
-              writeModule (modEnv) outPath
+              -- let modData ← mkModuleData modEnv
+              -- let (_, s) ← importModulesCore modData.imports
+              --   |>.run (s := { moduleNameSet := ({} : NameHashSet).insert modEnv.mainModule })
+              -- for h : modIdx in [0:s.moduleData.size] do
+              --   let mod := s.moduleData[modIdx]
+              --   if mod.constants.any (·.name == `Std.DTreeMap.Internal.Impl.balanceR!_eq_balance!) || mod.constNames.any (· == `Std.DTreeMap.Internal.Impl.balanceR!_eq_balance!) || mod.extraConstNames.any (· == `Std.DTreeMap.Internal.Impl.balanceR!_eq_balance!) then
+              --     dbg_trace s!"DBG[57]: Commands.lean:91 {mod.constants.any (·.name == `Std.DTreeMap.Internal.Impl.balanceR!_eq_balance!)}, {mod.constNames.any (· == `Std.DTreeMap.Internal.Impl.balanceR!_eq_balance!)}, {mod.extraConstNames.any (· == `Std.DTreeMap.Internal.Impl.balanceR!_eq_balance!)}"
+              -- dbg_trace s!"DBG[53]: Commands.lean:94 {modEnv.contains `Std.DTreeMap.Internal.Impl.balanceR!_eq_balance!}, {outPath}"
+              writeModule modEnv outPath
         else
           modEnv ← rp modEnv
 
         if dbgOnly then
+          -- dbg_trace s!"DBG[56]: Commands.lean:83 {modEnv.contains `Std.DTreeMap.Internal.Impl.balanceR!_eq_balance!}"
           let (modEnv', _) ← replay addDeclFn {newConstants := Std.HashMap.insert default const (map.get! const), overrides, opts} modEnv.toKernelEnv (printProgress := printProgress) (op := op)
           modEnv := updateBaseAfterKernelAdd modEnv modEnv'
         skipConsts := skipConsts.union mapConsts -- TC success, so want to skip in future runs (already in environment)
