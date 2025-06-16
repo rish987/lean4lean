@@ -457,15 +457,18 @@ unsafe def replayFromImports (module : Name) (verbose := false) (compare := fals
     throw <| IO.userError s!"object file '{mFile}' of module {module} does not exist"
   let (mod, region) ← readModuleData mFile
   let (_, s) ← importModulesCore mod.imports
-    |>.run (s := { moduleNameSet := ({} : NameHashSet).insert module })
-  let env ← finalizeImport s #[{module}] {} 0
-  let env := env.setMainModule module
+    |>.run (s := {
+      moduleNameMap := ({} : Std.HashMap ..).insert module
+        (.mk module (parts := #[(mod, region)]))
+      moduleNames := #[module] })
+  let env ← finalizeImport s #[{module}] {} 0 false false
+    -- | .ok env => pure env
+    -- | .error e => throw <| .userError <| ← (e.toMessageData {}).toString
   let mut newConstants := {}
   for name in mod.constNames, ci in mod.constants do
     newConstants := newConstants.insert name ci
-  let (_, _) ← replay addDeclFn { newConstants, verbose, compare, opts } env.toKernelEnv (mainModule := env.mainModule)
-  -- FIXME is this being done correctly?
-  env.freeRegions
+  let (env', _) ← replay addDeclFn { newConstants, verbose, compare, opts } env.toKernelEnv (mainModule := env.mainModule)
+  (Environment.ofKernelEnv env').freeRegions
   region.free
 
 unsafe def replayFromInit'' (module : Name) (initEnv : Environment) (newConstants : Std.HashMap Name ConstantInfo) (f : Kernel.Environment → IO Unit) (op : String := "typecheck")
@@ -477,7 +480,7 @@ unsafe def replayFromInit'' (module : Name) (initEnv : Environment) (newConstant
 unsafe def replayFromInit' (module : Name) (initEnv : Environment) (f : Kernel.Environment → IO Unit) (op : String := "typecheck")
     (verbose := false) (compare := false) (decl : Option Name := none) (opts : TypeCheckerOpts := {}) : IO Unit := do
   IO.println s!"loading module \"{module}\"..."
-  Lean.withImportModules #[{module}] {} 0 fun env => do
+  Lean.withImportModules #[{module}] {} (trustLevel := 0) fun env => do
     let mut newConstants := default
     let ics := initEnv.constants.toList
     let cs := env.constants.toList

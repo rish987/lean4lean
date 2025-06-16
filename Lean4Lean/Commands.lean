@@ -10,16 +10,19 @@ open private Lean.Environment.mk from Lean.Environment
 open private Lean.Kernel.Environment.mk from Lean.Environment
 open private Lean.Kernel.Environment.extensions from Lean.Environment
 open private Lean.Kernel.Environment.extraConstNames from Lean.Environment
-open private Lean.Environment.asyncConsts from Lean.Environment
+open private Lean.Environment.asyncConstsMap from Lean.Environment
 open private Lean.Environment.asyncCtx? from Lean.Environment
 open private Lean.Environment.realizedImportedConsts? from Lean.Environment
 open private Lean.Environment.realizedLocalConsts from Lean.Environment
+open private Lean.Environment.serverBaseExts from Lean.Environment
+open private Lean.Environment.allRealizations from Lean.Environment
 open private Lean.Kernel.Environment.add from Lean.Environment
 open private Lean.Kernel.Environment.mk from Lean.Environment
+open private Lean.Environment.updateBaseAfterKernelAdd from Lean.Environment
 
 def updateBaseAfterKernelAdd (env : Environment) (kernel : Kernel.Environment) : Environment :=
   let newKernel := Lean.Kernel.Environment.mk kernel.constants kernel.quotInit kernel.diagnostics (env.toKernelEnv.const2ModIdx) (Lean.Kernel.Environment.extensions env.toKernelEnv) (Lean.Kernel.Environment.extraConstNames kernel) (env.toKernelEnv.header)
-  Lean.Environment.mk newKernel (.pure newKernel) (Lean.Environment.asyncConsts env) (Lean.Environment.asyncCtx? env) (Lean.Environment.realizedImportedConsts? env) (Lean.Environment.realizedLocalConsts env)
+  Lean.Environment.mk (.mk newKernel newKernel) (Lean.Environment.serverBaseExts env) (.pure newKernel) (Lean.Environment.asyncConstsMap env) (Lean.Environment.asyncCtx? env) (Lean.Environment.realizedImportedConsts? env) (Lean.Environment.realizedLocalConsts env) (Lean.Environment.allRealizations env) (env.isExporting)
 
 def updateConst2ModIdx (env : Kernel.Environment) (const2ModIdx : Std.HashMap Name ModuleIdx) : Kernel.Environment := Id.run $ do
   let mut newConst2ModIdx := env.const2ModIdx.union const2ModIdx
@@ -89,11 +92,14 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn :
           IO.FS.createDirAll outDir
           let outPath := outDir.join outName
           if dbgOnly && (← System.FilePath.pathExists outPath) then
-            let (mod, _) ← readModuleData outPath
+            let (mod, region) ← readModuleData outPath
             let module := modEnv.mainModule
             let (_, s) ← importModulesCore mod.imports
-              |>.run (s := { moduleNameSet := ({} : NameHashSet).insert module })
-            modEnv ← finalizeImport s #[{module}] {} 0
+              |>.run (s := {
+                moduleNameMap := ({} : Std.HashMap ..).insert module
+                  (.mk module (parts := #[(mod, region)]))
+                moduleNames := #[module] })
+            modEnv ← finalizeImport s #[{module}] {} 0 false false
             for const in mod.constants do
               modEnv := updateBaseAfterKernelAdd modEnv (modEnv.toKernelEnv.add const)
             modEnv := modEnv.setMainModule module
