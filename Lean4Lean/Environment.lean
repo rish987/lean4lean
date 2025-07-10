@@ -116,7 +116,10 @@ def addDecl' (env : Environment) (decl : @& Declaration) (opts : TypeCheckerOpts
   match decl with
   | .axiomDecl v => addAxiom env v opts
   | .defnDecl v => addDefinition env v opts allowAxiomReplace
-  | .thmDecl v => addTheorem env v opts allowAxiomReplace
+  | .thmDecl v =>
+    if v.name == ``Nat.repeatTR.loop.eq_1 then
+      dbg_trace s!"DBG[91]: Environment.lean:120 (after if v.name == Nat.repeatTR.loop.eq_1 then)"
+    addTheorem env v opts allowAxiomReplace
   | .opaqueDecl v => addOpaque env v opts
   | .mutualDefnDecl v => addMutual env v opts
   | .quotDecl => pure (← addQuot env, {})
