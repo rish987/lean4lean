@@ -237,6 +237,16 @@ theorem liftN_instVar_hi (i : Nat) (e2 : VExpr) (n k j : Nat) :
 @[simp] theorem instL_instVar : (instVar i e k).instL ls = instVar i (e.instL ls) k := by
   simp [instVar]; split <;> [skip; split] <;> simp [instL, instL_liftN]
 
+/--
+`inst t e k` instantiates bound variable with De Bruijn index `k` in `t` with
+`e`, accounting for additional binders in subterms as necessary. Following
+instantiation, all references to binders above `k` are shifted down by one (as
+if the binding at depth `k` was "erased" from the context).
+
+It is assumed that the indices of any bound variables in `e` are relative
+binding depth k (i.e., `.bvar 0` (not under a binding subterm of `e`) really refers
+to the binding at depth `k + 1` in the current local context).
+-/
 def inst : VExpr → VExpr → (k :_:= 0) → VExpr
   | .bvar i, e, k => instVar i e k
   | .sort u, _, _ => .sort u
@@ -308,6 +318,10 @@ theorem liftN_unliftN_hi (h : k2 ≤ k1) :
     rw [ih, Nat.add_right_comm, liftN_instN_hi e default n1 (k1+n2) k2,
       Nat.add_right_comm k1]; rfl
 
+/--
+`e.Skips n k` asserts that `e` contains no free variable references in the
+range `[k, k + n)`.
+-/
 def Skips (e : VExpr) (n k : Nat) : Prop := liftN n (unliftN e n k) k = e
 
 protected theorem Skips.liftN : Skips (liftN n e k) n k := by simp [Skips]
@@ -503,6 +517,10 @@ theorem instN_bvar0 (e : VExpr) (k : Nat) :
   induction e generalizing k with simp [liftN, inst, *]
   | bvar i => induction i generalizing k <;> cases k <;> simp [*, lift, liftN]
 
+/--
+`e.OnVars P t` asserts that `P i` holds for every free variable of De Bruijn
+index `i` appearing in `e`.
+-/
 def OnVars (P : Nat → Prop) (e : VExpr) : Prop := ∀ k, e.Skips 1 k ∨ P k
 
 theorem OnVars.mono {P Q : Nat → Prop} (H : ∀ i, P i → Q i) (h : OnVars P e) : OnVars Q e :=

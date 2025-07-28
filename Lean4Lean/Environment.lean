@@ -97,6 +97,7 @@ def addMutual (env : Environment) (vs : List DefinitionVal) (check := true) :
   return env'
 
 /-- Type check given declaration and add it to the environment -/
+@[export lean_add_decl_new]
 def addDecl' (env : Environment) (decl : @& Declaration) (check := true) :
     Except KernelException Environment := do
   match decl with

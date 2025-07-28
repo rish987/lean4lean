@@ -5,6 +5,12 @@ namespace Lean4Lean
 
 open VExpr
 
+/--
+For `Γ = Γ₁ ++ Γ₀` with `|Γ₁| = k`, `Ctx.LiftN n k Γ Γ'` means that there exists
+some `As` with `|As| = n` such that `Γ' = liftN(Γ₁, n) ++ As ++ Γ₀`,
+where `liftN(Γ₁, n)` raises the De Bruijn indices of the expressions in `Γ₁` appropriately
+to refer to the same variables in `Γ₀`.
+-/
 inductive Ctx.LiftN (n : Nat) : Nat → List VExpr → List VExpr → Prop where
   | zero (As) (h : As.length = n := by rfl) : Ctx.LiftN n 0 Γ (As ++ Γ)
   | succ : Ctx.LiftN n k Γ Γ' → Ctx.LiftN n (k+1) (A::Γ) (A.liftN n k :: Γ')
