@@ -66,7 +66,7 @@ unsafe def runRunCmd (p : Parsed) : IO UInt32 := do
         let mut allDone := true
         let mut numDone' := 0
         for (m, t) in tasks do
-          if not (finished.find? m |>.isSome) then
+          if not (finished.get? m |>.isSome) then
             match ← IO.getTaskState t with
             | .finished =>
               if let .error e := t.get then

@@ -6,6 +6,7 @@ import Lean4Lean.Instantiate
 import Lean4Lean.ForEachExprV
 import Lean4Lean.EquivManager
 
+#check Eq.refl
 -- 72
 
 namespace Lean
@@ -91,14 +92,14 @@ structure TypeChecker.Context where
 
 namespace TypeChecker
 
-abbrev M := ReaderT Context <| StateT State <| Except KernelException
+abbrev M := ReaderT Context <| StateT State <| Except Kernel.Exception
 
 def M.run (env : Kernel.Environment) (x : M α)
-   (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) (nid : Nat := 0) (fvarTypeToReusedNamePrefix : Std.HashMap Expr Name := {}) (trace := false) (state : State := {}) (eqFVars : Std.HashSet (FVarId × FVarId) := {}) : Except KernelException (α × State) := do
+   (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) (nid : Nat := 0) (fvarTypeToReusedNamePrefix : Std.HashMap Expr Name := {}) (trace := false) (state : State := {}) (eqFVars : Std.HashSet (FVarId × FVarId) := {}) : Except Kernel.Exception (α × State) := do
   x {env, safety, lctx, opts, lparams, trace, eqFVars} |>.run {state with nid, fvarTypeToReusedNamePrefix}
 
 def M.run' (env : Kernel.Environment) (x : M α)
-   (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) (nid : Nat := 0) (fvarTypeToReusedNamePrefix : Std.HashMap Expr Name := {}) (trace := false) (eqFVars : Std.HashSet (FVarId × FVarId) := {}) : Except KernelException α := do
+   (safety : DefinitionSafety := .safe) (opts : TypeCheckerOpts := {}) (lctx : LocalContext := {}) (lparams : List Name := {}) (nid : Nat := 0) (fvarTypeToReusedNamePrefix : Std.HashMap Expr Name := {}) (trace := false) (eqFVars : Std.HashSet (FVarId × FVarId) := {}) : Except Kernel.Exception α := do
   x {env, safety, lctx, opts, lparams, trace, eqFVars} |>.run' {nid, fvarTypeToReusedNamePrefix}
 
 def getCallStack : M (Array Nat) := do pure $ (← readThe Context).callStack.map (·.1)
@@ -221,17 +222,17 @@ def ensureForallCore (e s : Expr) : RecM Expr := do
   if e'.isForall then return e'
   throw <| .funExpected (← getKEnv) (← getLCtx) s
 
-def checkLevel (tc : Context) (l : Level) : Except KernelException Unit := do
+def checkLevel (tc : Context) (l : Level) : Except Kernel.Exception Unit := do
   if let some n2 := l.getUndefParam tc.lparams then
     throw <| .other s!"invalid reference to undefined universe level parameter '{n2}'"
 
-def inferFVar (tc : Context) (name : FVarId) : Except KernelException Expr := do
+def inferFVar (tc : Context) (name : FVarId) : Except Kernel.Exception Expr := do
   if let some decl := tc.lctx.find? name then
     return decl.type
   throw <| .other s!"unknown free variable '{name.name}'"
 
 def inferConstant (tc : Context) (name : Name) (ls : List Level) (inferOnly : Bool) :
-    Except KernelException Expr := do
+    Except Kernel.Exception Expr := do
   let e := Expr.const name ls
   let info ← tc.env.get name
   let ps := info.levelParams
@@ -333,19 +334,19 @@ def inferLet (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] #[] e where
   | e => do
     let r ← inferType 11 (e.instantiateRev fvars) inferOnly
     let r := r.cheapBetaReduce
-    let rec loopUsed i (used : Array Bool) :=
-      match i with
-      | 0 => used
-      | i+1 =>
-        let used := if used[i]! then markUsed i fvars vals[i]! used else used
-        loopUsed i used
-    let used := mkArray fvars.size false
-    let used := markUsed fvars.size fvars r used
-    let used := loopUsed fvars.size used
-    let mut usedFVars := #[]
-    for fvar in fvars, b in used do
-      if b then
-        usedFVars := usedFVars.push fvar
+    -- let rec loopUsed i (used : Array Bool) :=
+    --   match i with
+    --   | 0 => used
+    --   | i+1 =>
+    --     let used := if used[i]! then markUsed i fvars vals[i]! used else used
+    --     loopUsed i used
+    -- let used := mkArray fvars.size false
+    -- let used := markUsed fvars.size fvars r used
+    -- let used := loopUsed fvars.size used
+    -- let mut usedFVars := #[]
+    -- for fvar in fvars, b in used do
+    --   if b then
+    --     usedFVars := usedFVars.push fvar
     return (← getLCtx).mkForall fvars r
 
 def isProp (e : Expr) : RecM Bool :=
@@ -583,7 +584,7 @@ def unfoldDefinition (env : Kernel.Environment) (e : Expr) : Option Expr := do
   else
     unfoldDefinitionCore env e
 
-def reduceNative (_env : Kernel.Environment) (e : Expr) : Except KernelException (Option Expr) := do
+def reduceNative (_env : Kernel.Environment) (e : Expr) : Except Kernel.Exception (Option Expr) := do
   let .app f (.const c _) := e | return none
   if f == .const ``reduceBool [] then
     throw <| .other s!"lean4lean does not support 'reduceBool {c}' reduction"

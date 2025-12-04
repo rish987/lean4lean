@@ -56,7 +56,7 @@ namespace Deps
             | .recInfo      _ => panic! "unsupported override"
             pure $ .some newCi
           else
-            pure $ (← read).env.find? name | throw $ IO.userError s!"could not find constant \"{name}\" for translation, verify that it exists in the Lean input"
+            pure $ (← read).env.find? name | throw $ IO.userError s!"could not find constant \"{name}\" for typechecking, verify that it exists in the Lean input"
         modify fun s => { s with map := s.map.insert name const }
         let mut deps := #[]
         if name == ``String then deps := deps.push ``Char.ofNat

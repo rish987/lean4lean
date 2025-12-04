@@ -17,14 +17,14 @@ def checkConstantVal (env : Kernel.Environment) (v : ConstantVal) (allowPrimitiv
   _ ← ensureSort sort v.type
 
 def addAxiom (env : Environment) (v : AxiomVal) (opts : TypeCheckerOpts := {}) :
-    Except KernelException (Environment × Data) := do
+    Except Kernel.Exception (Environment × Data) := do
   -- dbg_trace s!"\nAxiom encountered: {v.name}"
   let (_, s) ← (checkConstantVal env v.toConstantVal).run env
     (safety := if v.isUnsafe then .unsafe else .safe) (opts := opts)
   return (env.add (.axiomInfo v), s.data)
 
 def addDefinition (env : Environment) (v : DefinitionVal) (opts : TypeCheckerOpts := {}) (allowAxiomReplace := false) :
-    Except KernelException (Environment × Data) := do
+    Except Kernel.Exception (Environment × Data) := do
   if let .unsafe := v.safety then
     -- Meta definition can be recursive.
     -- So, we check the header, add, and then type check the body.
@@ -60,7 +60,7 @@ def addDefinition (env : Environment) (v : DefinitionVal) (opts : TypeCheckerOpt
     return (env.add ret, s.data)
 
 def addTheorem (env : Environment) (v : TheoremVal) (opts : TypeCheckerOpts := {}) (allowAxiomReplace := false) :
-    Except KernelException (Environment × Data) := do
+    Except Kernel.Exception (Environment × Data) := do
   -- TODO(Leo): we must add support for handling tasks here
   let (ret, s) ← M.run env (safety := .safe) (lctx := {}) (opts := opts) do
     if !(← isProp v.type) then
@@ -80,7 +80,7 @@ def addTheorem (env : Environment) (v : TheoremVal) (opts : TypeCheckerOpts := {
   return (env.add ret, s.data)
 
 def addOpaque (env : Environment) (v : OpaqueVal) (opts : TypeCheckerOpts := {}) :
-    Except KernelException (Environment × Data) := do
+    Except Kernel.Exception (Environment × Data) := do
   let (_, s) ← M.run env (safety := .safe) (lctx := {}) (opts := opts) do
     checkConstantVal env v.toConstantVal
     let valType ← TypeChecker.check v.value v.levelParams
@@ -89,7 +89,7 @@ def addOpaque (env : Environment) (v : OpaqueVal) (opts : TypeCheckerOpts := {})
   return (env.add (.opaqueInfo v), s.data)
 
 def addMutual (env : Environment) (vs : List DefinitionVal) (opts : TypeCheckerOpts := {}) :
-    Except KernelException (Environment × Data) := do
+    Except Kernel.Exception (Environment × Data) := do
   let v₀ :: _ := vs | throw <| .other "invalid empty mutual definition"
   if let .safe := v₀.safety then
     throw <| .other "invalid mutual definition, declaration is not tagged as unsafe/partial"
@@ -112,7 +112,7 @@ def addMutual (env : Environment) (vs : List DefinitionVal) (opts : TypeCheckerO
 
 /-- Type check given declaration and add it to the environment -/
 def addDecl' (env : Environment) (decl : @& Declaration) (opts : TypeCheckerOpts) (allowAxiomReplace := false) :
-    Except KernelException (Environment × Data) := do
+    Except Kernel.Exception (Environment × Data) := do
   match decl with
   | .axiomDecl v => addAxiom env v opts
   | .defnDecl v => addDefinition env v opts allowAxiomReplace

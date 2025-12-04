@@ -22,8 +22,8 @@ end Environment
 
 namespace NameSet
 
-def ofList (names : List Name) : NameSet :=
-  names.foldl (fun s n => s.insert n) {}
+-- def ofList (names : List Name) : NameSet :=
+--   names.foldl (fun s n => s.insert n) {}
 
 end NameSet
 
@@ -126,15 +126,15 @@ def isTodo (name : Name) : M Bool := do
   else
     return false
 
-/-- Use the current `Environment` to throw a `KernelException`. -/
-def throwKernelException (ex : KernelException) : M α := do
+/-- Use the current `Environment` to throw a `Kernel.Exception`. -/
+def throwKernel.Exception (ex : Kernel.Exception) : M α := do
     let ctx := { fileName := "", options := pp.match.set (pp.rawOnError.set {} true) false, fileMap := default }
     let state := { env := Lean.Environment.ofKernelEnv (← get).env }
     Prod.fst <$> (Lean.Core.CoreM.toIO · ctx state) do Lean.throwKernelException ex
 
   -- { env with checked := .pure kernel, checkedWithoutAsync := { kernel with extensions := env.checkedWithoutAsync.extensions } }
 
-/-- Add a declaration, possibly throwing a `KernelException`. -/
+/-- Add a declaration, possibly throwing a `Kernel.Exception`. -/
 def addDecl (d : Declaration) (verbose := false) (allowAxiomReplace := false) : M Unit := do
   let env := (← get).env
   if (← read).verbose then
@@ -163,7 +163,7 @@ def addDecl (d : Declaration) (verbose := false) (allowAxiomReplace := false) : 
       modify fun s => {s with data := {s.data with structRedUses := s.data.structRedUses + 1}}
     if data.usedEta then
       if verbose then
-        println s!"{d.name} used eta"
+        println s!"{d.name} used function eta"
       modify fun s => {s with data := {s.data with etaUses := s.data.etaUses + 1}}
     if data.usedUnitEta then
       if verbose then
@@ -188,7 +188,7 @@ def addDecl (d : Declaration) (verbose := false) (allowAxiomReplace := false) : 
       if (← read).compare then
         let t3 ← match (← get).env.addDecl {} d with
         | .ok _ => IO.monoMsNow
-        | .error ex => throwKernelException ex
+        | .error ex => throwKernel.Exception ex
         if (t2 - t1) > 2 * (t3 - t2) then
           println
             s!"{(← get).mainModule}:{d.name}: lean took {t3 - t2}, lean4lean took {t2 - t1}"
@@ -198,7 +198,7 @@ def addDecl (d : Declaration) (verbose := false) (allowAxiomReplace := false) : 
         println s!"{(← get).mainModule}:{d.name}: lean4lean took {t2 - t1}"
     modify fun s => { s with env := newEnv }
   | .error ex =>
-    throwKernelException ex
+    throwKernel.Exception ex
 
 deriving instance BEq for ConstantVal
 deriving instance BEq for ConstructorVal
@@ -214,7 +214,7 @@ partial def getDepConsts (newConstants : Std.HashMap Name ConstantInfo) (names :
   let rec loop ret names := do
     let mut ret := ret
     for name in names do
-      if let none := ret.find? name then
+      if let none := ret.get? name then
         let acc' := ret.insert name
         let some ci := newConstants[name]? | unreachable!
         ret ← loop acc' ci.getUsedConstants.toList
@@ -275,7 +275,7 @@ partial def replayConstant (name : Name) (addDeclFn' : Declaration → M Unit) (
         else
           unreachable!
       let mut deps := ci.getUsedConstants
-      let abortedDeps : Lean.NameSet := (deps.intersectBy (fun _ _ _ => ()) (← get).aborted)
+      let abortedDeps : Lean.NameSet := (deps ∩ (← get).aborted)
       if not abortedDeps.isEmpty then
         modify fun s =>
           { s with aborted := s.aborted.insert name }
@@ -385,11 +385,10 @@ variable (addDeclFn : Declaration → M Unit)
 open private Lean.Environment.mk from Lean.Environment
 open private Lean.Kernel.Environment.extensions from Lean.Environment
 open private Lean.Kernel.Environment.irBaseExts from Lean.Environment
-open private Lean.Kernel.Environment.extraConstNames from Lean.Environment
 open private Lean.Kernel.Environment.mk from Lean.Environment
 
 def _root_.Lean.Kernel.Environment.withConsts (env : Kernel.Environment) (f : ConstMap → ConstMap): Kernel.Environment :=
-  Lean.Kernel.Environment.mk (f env.constants) env.quotInit env.diagnostics env.const2ModIdx (Lean.Kernel.Environment.extensions env) (Lean.Kernel.Environment.irBaseExts env) (Lean.Kernel.Environment.extraConstNames env) env.header
+  Lean.Kernel.Environment.mk (f env.constants) env.quotInit env.diagnostics env.const2ModIdx (Lean.Kernel.Environment.extensions env) (Lean.Kernel.Environment.irBaseExts env) env.header
 
 def _root_.Lean.Kernel.Environment.toMap₁ (env : Kernel.Environment) : Kernel.Environment :=
   let newMap₁ := env.constants.map₂.foldl (init := env.constants.map₁) fun acc n c => acc.insert n c

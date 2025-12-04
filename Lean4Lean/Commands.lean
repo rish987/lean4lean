@@ -10,11 +10,10 @@ open private Lean.Environment.mk from Lean.Environment
 open private Lean.Kernel.Environment.mk from Lean.Environment
 open private Lean.Kernel.Environment.irBaseExts from Lean.Environment
 open private Lean.Kernel.Environment.extensions from Lean.Environment
-open private Lean.Kernel.Environment.extraConstNames from Lean.Environment
 open private Lean.Environment.asyncConstsMap from Lean.Environment
 open private Lean.Environment.asyncCtx? from Lean.Environment
-open private Lean.Environment.realizedImportedConsts? from Lean.Environment
-open private Lean.Environment.realizedLocalConsts from Lean.Environment
+open private Lean.Environment.importRealizationCtx? from Lean.Environment
+open private Lean.Environment.localRealizationCtxMap from Lean.Environment
 open private Lean.Environment.serverBaseExts from Lean.Environment
 open private Lean.Environment.allRealizations from Lean.Environment
 open private Lean.Environment.base from Lean.Environment
@@ -25,7 +24,7 @@ open private Lean.Kernel.Environment.mk from Lean.Environment
 open private Lean.Environment.updateBaseAfterKernelAdd from Lean.Environment
 
 def updateKEnvHeader (kernel : Kernel.Environment) (newHeader : EnvironmentHeader) : Kernel.Environment :=
-  Lean.Kernel.Environment.mk kernel.constants kernel.quotInit kernel.diagnostics (kernel.const2ModIdx) (Lean.Kernel.Environment.extensions kernel) (Lean.Kernel.Environment.irBaseExts kernel) (Lean.Kernel.Environment.extraConstNames kernel) newHeader
+  Lean.Kernel.Environment.mk kernel.constants kernel.quotInit kernel.diagnostics (kernel.const2ModIdx) (Lean.Kernel.Environment.extensions kernel) (Lean.Kernel.Environment.irBaseExts kernel) newHeader
 
 def updateEnvHeader (env : Environment) (newHeader : EnvironmentHeader) : Environment :=
   let base := Lean.Environment.base env
@@ -34,15 +33,15 @@ def updateEnvHeader (env : Environment) (newHeader : EnvironmentHeader) : Enviro
   let pub := Lean.VisibilityMap.public base
   let newPub := updateKEnvHeader pub newHeader
   let newBase := Lean.VisibilityMap.mk newPrv newPub
-  Lean.Environment.mk newBase (Lean.Environment.serverBaseExts env) (Lean.Environment.checked env) (Lean.Environment.asyncConstsMap env) (Lean.Environment.asyncCtx? env) (Lean.Environment.realizedImportedConsts? env) (Lean.Environment.realizedLocalConsts env) (Lean.Environment.allRealizations env) (env.isExporting)
+  Lean.Environment.mk newBase (Lean.Environment.serverBaseExts env) (Lean.Environment.checked env) (Lean.Environment.asyncConstsMap env) (Lean.Environment.asyncCtx? env) (Lean.Environment.importRealizationCtx? env) (Lean.Environment.localRealizationCtxMap env) (Lean.Environment.allRealizations env) (env.isExporting)
 
 def updateBaseAfterKernelAdd (env : Environment) (kernel : Kernel.Environment) : Environment :=
-  let newKernel := Lean.Kernel.Environment.mk kernel.constants kernel.quotInit kernel.diagnostics (env.toKernelEnv.const2ModIdx) (Lean.Kernel.Environment.extensions env.toKernelEnv) (Lean.Kernel.Environment.irBaseExts env.toKernelEnv) (Lean.Kernel.Environment.extraConstNames kernel) (env.toKernelEnv.header)
-  Lean.Environment.mk (.mk newKernel newKernel) (Lean.Environment.serverBaseExts env) (.pure newKernel) (Lean.Environment.asyncConstsMap env) (Lean.Environment.asyncCtx? env) (Lean.Environment.realizedImportedConsts? env) (Lean.Environment.realizedLocalConsts env) (Lean.Environment.allRealizations env) (env.isExporting)
+  let newKernel := Lean.Kernel.Environment.mk kernel.constants kernel.quotInit kernel.diagnostics (env.toKernelEnv.const2ModIdx) (Lean.Kernel.Environment.extensions env.toKernelEnv) (Lean.Kernel.Environment.irBaseExts env.toKernelEnv) (env.toKernelEnv.header)
+  Lean.Environment.mk (Lean.VisibilityMap.mk newKernel newKernel) (Lean.Environment.serverBaseExts env) (.pure newKernel) (Lean.Environment.asyncConstsMap env) (Lean.Environment.asyncCtx? env) (Lean.Environment.importRealizationCtx? env) (Lean.Environment.localRealizationCtxMap env) (Lean.Environment.allRealizations env) (env.isExporting)
 
 def updateConst2ModIdx (env : Kernel.Environment) (const2ModIdx : Std.HashMap Name ModuleIdx) : Kernel.Environment := Id.run $ do
   let mut newConst2ModIdx := env.const2ModIdx.union const2ModIdx
-  let newKernel := Lean.Kernel.Environment.mk env.constants env.quotInit env.diagnostics newConst2ModIdx (Lean.Kernel.Environment.extensions env) (Lean.Kernel.Environment.irBaseExts env) (Lean.Kernel.Environment.extraConstNames env) (env.header)
+  let newKernel := Lean.Kernel.Environment.mk env.constants env.quotInit env.diagnostics newConst2ModIdx (Lean.Kernel.Environment.extensions env) (Lean.Kernel.Environment.irBaseExts env) (env.header)
   pure newKernel
 
 def getDepConstsEnv (env : Environment) (consts : Array Name) (overrides : Std.HashMap Name ConstantInfo) : IO $ Std.HashMap Name ConstantInfo := do
@@ -78,11 +77,11 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn :
         let mut map := map'
         let mapConsts := map.fold (init := default) fun acc const _ => acc.insert const
 
-        let erredConsts : Lean.NameSet := mapConsts.intersectBy (fun _ _ _ => default) errConsts
+        let erredConsts : Lean.NameSet := mapConsts ∩ errConsts
         if erredConsts.size > 0 then
           throw $ IO.userError s!"Encountered untypecheckable constant dependencies: {erredConsts.toList}."
 
-        let skippedConsts : Lean.NameSet := mapConsts.intersectBy (fun _ _ _ => default) skipConsts
+        let skippedConsts : Lean.NameSet := mapConsts ∩ skipConsts
         for skipConst in skippedConsts do
           map := map.erase skipConst
 
