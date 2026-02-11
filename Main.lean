@@ -14,6 +14,25 @@ open Lean
 open Cli
 open Lean4Lean
 
+class Type'' (A : Type) where
+el : A
+
+instance : CoeSort (Type'' α ) Type where
+coe _ := α
+
+instance arr' ( α : Type) [b : Type'' β  ] : Type'' (α -> β) := {el := fun _ => b.el}
+unif_hint (a : Type) (b : Type'' α ) (A : Type'' (a -> α))  where A =?= @arr' _ a b ⊢ a -> α  =?= (a -> α)
+
+instance Prop'' : Type'' Prop  := {el := True}
+
+noncomputable def ε' : ∀ [A : Type'' α], (A -> Prop) -> A
+    := fun {A} P  => @Classical.epsilon A (Nonempty.intro A.el) P -- Classical.epsilon is noncumptable.
+
+noncomputable def COND'' [A : Type'' α ] (P : Prop) (x y : A) :=
+@ε' α  A ( fun z : A => And (P -> z = x) (Not P -> z = y) )
+
+noncomputable def _SEQPATTERN' [A : Type'' α] [B : Type'' β] : (A -> B -> Prop) -> (A -> B -> Prop) -> A -> B -> Prop := fun r : A -> B -> Prop => fun s : A -> B -> Prop => fun x : A => @COND'' (β -> Prop) inferInstance (exists y : B, r x y) (r x) (s x)
+
 /--
 Run as e.g. `lake exe lean4lean` to check everything on the Lean search path,
 or `lake exe lean4lean Mathlib.Data.Nat.Basic` to check a single file.

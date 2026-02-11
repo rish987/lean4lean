@@ -2,6 +2,14 @@ import Lean.CoreM
 import Lean.Util.FoldConsts
 import Lean4Lean.Environment
 
+-- def singularFace {α : T} (n : num) (m : num)
+--    (f : (num → Real) → α) : ((num → Real) → α) :=
+--   ...
+--
+-- def singularFace {α : T} (n : ℕ) (m : ℕ)
+--    (f : (ℕ → ℝ) → α) : ((ℕ → ℝ) → α) :=
+--   ...
+
 open Lean
 
 namespace Lean
@@ -519,6 +527,5 @@ end Lean4Lean
 
 register_option l4l.check : Bool := {
   defValue := false
-  group := "l4l"
-  descr := "run secondary Lean4Lean typechecker on definintions"
+  descr := "run secondary Lean4Lean typechecker on definitions"
 }

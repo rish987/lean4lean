@@ -22,6 +22,20 @@ open private Lean.VisibilityMap.private from Lean.Environment
 open private Lean.Kernel.Environment.add from Lean.Environment
 open private Lean.Kernel.Environment.mk from Lean.Environment
 open private Lean.Environment.updateBaseAfterKernelAdd from Lean.Environment
+open private Lean.EnvironmentHeader.mk from Lean.Environment
+open private Lean.EnvironmentHeader.moduleName2Idx from Lean.Environment
+
+def updateEnvHeaderImports (e : EnvironmentHeader) (imports : Array Import) : EnvironmentHeader :=
+  Lean.EnvironmentHeader.mk
+    (e.trustLevel)
+    (e.mainModule)
+    (e.isModule)
+    imports
+    (e.regions)
+    (e.modules)
+    (Lean.EnvironmentHeader.moduleName2Idx e)
+    (e.importAllModules)
+    (e.moduleData)
 
 def updateKEnvHeader (kernel : Kernel.Environment) (newHeader : EnvironmentHeader) : Kernel.Environment :=
   Lean.Kernel.Environment.mk kernel.constants kernel.quotInit kernel.diagnostics (kernel.const2ModIdx) (Lean.Kernel.Environment.extensions kernel) (Lean.Kernel.Environment.irBaseExts kernel) newHeader

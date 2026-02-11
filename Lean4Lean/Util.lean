@@ -2,10 +2,10 @@ import Lean
 open Lean
 
 def ppExpr (env : Environment) (e : Expr) : IO String := do
-  let options := default
-  let options := KVMap.set options `pp.proofs true
-  let options := KVMap.set options `pp.explicit true
-  let options := KVMap.set options `pp.funBinderTypes true
+  let options : Options := default
+  let options := options.set `pp.proofs true
+  let options := options.set `pp.explicit true
+  let options := options.set `pp.funBinderTypes true
   pure s!"{← PrettyPrinter.ppExprLegacy env default default options e}"
 
 -- TODO existing function for this?
