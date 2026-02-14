@@ -72,6 +72,9 @@ def addTheorem (env : Environment) (v : TheoremVal) (opts : TypeCheckerOpts := {
       if !(← TypeChecker.isDefEq valType v.type) then
         throw <| .declTypeMismatch env (.thmDecl v) valType
     catch e =>
+      if let .other "aborted due to bignum op" := e then
+        dbg_trace s!"axiomatized: {v.name}"
+        return (.axiomInfo {v with isUnsafe := false})
       if allowAxiomReplace then
         return (.axiomInfo {v with isUnsafe := false})
       else

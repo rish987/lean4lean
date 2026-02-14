@@ -57,7 +57,8 @@ unsafe def runRunCmd (p : Parsed) : IO UInt32 := do
   | _ => initSearchPath (← findSysroot)
   let proofIrrelevance := not $ p.hasFlag "no-proof-irrel"
   let kLikeReduction := not $ p.hasFlag "no-klike-red"
-  let opts := {proofIrrelevance, kLikeReduction}
+  let unitEta := not $ p.hasFlag "no-unit-eta"
+  let opts := {proofIrrelevance, kLikeReduction, unitEta}
   match p.positionalArg? "input" with
     | .some mod => match mod.value.toName with
       | .anonymous => throw <| IO.userError s!"Could not resolve module: {mod}"
@@ -110,6 +111,7 @@ unsafe def runCmd : Cmd := `[Cli|
     s, "search-path" : String;      "Set search path directory"
     npi, "no-proof-irrel";          "Disable proof irrelevance"
     nklr, "no-klike-red";           "Disable k-like reduction"
+    nueta, "no-unit-eta";           "Disable unit-eta"
     -- o, only : Array String; "Only translate the specified constants and their dependencies."
 
   ARGS:

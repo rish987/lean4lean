@@ -71,6 +71,7 @@ structure TypeCheckerOpts where
   proofIrrelevance := true
   kLikeReduction := true
   structLikeReduction := true
+  unitEta := true
 
 structure TypeChecker.Context where
   dbg : Nat := 0
@@ -437,7 +438,13 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
   if let some r := (cond inferOnly state.inferTypeI state.inferTypeC)[e]? then
     return r
   let r ← match e with
-    | .lit l => pure l.type
+    | .lit l =>
+      -- match l with
+      -- | .natVal n => 
+      --   if n > 100 then
+      --     throw $ .other "encountered large nat literal"
+      -- | .strVal s => pure () -- dbg_trace s!"encountered string literal: {Expr.strLitToConstructor s}"
+      pure l.type
     | .mdata _ e => inferType' e inferOnly
     | .proj s idx e => inferProj s idx e (← inferType' e inferOnly)
     | .fvar n => inferFVar (← readThe Context) n
@@ -594,14 +601,18 @@ def reduceNative (_env : Kernel.Environment) (e : Expr) : Except Kernel.Exceptio
 
 def rawNatLitExt? (e : Expr) : Option Nat := if e == .natZero then some 0 else e.rawNatLit?
 
-def reduceBinNatOp (f : Nat → Nat → Nat) (a b : Expr) : RecM (Option Expr) := do
+def reduceBinNatOp (op : Name) (f : Nat → Nat → Nat) (a b : Expr) : RecM (Option Expr) := do
   let some v1 := rawNatLitExt? (← whnf 25 a) | return none
   let some v2 := rawNatLitExt? (← whnf 26 b) | return none
+  -- if v1 > 100 || v2 > 100 then
+  --   throw $ .other "aborted due to bignum op"
   return some <| .lit <| .natVal <| f v1 v2
 
-def reduceBinNatPred (f : Nat → Nat → Bool) (a b : Expr) : RecM (Option Expr) := do
+def reduceBinNatPred (op : Name) (f : Nat → Nat → Bool) (a b : Expr) : RecM (Option Expr) := do
   let some v1 := rawNatLitExt? (← whnf 27 a) | return none
   let some v2 := rawNatLitExt? (← whnf 28 b) | return none
+  -- if v1 > 100 || v2 > 100 then
+  --   throw $ .other "aborted due to bignum op"
   return toExpr <| f v1 v2
 
 def reduceNat (e : Expr) : RecM (Option Expr) := do
@@ -614,26 +625,16 @@ def reduceNat (e : Expr) : RecM (Option Expr) := do
       return some <| .lit <| .natVal <| v + 1
   else if nargs == 2 then
     let .app (.app (.const f _) a) b := e | return none
-    if f == ``Nat.add then return ← reduceBinNatOp Nat.add a b
-    if f == ``Nat.sub then return ← reduceBinNatOp Nat.sub a b
-    if f == ``Nat.mul then return ← reduceBinNatOp Nat.mul a b
-    if f == ``Nat.pow then return ← reduceBinNatOp Nat.pow a b
-    if f == ``Nat.gcd then
-      unless not (← readThe Context).opts.kLikeReduction do return ← reduceBinNatOp Nat.gcd a b
-      let a' := (← whnf 27 a)
-      let b' := (← whnf 28 b)
-      let abort :=
-        throw $ .other "typechecking aborted"
-      let some v1 := rawNatLitExt? a' | return none
-      let some v2 := rawNatLitExt? b' | return none
-      if v1 > 300 || v2 > 300 then
-        abort
-      -- trace s!"dbg: GCD averted: {natLitExt? (← whnf 0 a.toPExpr).1} {natLitExt? (← whnf 0 a.toPExpr).1}"
-      return none
-    if f == ``Nat.mod then return ← reduceBinNatOp Nat.mod a b
-    if f == ``Nat.div then return ← reduceBinNatOp Nat.div a b
-    if f == ``Nat.beq then return ← reduceBinNatPred Nat.beq a b
-    if f == ``Nat.ble then return ← reduceBinNatPred Nat.ble a b
+      -- throw $ .other s!"typechecking aborted {f} {v1} {v2}"
+    if f == ``Nat.add then return ← reduceBinNatOp ``Nat.add Nat.add a b
+    if f == ``Nat.sub then return ← reduceBinNatOp ``Nat.sub Nat.sub a b
+    if f == ``Nat.mul then return ← reduceBinNatOp ``Nat.mul Nat.mul a b
+    if f == ``Nat.pow then return ← reduceBinNatOp ``Nat.pow Nat.pow a b
+    if f == ``Nat.gcd then return ← reduceBinNatOp ``Nat.gcd Nat.gcd a b
+    if f == ``Nat.mod then return ← reduceBinNatOp ``Nat.mod Nat.mod a b
+    if f == ``Nat.div then return ← reduceBinNatOp ``Nat.div Nat.div a b
+    if f == ``Nat.beq then return ← reduceBinNatPred ``Nat.beq Nat.beq a b
+    if f == ``Nat.ble then return ← reduceBinNatPred ``Nat.ble Nat.ble a b
   return none
 
 
@@ -868,7 +869,7 @@ def lazyDeltaReduction (tn sn : Expr) : RecM ReductionStatus := loop tn sn 1000 
 def tryStringLitExpansionCore (t s : Expr) : RecM LBool := do
   let .lit (.strVal st) := t | return .undef
   let .app sf _ := s | return .undef
-  unless sf == .const ``String.mk [] do return .undef
+  unless sf == .const ``String.ofList [] do return .undef
   toLBoolM <| isDefEqCore 41 (.strLitToConstructor st) s
 
 def tryStringLitExpansion (t s : Expr) : RecM LBool := do
@@ -960,9 +961,10 @@ def isDefEqCore' (t s : Expr) : RecM Bool := do
   let r ← tryStringLitExpansion tn sn
   if r != .undef then
     return r == .true
-  if ← isDefEqUnitLike tn sn then
-    modify fun s => {s with data := {s.data with usedUnitEta := true}}
-    return true
+  if (← readThe Context).opts.unitEta then
+    if ← isDefEqUnitLike tn sn then
+      modify fun s => {s with data := {s.data with usedUnitEta := true}}
+      return true
   return false
 
 end Inner

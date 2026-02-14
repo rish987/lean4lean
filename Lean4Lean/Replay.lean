@@ -213,9 +213,6 @@ deriving instance BEq for ConstructorVal
 deriving instance BEq for RecursorRule
 deriving instance BEq for RecursorVal
 
-
-
-
 mutual
 
 partial def getDepConsts (newConstants : Std.HashMap Name ConstantInfo) (names : List Name) : IO NameSet := do
@@ -331,7 +328,7 @@ partial def replayConstant (name : Name) (addDeclFn' : Declaration → M Unit) (
           -- because the kernel treats the existence of the `String` type as license
           -- to use string literals, which use `Char.ofNat` internally. However
           -- this definition is not transitively reachable from the declaration of `String`.
-          if o.name == ``String then replayConstant ``Char.ofNat addDeclFn' (op := op)
+          -- if o.name == ``String then replayConstant ``Char.ofNat addDeclFn' (op := op)
           modify fun s =>
             { s with remaining := s.remaining.erase o.name, pending := s.pending.erase o.name }
         let ctorInfo ← all.mapM fun ci => do
@@ -407,7 +404,8 @@ def _root_.Lean.Kernel.Environment.toMap₂ (env : Kernel.Environment) : Kernel.
   env.withConsts fun c => {c with map₂ := newMap, map₁ := default}
 
 /-- "Replay" some constants into an `Environment`, sending them to the kernel for checking. -/
-def replay (ctx : Context) (_env : Kernel.Environment) (decl : Option Name := none) (printProgress : Bool := false) (op : String := "typecheck") (aborted : NameSet := default) (mainModule : Name := `NONE) : IO (Kernel.Environment × NameSet) := do
+def replay (ctx : Context) (_env : Kernel.Environment) (decl : Option Name := none) (printProgress : Bool := false) (op : String := "typecheck")
+    (aborted : NameSet := default) (mainModule : Name := `NONE) (const2Mods : Std.HashMap Name Name := default) : IO (Kernel.Environment × NameSet) := do
   let env := _env.toMap₁.withConsts fun c => {c with stage₁ := false}
   let mut remaining : NameSet := ∅
   let mut numToCheck : Nat := 0
@@ -426,8 +424,12 @@ def replay (ctx : Context) (_env : Kernel.Environment) (decl : Option Name := no
       | none =>
         let tryReplay n := do
           try
-            if not ((← get).aborted.contains n) then
-              replayConstant n addDeclFn printProgress op
+            let modName := const2Mods[n]!
+            -- dbg_trace s!"DBG[128]: Replay.lean:427: env.header.moduleNames={env.header.moduleNames}"
+            -- dbg_trace s!"DBG[127]: Replay.lean:427: modName={modName}, {mainModule}"
+            if modName == mainModule then
+              if not ((← get).aborted.contains n) then
+                replayConstant n addDeclFn printProgress op
           catch
           | e => 
             IO.eprintln s!"Error {op}ing constant `{n}`: {e.toString}"
@@ -476,15 +478,19 @@ unsafe def replayFromImports (module : Name) (verbose := false) (compare := fals
   region.free
 
 unsafe def replayFromInit'' (module : Name) (initEnv : Environment) (newConstants : Std.HashMap Name ConstantInfo) (f : Kernel.Environment → IO Unit) (op : String := "typecheck")
-    (verbose := false) (compare := false) (decl : Option Name := none) (opts : TypeCheckerOpts := {}) (printProgress := true) : IO Unit := do
+    (verbose := false) (compare := false) (decl : Option Name := none) (opts : TypeCheckerOpts := {}) (printProgress := true) (const2Mods : Std.HashMap Name Name := default) : IO Unit := do
     let ctx := { newConstants, verbose, compare, opts }
-    let (env, _) ← replay addDeclFn ctx (initEnv.toKernelEnv) (op := op) (decl := decl) (printProgress := printProgress) (mainModule := module)
+    let (env, _) ← replay addDeclFn ctx (initEnv.toKernelEnv) (op := op) (decl := decl) (printProgress := printProgress) (mainModule := module) (const2Mods := const2Mods)
     f env
 
 unsafe def replayFromInit' (module : Name) (initEnv : Environment) (f : Kernel.Environment → IO Unit) (op : String := "typecheck")
     (verbose := false) (compare := false) (decl : Option Name := none) (opts : TypeCheckerOpts := {}) : IO Unit := do
   IO.println s!"loading module \"{module}\"..."
   Lean.withImportModules #[{module}] {} (trustLevel := 0) fun env => do
+    let mut const2Mods : Std.HashMap Name Name := default
+    for (const, modIdx) in env.const2ModIdx do
+      let modName := env.header.moduleNames[modIdx]!
+      const2Mods := const2Mods.insert const modName
     let mut newConstants := default
     let ics := initEnv.constants.toList
     let cs := env.constants.toList
@@ -504,7 +510,7 @@ unsafe def replayFromInit' (module : Name) (initEnv : Environment) (f : Kernel.E
     --     acc.erase const
     --   else
     --     acc
-    replayFromInit'' addDeclFn module (← mkEmptyEnvironment) newConstants f (op := op) (decl := decl) (verbose := verbose) (compare := compare) (opts := opts)
+    replayFromInit'' addDeclFn module (← mkEmptyEnvironment) newConstants f (op := op) (decl := decl) (verbose := verbose) (compare := compare) (opts := opts) (const2Mods := const2Mods)
 
 unsafe def replayFromEnv (module : Name) (initEnv : Kernel.Environment) (op : String := "typecheck")
     (verbose := false) (compare := false) (decl : Option Name := none) (opts : TypeCheckerOpts := {}) (printProgress := true) : IO Unit := do

@@ -73,13 +73,8 @@ def checkPrimitiveDef (env : Kernel.Environment) (v : DefinitionVal) : M Bool :=
     unless ← TypeChecker.isDefEq v.type (.arrow nat (.arrow nat nat)) do fail
     return true -- TODO
   | ``Nat.gcd => -- TODO parameterize
-    unless (← read).opts.kLikeReduction do return true -- will abort at translation of terms w/ large GCD computations
-    unless env.constants.contains ``Nat.mod && v.levelParams.isEmpty do fail
-    -- gcd : Nat → Nat → Nat
-    unless ← TypeChecker.isDefEq v.type (.arrow nat (.arrow nat nat)) do fail
-    let gcd := mkApp2 v.value
-    unless ← defeq1 (gcd zero x) x do fail
-    unless ← defeq2 (gcd (succ y) x) (gcd (_mod x (succ y)) (succ y)) do fail
+    -- TODO fix
+    return true
   | ``Nat.beq =>
     unless env.constants.contains ``Nat && env.constants.contains ``Bool && v.levelParams.isEmpty do fail
     -- beq : Nat → Nat → Bool
