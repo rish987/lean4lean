@@ -111,7 +111,8 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn :
             else
               for (_, ci) in map.erase const |>.toList do
                 modEnv := updateBaseAfterKernelAdd modEnv (modEnv.toKernelEnv.add ci)
-              let (env, _) ← replay addDeclFn {newConstants := Std.HashMap.insert default const (map.get! const), overrides, opts} modEnv.toKernelEnv (printProgress := printProgress) (op := op)
+              let info := map.get! const
+              let (env, _) ← replay addDeclFn {newConstants := Std.HashMap.insert default const info, overrides, opts} modEnv.toKernelEnv (printProgress := printProgress) (op := op)
               modEnv := updateBaseAfterKernelAdd modEnv env
           pure modEnv
 

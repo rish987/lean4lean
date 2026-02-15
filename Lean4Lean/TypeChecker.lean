@@ -72,6 +72,7 @@ structure TypeCheckerOpts where
   kLikeReduction := true
   structLikeReduction := true
   unitEta := true
+  bignums := true
 
 structure TypeChecker.Context where
   dbg : Nat := 0
@@ -604,14 +605,19 @@ def rawNatLitExt? (e : Expr) : Option Nat := if e == .natZero then some 0 else e
 def reduceBinNatOp (op : Name) (f : Nat → Nat → Nat) (a b : Expr) : RecM (Option Expr) := do
   let some v1 := rawNatLitExt? (← whnf 25 a) | return none
   let some v2 := rawNatLitExt? (← whnf 26 b) | return none
-  -- if v1 > 100 || v2 > 100 then
+  let res := f v1 v2
+  if not (← readThe Context).opts.bignums then
+    if v1 > 100 || v2 > 100 || res > 100 then
+      return none
   --   throw $ .other "aborted due to bignum op"
-  return some <| .lit <| .natVal <| f v1 v2
+  return some <| .lit <| .natVal <| res
 
 def reduceBinNatPred (op : Name) (f : Nat → Nat → Bool) (a b : Expr) : RecM (Option Expr) := do
   let some v1 := rawNatLitExt? (← whnf 27 a) | return none
   let some v2 := rawNatLitExt? (← whnf 28 b) | return none
-  -- if v1 > 100 || v2 > 100 then
+  if not (← readThe Context).opts.bignums then
+    if v1 > 100 || v2 > 100 then
+      return none
   --   throw $ .other "aborted due to bignum op"
   return toExpr <| f v1 v2
 

@@ -405,7 +405,7 @@ def _root_.Lean.Kernel.Environment.toMap₂ (env : Kernel.Environment) : Kernel.
 
 /-- "Replay" some constants into an `Environment`, sending them to the kernel for checking. -/
 def replay (ctx : Context) (_env : Kernel.Environment) (decl : Option Name := none) (printProgress : Bool := false) (op : String := "typecheck")
-    (aborted : NameSet := default) (mainModule : Name := `NONE) (const2Mods : Std.HashMap Name Name := default) : IO (Kernel.Environment × NameSet) := do
+    (aborted : NameSet := default) (mainModule : Name := `NONE) (const2Mods : Option (Std.HashMap Name Name) := none) : IO (Kernel.Environment × NameSet) := do
   let env := _env.toMap₁.withConsts fun c => {c with stage₁ := false}
   let mut remaining : NameSet := ∅
   let mut numToCheck : Nat := 0
@@ -420,14 +420,17 @@ def replay (ctx : Context) (_env : Kernel.Environment) (decl : Option Name := no
   let (_, s) ← StateRefT'.run (s := { env, remaining, numToCheck, aborted, mainModule }) do
     ReaderT.run (r := ctx) do
       match decl with
-      | some d => replayConstant d addDeclFn (op := op) (printProgress? := printProgress)
+      | some d =>
+        replayConstant d addDeclFn (op := op) (printProgress? := printProgress)
       | none =>
         let tryReplay n := do
           try
-            let modName := const2Mods[n]!
-            -- dbg_trace s!"DBG[128]: Replay.lean:427: env.header.moduleNames={env.header.moduleNames}"
-            -- dbg_trace s!"DBG[127]: Replay.lean:427: modName={modName}, {mainModule}"
-            if modName == mainModule then
+            if let some map := const2Mods then
+              let modName := map[n]!
+              if modName == mainModule then
+                if not ((← get).aborted.contains n) then
+                  replayConstant n addDeclFn printProgress op
+            else
               if not ((← get).aborted.contains n) then
                 replayConstant n addDeclFn printProgress op
           catch
@@ -478,7 +481,7 @@ unsafe def replayFromImports (module : Name) (verbose := false) (compare := fals
   region.free
 
 unsafe def replayFromInit'' (module : Name) (initEnv : Environment) (newConstants : Std.HashMap Name ConstantInfo) (f : Kernel.Environment → IO Unit) (op : String := "typecheck")
-    (verbose := false) (compare := false) (decl : Option Name := none) (opts : TypeCheckerOpts := {}) (printProgress := true) (const2Mods : Std.HashMap Name Name := default) : IO Unit := do
+    (verbose := false) (compare := false) (decl : Option Name := none) (opts : TypeCheckerOpts := {}) (printProgress := true) (const2Mods : Option (Std.HashMap Name Name) := default) : IO Unit := do
     let ctx := { newConstants, verbose, compare, opts }
     let (env, _) ← replay addDeclFn ctx (initEnv.toKernelEnv) (op := op) (decl := decl) (printProgress := printProgress) (mainModule := module) (const2Mods := const2Mods)
     f env
@@ -506,7 +509,6 @@ unsafe def replayFromInit' (module : Name) (initEnv : Environment) (f : Kernel.E
     -- let mut newConstants := initEnv.constants.fold (init := env.constants.map₁) fun acc const _info =>
     --   if let some _info' := acc[const]? then
     --     -- assert! _info == _info' --TODO sanity check; need to derive BEq?
-    --     -- dbg_trace s!"DBG[3]: Replay.lean:382: const={const}"
     --     acc.erase const
     --   else
     --     acc
