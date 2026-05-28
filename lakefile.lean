@@ -6,7 +6,7 @@ package lean4lean
 require batteries from git "https://github.com/leanprover-community/batteries" @ "v4.18.0-rc1"
 
 require Cli from git
-  "https://github.com/leanprover/lean4-cli" @ "main"
+  "https://github.com/leanprover/lean4-cli" @ "v4.18.0-rc1"
 
 @[default_target]
 lean_lib Lean4Lean
