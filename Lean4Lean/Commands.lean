@@ -70,16 +70,16 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn :
         let rp modEnv := do
           let mut modEnv := modEnv
           if dbgOnly then
-            let (env', _) ← replay addDeclFn {newConstants := map.erase const, overrides, opts := opts} modEnv.toKernelEnv (printProgress := printProgress) (op := op)
+            let (env', _, _) ← replay addDeclFn {newConstants := map.erase const, overrides, opts := opts} modEnv.toKernelEnv (printProgress := printProgress) (op := op)
             modEnv := updateBaseAfterKernelAdd modEnv env'
           else
             if deps then
-              let (env, _) ← replay addDeclFn {newConstants := map, overrides, opts} modEnv.toKernelEnv (printProgress := printProgress) (op := op)
+              let (env, _, _) ← replay addDeclFn {newConstants := map, overrides, opts} modEnv.toKernelEnv (printProgress := printProgress) (op := op)
               modEnv := updateBaseAfterKernelAdd modEnv env
             else
               for (_, ci) in map.erase const |>.toList do
                 modEnv := updateBaseAfterKernelAdd modEnv (modEnv.toKernelEnv.add ci)
-              let (env, _) ← replay addDeclFn {newConstants := Std.HashMap.insert default const (map.get! const), overrides, opts} modEnv.toKernelEnv (printProgress := printProgress) (op := op)
+              let (env, _, _) ← replay addDeclFn {newConstants := Std.HashMap.insert default const (map.get! const), overrides, opts} modEnv.toKernelEnv (printProgress := printProgress) (op := op)
               modEnv := updateBaseAfterKernelAdd modEnv env
           pure modEnv
 
@@ -114,7 +114,7 @@ def checkConstants (env : Lean.Environment) (consts : Lean.NameSet) (addDeclFn :
 
         if dbgOnly then
           -- dbg_trace s!"DBG[56]: Commands.lean:83 {modEnv.contains `Std.DTreeMap.Internal.Impl.balanceR!_eq_balance!}"
-          let (modEnv', _) ← replay addDeclFn {newConstants := Std.HashMap.insert default const (map.get! const), overrides, opts} modEnv.toKernelEnv (printProgress := printProgress) (op := op)
+          let (modEnv', _, _) ← replay addDeclFn {newConstants := Std.HashMap.insert default const (map.get! const), overrides, opts} modEnv.toKernelEnv (printProgress := printProgress) (op := op)
           modEnv := updateBaseAfterKernelAdd modEnv modEnv'
         skipConsts := skipConsts.union mapConsts -- TC success, so want to skip in future runs (already in environment)
       let onlyConstsToTrans := onlyConstsToTrans.insert const

@@ -85,6 +85,10 @@ structure State where
   numToCheck : Nat
   numChecked : Nat := 0
   aborted : NameSet := {}
+  /-- Constants whose kernel check required an infeasible primitive `Nat` op
+      (`Lean4Less.natPrimOpStubThreshold`); kept in the environment (added untrusted) but
+      surfaced so the lean2dk translation can stub them (declare without a rewrite rule). -/
+  stubbed : NameSet := {}
   remaining : NameSet := {}
   pending : NameSet := {}
   postponedConstructors : NameSet := {}
@@ -289,6 +293,15 @@ partial def replayConstant (name : Name) (addDeclFn' : Declaration → M Unit) (
         modify fun s =>
           { s with aborted := s.aborted.insert name }
         IO.println s!"\n{name} aborted: {m}"
+      | .otherError 165847 m => -- 165847: infeasible primitive Nat op -> stub in output
+        -- Record the constant for stubbing, but still add it via Lean's real (GMP-backed)
+        -- kernel so the environment stays consistent -- e.g. `String` requires `Char.ofNat`
+        -- to exist. Lean's kernel computes the primitive op fine; only Dedukti cannot.
+        modify fun s => { s with stubbed := s.stubbed.insert name }
+        match (← get).env.addDecl {} decl with
+        | .ok newEnv => modify fun s => { s with env := newEnv }
+        | .error _ => pure ()
+        IO.println s!"\n{name} stubbed (infeasible primitive Nat op): {m}"
       | _ =>
         dbg_trace s!"Error in {decl.name}"
         throw e
@@ -399,7 +412,7 @@ def _root_.Lean.Kernel.Environment.toMap₂ (env : Kernel.Environment) : Kernel.
   env.withConsts fun c => {c with map₂ := newMap, map₁ := default}
 
 /-- "Replay" some constants into an `Environment`, sending them to the kernel for checking. -/
-def replay (ctx : Context) (_env : Kernel.Environment) (decl : Option Name := none) (printProgress : Bool := false) (op : String := "typecheck") (aborted : NameSet := default) (mainModule : Name := `NONE) : IO (Kernel.Environment × NameSet) := do
+def replay (ctx : Context) (_env : Kernel.Environment) (decl : Option Name := none) (printProgress : Bool := false) (op : String := "typecheck") (aborted : NameSet := default) (stubbed : NameSet := default) (mainModule : Name := `NONE) : IO (Kernel.Environment × NameSet × NameSet) := do
   let env := _env.toMap₁.withConsts fun c => {c with stage₁ := false}
   let mut remaining : NameSet := ∅
   let mut numToCheck : Nat := 0
@@ -411,7 +424,7 @@ def replay (ctx : Context) (_env : Kernel.Environment) (decl : Option Name := no
       numToCheck := numToCheck + 1
   -- if let some onlyConsts := onlyConsts? then
   --   numToCheck := (← getDepConsts ctx.newConstants onlyConsts).size
-  let (_, s) ← StateRefT'.run (s := { env, remaining, numToCheck, aborted, mainModule }) do
+  let (_, s) ← StateRefT'.run (s := { env, remaining, numToCheck, aborted, stubbed, mainModule }) do
     ReaderT.run (r := ctx) do
       match decl with
       | some d => replayConstant d addDeclFn (op := op) (printProgress? := printProgress)
@@ -449,7 +462,7 @@ def replay (ctx : Context) (_env : Kernel.Environment) (decl : Option Name := no
     --         IO.println s!"  - used proof irrelevance"
     --       if d.usedKLikeReduction then
     --         IO.println s!"  - used k-like reduction"
-  return (s.env, s.aborted)
+  return (s.env, s.aborted, s.stubbed)
 
 unsafe def replayFromImports (module : Name) (verbose := false) (compare := false) (opts : TypeCheckerOpts := {}) : IO Unit := do
   let mFile ← findOLean module
